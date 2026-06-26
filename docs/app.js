@@ -112,9 +112,15 @@ async function loadQuotes() {
   const quotes = data.quotes || [];
   if (!quotes.length) { $('#grid').innerHTML = '<div class="muted">추적 종목이 없습니다. config/watchlist.json을 편집하세요.</div>'; return; }
 
-  // 갱신 시각은 데이터(시세)의 시각 기준 — 가장 최신 종목 시각 표시
+  // "시세 기준" = 가장 최신 종목의 시장 데이터 시각 + 장중/장마감 (장 마감 후엔 마감 시각에서 멈추는 게 정상)
   const times = quotes.map((q) => q.asOf).filter(Boolean).map((s) => +new Date(s)).filter(Number.isFinite);
-  if (times.length) $('#updated').textContent = new Date(Math.max(...times)).toLocaleString('ko-KR');
+  if (times.length) {
+    const t = new Date(Math.max(...times)).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const open = quotes.some((q) => q.marketStatus === 'OPEN');
+    $('#updated').textContent = `${t} ${open ? '🟢 장중' : '⚪ 장마감'}`;
+  }
+  // 헤더 시계 = 페이지가 실제로 데이터를 마지막으로 받아온 시각(살아있음 표시)
+  $('#clock').textContent = '확인 ' + new Date().toLocaleTimeString('ko-KR');
 
   for (const q of quotes) {
     if (!q.ok || q.price == null) continue;
@@ -193,7 +199,7 @@ function renderNews(q, data) {
 }
 
 // ---------- 루프 ----------
-function tick() { loadMarket(); loadQuotes(); $('#clock').textContent = new Date().toLocaleTimeString('ko-KR'); }
+function tick() { loadMarket(); loadQuotes(); }
 function restartTimer() {
   if (state.timer) clearInterval(state.timer);
   if (state.intervalSec > 0) state.timer = setInterval(tick, state.intervalSec * 1000);
