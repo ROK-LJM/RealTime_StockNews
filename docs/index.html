@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>📈 실시간 주식시장 파악</title>
+  <link rel="stylesheet" href="./style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>📈</text></svg>" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo">📈</span> 실시간 주식시장 파악</div>
+    <div class="controls">
+      <label class="refresh">새로고침
+        <select id="interval">
+          <option value="30">30초</option>
+          <option value="60" selected>1분</option>
+          <option value="300">5분</option>
+          <option value="0">수동</option>
+        </select>
+      </label>
+      <button id="refreshBtn" title="새로고침">🔄</button>
+      <span id="clock" class="clock">—</span>
+    </div>
+  </header>
+
+  <section class="market">
+    <div class="mood card">
+      <div class="mood-gauge">
+        <canvas id="moodCanvas" width="220" height="130"></canvas>
+        <div class="mood-score"><span id="moodScore">--</span></div>
+      </div>
+      <div class="mood-info">
+        <div class="mood-label" id="moodLabel">시장 분위기 로딩…</div>
+        <div class="mood-summary" id="moodSummary"></div>
+      </div>
+    </div>
+    <div class="indices" id="indices"><div class="muted">지수 로딩…</div></div>
+  </section>
+
+  <section class="holdings-head">
+    <h2>내 보유 종목</h2>
+    <div class="muted" style="font-size:12px">데이터 갱신: <span id="updated">—</span></div>
+  </section>
+
+  <section class="grid" id="grid"><div class="muted">종목 로딩…</div></section>
+
+  <details class="help">
+    <summary>➕ 추적 종목 추가/삭제하는 법</summary>
+    <div>
+      저장소의 <code>config/watchlist.json</code> 파일을 깃허브에서 편집하세요. 예:
+      <pre>{
+  "items": [
+    { "code": "005930", "market": "KR", "name": "삼성전자" },
+    { "code": "AAPL",   "market": "US", "name": "Apple" }
+  ]
+}</pre>
+      한국 종목은 6자리 코드(<code>005930</code>), 미국은 티커(<code>AAPL</code>). 저장하면 5분 안에 자동 반영됩니다.
+    </div>
+  </details>
+
+  <footer class="foot">
+    무료 공개 데이터(야후 파이낸스·구글뉴스) 기반 · GitHub Actions가 약 5분마다 갱신 · GitHub Pages 서빙 · 매매/주문 기능 없음
+  </footer>
+
+  <script src="./app.js"></script>
+</body>
+</html>
