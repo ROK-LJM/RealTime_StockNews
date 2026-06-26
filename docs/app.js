@@ -2,15 +2,16 @@
 'use strict';
 
 const MOVER_THRESHOLD = 3;
-const MAX_SPARK = 120;
+const FORECAST_DAYS = 20; // 예측 지평(거래일)
+const DRIFT_DAMP = 0.35;  // 추세 감쇠 계수 — 최근 급등락이 그대로 이어진다고 보지 않도록 보수적으로
 
 const $ = (s) => document.querySelector(s);
-const state = { timer: null, intervalSec: 60, history: new Map(), news: {} };
+const state = { timer: null, intervalSec: 60, hist: {}, news: {} };
 
 // ---------- 포맷 ----------
 function fmtPrice(q) {
   if (q.price == null) return '—';
-  if (q.currency === 'KRW') return q.price.toLocaleString('ko-KR');
+  if (q.currency === 'KRW') return Math.round(q.price).toLocaleString('ko-KR');
   return '$' + q.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 function fmtChange(q) {
@@ -29,6 +30,7 @@ function fmtVol(v) {
   if (v >= 1e4) return (v / 1e4).toFixed(0) + '만';
   return v.toLocaleString();
 }
+function fmtCompact(v) { return v >= 1000 ? Math.round(v).toLocaleString() : v.toFixed(2); }
 function cssId(code) { return String(code).replace(/[^a-zA-Z0-9]/g, '_'); }
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
@@ -36,6 +38,40 @@ async function loadJson(name) {
   const r = await fetch(`./data/${name}?t=${Date.now()}`, { cache: 'no-store' });
   if (!r.ok) throw new Error(name + ' ' + r.status);
   return r.json();
+}
+
+// ---------- 통계 / 예측 ----------
+function periodReturn(closes, n) {
+  const L = closes.length;
+  if (L <= n) return null;
+  const a = closes[L - 1 - n], b = closes[L - 1];
+  return a ? (b - a) / a * 100 : null;
+}
+// 단순 통계 예측: 최근 일간 로그수익률의 평균(추세)·표준편차(변동성)로
+// 기하 랜덤워크 중앙값과 ±1σ(≈68%) 밴드를 horizon일까지 투영. (참고용, 투자조언 아님)
+function forecast(closes, horizon) {
+  if (!closes || closes.length < 25) return null;
+  const rets = [];
+  for (let i = 1; i < closes.length; i++) if (closes[i - 1] > 0) rets.push(Math.log(closes[i] / closes[i - 1]));
+  const recent = rets.slice(-60);
+  const n = recent.length;
+  const mu = recent.reduce((a, b) => a + b, 0) / n;
+  const variance = recent.reduce((a, b) => a + (b - mu) * (b - mu), 0) / Math.max(1, n - 1);
+  const sigma = Math.sqrt(variance);
+  const muUsed = mu * DRIFT_DAMP; // 추세는 감쇠, 변동성(밴드)은 실제 그대로 유지
+  const last = closes[closes.length - 1];
+  const median = [], upper = [], lower = [];
+  for (let t = 1; t <= horizon; t++) {
+    const m = last * Math.exp(muUsed * t);
+    const band = Math.exp(sigma * Math.sqrt(t));
+    median.push(m); upper.push(m * band); lower.push(m / band);
+  }
+  const end = median[horizon - 1];
+  return {
+    median, upper, lower, last,
+    expReturnPct: (end - last) / last * 100,
+    endBandPct: (Math.exp(sigma * Math.sqrt(horizon)) - 1) * 100,
+  };
 }
 
 // ---------- 게이지 ----------
@@ -55,29 +91,54 @@ function drawGauge(canvas, score, tone) {
   ctx.textAlign = 'right'; ctx.fillText('탐욕', cx + r, cy + 12);
 }
 
-// ---------- 스파크라인 ----------
-function drawSpark(canvas, values, pct) {
+// ---------- 과거 + 예측 차트 ----------
+function drawChart(canvas, closes, fc) {
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
-  const W = canvas.clientWidth || 280, H = 40;
+  const W = canvas.clientWidth || 300, H = 150;
   canvas.width = W * dpr; canvas.height = H * dpr; ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, W, H);
-  if (!values || values.length < 2) {
+  if (!closes || closes.length < 2) {
     ctx.fillStyle = '#6f7d90'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText('가격 흐름 수집 중…', W / 2, H / 2 + 4);
+    ctx.fillText('과거 시세 수집 중…', W / 2, H / 2);
     return;
   }
-  const min = Math.min(...values), max = Math.max(...values), span = max - min || 1;
-  const col = pct > 0 ? '#ff5b5b' : pct < 0 ? '#4aa3ff' : '#9aa7b8';
-  const x = (i) => (i / (values.length - 1)) * (W - 4) + 2;
-  const y = (v) => H - 4 - ((v - min) / span) * (H - 10);
-  ctx.beginPath(); ctx.moveTo(x(0), y(values[0]));
-  values.forEach((v, i) => ctx.lineTo(x(i), y(v)));
-  ctx.lineTo(x(values.length - 1), H); ctx.lineTo(x(0), H); ctx.closePath();
-  ctx.fillStyle = col + '22'; ctx.fill();
-  ctx.beginPath(); ctx.moveTo(x(0), y(values[0]));
-  values.forEach((v, i) => ctx.lineTo(x(i), y(v)));
-  ctx.strokeStyle = col; ctx.lineWidth = 1.6; ctx.lineJoin = 'round'; ctx.stroke();
+  const hist = closes, HN = hist.length, FN = fc ? fc.median.length : 0, N = HN + FN;
+  let lo = Math.min(...hist), hi = Math.max(...hist);
+  if (fc) { lo = Math.min(lo, ...fc.lower); hi = Math.max(hi, ...fc.upper); }
+  const padTop = 10, padBot = 18, padL = 2, padR = 2, span = (hi - lo) || 1;
+  const x = (i) => padL + (i / (N - 1)) * (W - padL - padR);
+  const y = (v) => padTop + (1 - (v - lo) / span) * (H - padTop - padBot);
+  const up = hist[HN - 1] >= hist[Math.max(0, HN - 64)];
+  const histCol = up ? '#ff5b5b' : '#4aa3ff';
+
+  if (fc) {
+    // ±1σ 밴드
+    ctx.beginPath();
+    ctx.moveTo(x(HN - 1), y(hist[HN - 1]));
+    fc.upper.forEach((v, i) => ctx.lineTo(x(HN + i), y(v)));
+    for (let i = FN - 1; i >= 0; i--) ctx.lineTo(x(HN + i), y(fc.lower[i]));
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(255,180,84,0.13)'; ctx.fill();
+  }
+  // 과거 라인
+  ctx.beginPath(); ctx.moveTo(x(0), y(hist[0]));
+  hist.forEach((v, i) => ctx.lineTo(x(i), y(v)));
+  ctx.strokeStyle = histCol; ctx.lineWidth = 1.6; ctx.lineJoin = 'round'; ctx.stroke();
+  if (fc) {
+    // 예측 중앙값(점선)
+    ctx.beginPath(); ctx.moveTo(x(HN - 1), y(hist[HN - 1]));
+    fc.median.forEach((v, i) => ctx.lineTo(x(HN + i), y(v)));
+    ctx.setLineDash([4, 3]); ctx.strokeStyle = '#ffb454'; ctx.lineWidth = 1.6; ctx.stroke(); ctx.setLineDash([]);
+    // 오늘 구분선
+    ctx.beginPath(); ctx.moveTo(x(HN - 1), padTop); ctx.lineTo(x(HN - 1), H - padBot);
+    ctx.setLineDash([2, 3]); ctx.strokeStyle = 'rgba(255,255,255,0.2)'; ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]);
+  }
+  // 라벨
+  ctx.font = '10px sans-serif'; ctx.fillStyle = '#6f7d90';
+  ctx.textAlign = 'left'; ctx.fillText('최고 ' + fmtCompact(hi), 2, padTop);
+  ctx.fillText('최저 ' + fmtCompact(lo), 2, H - 5);
+  if (fc) { ctx.fillStyle = '#ffb454'; ctx.textAlign = 'right'; ctx.fillText('예측 →', W - 2, padTop); }
 }
 
 // ---------- 시장 분위기 + 지수 ----------
@@ -105,40 +166,45 @@ async function loadMarket() {
 
 // ---------- 보유 종목 ----------
 async function loadQuotes() {
-  let data, news;
-  try { [data, news] = await Promise.all([loadJson('quotes.json'), loadJson('news.json').catch(() => ({}))]); }
-  catch (e) { $('#grid').innerHTML = `<div class="muted">아직 데이터가 없습니다. GitHub Actions 첫 실행을 기다려주세요.</div>`; return; }
+  let data, news, hist;
+  try {
+    [data, news, hist] = await Promise.all([
+      loadJson('quotes.json'),
+      loadJson('news.json').catch(() => ({})),
+      loadJson('history.json').catch(() => ({})),
+    ]);
+  } catch (e) {
+    $('#grid').innerHTML = `<div class="muted">아직 데이터가 없습니다. GitHub Actions 첫 실행을 기다려주세요.</div>`;
+    return;
+  }
   state.news = news || {};
+  state.hist = hist || {};
   const quotes = data.quotes || [];
   if (!quotes.length) { $('#grid').innerHTML = '<div class="muted">추적 종목이 없습니다. config/watchlist.json을 편집하세요.</div>'; return; }
 
-  // "시세 기준" = 가장 최신 종목의 시장 데이터 시각 + 장중/장마감 (장 마감 후엔 마감 시각에서 멈추는 게 정상)
   const times = quotes.map((q) => q.asOf).filter(Boolean).map((s) => +new Date(s)).filter(Number.isFinite);
   if (times.length) {
     const t = new Date(Math.max(...times)).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
     const open = quotes.some((q) => q.marketStatus === 'OPEN');
     $('#updated').textContent = `${t} ${open ? '🟢 장중' : '⚪ 장마감'}`;
   }
-  // 헤더 시계 = 페이지가 실제로 데이터를 마지막으로 받아온 시각(살아있음 표시)
   $('#clock').textContent = '확인 ' + new Date().toLocaleTimeString('ko-KR');
 
+  $('#grid').innerHTML = quotes.map((q) => renderCard(q, state.hist[q.code])).join('');
   for (const q of quotes) {
-    if (!q.ok || q.price == null) continue;
-    const arr = state.history.get(q.code) || [];
-    if (arr.length === 0 || arr[arr.length - 1] !== q.price) arr.push(q.price);
-    if (arr.length > MAX_SPARK) arr.shift();
-    state.history.set(q.code, arr);
-  }
-
-  $('#grid').innerHTML = quotes.map(renderCard).join('');
-  for (const q of quotes) {
-    const cv = document.getElementById('spark-' + cssId(q.code));
-    if (cv) drawSpark(cv, state.history.get(q.code), q.changePct ?? 0);
+    const h = state.hist[q.code];
+    const cv = document.getElementById('chart-' + cssId(q.code));
+    if (cv) drawChart(cv, h && h.closes, h && h.closes ? forecast(h.closes, FORECAST_DAYS) : null);
   }
   for (const q of quotes) renderNews(q, state.news[q.code]);
 }
 
-function renderCard(q) {
+function retSpan(label, v) {
+  if (v == null) return `<span class="ret"><i>${label}</i> —</span>`;
+  return `<span class="ret"><i>${label}</i> <b class="${dirClass(v)}-c">${fmtPct(v)}</b></span>`;
+}
+
+function renderCard(q, hist) {
   const id = cssId(q.code);
   if (!q.ok) {
     return `<div class="stock">
@@ -155,6 +221,21 @@ function renderCard(q) {
   const arrow = q.changePct > 0 ? '▲' : q.changePct < 0 ? '▼' : '–';
   const status = q.marketStatus === 'OPEN' ? '🟢 장중' : '⚪ 마감';
   const market = q.market || (q.currency === 'KRW' ? 'KR' : 'US');
+
+  const closes = hist && hist.closes;
+  const retRow = closes
+    ? `<div class="rets">${retSpan('1주', periodReturn(closes, 5))}${retSpan('1개월', periodReturn(closes, 21))}${retSpan('3개월', periodReturn(closes, 63))}</div>`
+    : '';
+  const fc = closes ? forecast(closes, FORECAST_DAYS) : null;
+  let fcRow = '';
+  if (fc) {
+    const target = fmtPrice({ price: fc.median[fc.median.length - 1], currency: q.currency });
+    fcRow = `<div class="fc">🔮 약 ${FORECAST_DAYS}거래일 예측: <b>${target}</b>
+      <span class="${dirClass(fc.expReturnPct)}-c">(중앙값 ${fmtPct(fc.expReturnPct)})</span>
+      <span class="muted">· 변동범위 ±${fc.endBandPct.toFixed(1)}%</span>
+      <span class="fc-note" title="최근 60거래일 추세·변동성 기반 단순 통계 추정. 실제와 다를 수 있으며 투자조언 아님.">ⓘ 참고용</span></div>`;
+  }
+
   return `<div class="stock ${moverCls}">
     <div class="stock-head" style="padding-right:0">
       <div class="nm">${esc(q.name)}<span class="code">${q.code}</span><span class="market-tag">${market}</span></div>
@@ -164,7 +245,9 @@ function renderCard(q) {
       <span class="price">${fmtPrice(q)}</span>
       <span class="chg ${c}-c">${arrow} ${fmtChange({ change: q.change, currency: q.currency })} (${fmtPct(q.changePct)})</span>
     </div>
-    <div class="spark"><canvas id="spark-${id}"></canvas></div>
+    ${retRow}
+    <div class="chart"><canvas id="chart-${id}"></canvas></div>
+    ${fcRow}
     <div class="meta">
       <span>고 <b>${q.high != null ? fmtPrice({ price: q.high, currency: q.currency }) : '—'}</b></span>
       <span>저 <b>${q.low != null ? fmtPrice({ price: q.low, currency: q.currency }) : '—'}</b></span>
@@ -207,6 +290,7 @@ function restartTimer() {
 
 $('#refreshBtn').addEventListener('click', tick);
 $('#interval').addEventListener('change', (e) => { state.intervalSec = +e.target.value; restartTimer(); });
+window.addEventListener('resize', () => { for (const code in state.hist) { const h = state.hist[code]; const cv = document.getElementById('chart-' + cssId(code)); if (cv) drawChart(cv, h.closes, h.closes ? forecast(h.closes, FORECAST_DAYS) : null); } });
 
 tick();
 restartTimer();

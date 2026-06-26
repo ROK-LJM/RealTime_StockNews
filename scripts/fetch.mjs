@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getMarket, getQuotes, getNews } from './sources.mjs';
+import { getMarket, getQuotes, getNews, getHistory } from './sources.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dataDir = path.join(root, 'docs', 'data');
@@ -52,7 +52,18 @@ async function run() {
     else console.warn('  ! 시세 전부 실패 — quotes.json 유지');
   } catch (e) { console.error('  ✗ 시세 실패 — quotes.json 유지:', e.message); }
 
-  // 3) 종목별 뉴스 (순차 수집으로 과호출 방지)
+  // 3) 종목별 과거 시세(일봉 6개월) — 등락 차트 + 예측 입력
+  try {
+    const history = {};
+    for (const it of items) {
+      try { const h = await getHistory(it); if (h) history[it.code] = h; }
+      catch (e) { console.error(`    과거시세 실패(${it.code}):`, e.message); }
+    }
+    if (Object.keys(history).length) write('history.json', history);
+    else console.warn('  ! 과거시세 전부 비어 있음 — history.json 유지');
+  } catch (e) { console.error('  ✗ 과거시세 실패 — history.json 유지:', e.message); }
+
+  // 4) 종목별 뉴스 (순차 수집으로 과호출 방지)
   try {
     const news = {};
     for (const it of items) {

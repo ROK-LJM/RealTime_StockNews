@@ -86,6 +86,17 @@ button:hover { border-color: var(--accent); }
 .spark { margin: 8px 0 4px; height: 40px; }
 .spark canvas { width: 100%; height: 40px; display: block; }
 
+.rets { display: flex; gap: 14px; margin: 8px 0 2px; font-size: 12px; flex-wrap: wrap; }
+.ret i { color: var(--muted); font-style: normal; margin-right: 3px; }
+.ret b { font-variant-numeric: tabular-nums; }
+
+.chart { margin: 6px 0 4px; height: 150px; }
+.chart canvas { width: 100%; height: 150px; display: block; }
+
+.fc { font-size: 12px; color: var(--text); margin: 2px 0 6px; line-height: 1.5; }
+.fc b { font-weight: 700; }
+.fc-note { color: #ffb454; cursor: help; margin-left: 4px; border-bottom: 1px dotted #ffb45488; }
+
 .meta { display: flex; gap: 14px; color: var(--muted); font-size: 12px; margin-top: 4px; flex-wrap: wrap; }
 .meta b { color: var(--text); font-weight: 600; }
 

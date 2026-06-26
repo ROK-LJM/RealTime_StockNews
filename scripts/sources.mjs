@@ -92,6 +92,25 @@ export async function getQuote(item) {
 
 export async function getQuotes(items) { return Promise.all(items.map(getQuote)); }
 
+// ---------- 과거 시세(일봉) ----------
+// 야후 차트(무료, 키 불필요)로 약 6개월 일봉 종가를 받아온다 → 과거 등락 차트 + 예측의 입력.
+export async function getHistory(item, range = '6mo') {
+  const code = String(item.code).trim();
+  const market = item.market || (isKRCode(code) ? 'KR' : 'US');
+  try {
+    const symbol = market === 'KR' && isKRCode(code) ? await resolveKR(code) : code;
+    const j = await http(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=${range}`, { as: 'json' });
+    const r = j?.chart?.result?.[0];
+    const ts = r?.timestamp || [];
+    const closes = r?.indicators?.quote?.[0]?.close || [];
+    const out = { dates: [], closes: [] };
+    for (let i = 0; i < ts.length; i++) {
+      if (closes[i] != null) { out.dates.push(ts[i] * 1000); out.closes.push(Math.round(closes[i] * 100) / 100); }
+    }
+    return out.closes.length >= 2 ? out : null;
+  } catch { return null; }
+}
+
 // ---------- 지수 + 분위기 ----------
 export async function getMarket() {
   const cached = getCache('market', 8000);
