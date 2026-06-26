@@ -54,6 +54,9 @@ button:hover { border-color: var(--accent); }
 .idx .nm { color: var(--muted); font-size: 13px; }
 .idx .pv { font-size: 21px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
 .idx .ch { font-size: 13px; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.idx.fx { background: var(--panel-2); }
+.idx.fx .pv { font-size: 19px; }
+.fx-u { font-size: 12px; color: var(--muted); margin-left: 2px; font-weight: 400; }
 
 /* 보유종목 헤더 */
 .holdings-head { display: flex; justify-content: space-between; align-items: center; padding: 6px 20px; flex-wrap: wrap; gap: 10px; }

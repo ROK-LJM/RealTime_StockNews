@@ -126,7 +126,22 @@ export async function getMarket() {
   const indices = settled.filter(Boolean);
   const vix = indices.find((i) => i.symbol === '^VIX');
   const mood = computeMood(indices.filter((i) => i.symbol !== '^VIX'), vix?.price);
-  return setCache('market', { indices, vix: vix || null, mood });
+
+  // 환율 (원/달러, 원/100엔) — 야후 무료 환율
+  const fxDefs = [['KRW=X', '원/달러', 1], ['JPYKRW=X', '원/100엔', 100]];
+  const fxSettled = await Promise.all(fxDefs.map(async ([sym, name, mult]) => {
+    try {
+      const m = await yahoo(sym);
+      const price = m.regularMarketPrice * mult;
+      const prev = (m.chartPreviousClose ?? m.previousClose) * mult;
+      const change = price != null && prev != null ? price - prev : null;
+      const r = (x) => x == null ? null : Math.round(x * 100) / 100;
+      return { name, symbol: sym, price: r(price), change: r(change), changePct: change != null && prev ? (change / prev) * 100 : null };
+    } catch { return null; }
+  }));
+  const forex = fxSettled.filter(Boolean);
+
+  return setCache('market', { indices, vix: vix || null, mood, forex });
 }
 
 function computeMood(indices, vix) {

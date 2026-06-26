@@ -217,7 +217,7 @@ async function loadMarket() {
     $('#moodScore').textContent = mood.score ?? '--';
     $('#moodLabel').textContent = mood.label || '—';
     $('#moodSummary').textContent = mood.summary || '';
-    $('#indices').innerHTML = (m.indices || []).map((i) => {
+    const idxHtml = (m.indices || []).map((i) => {
       const c = dirClass(i.changePct);
       const arrow = i.changePct > 0 ? '▲' : i.changePct < 0 ? '▼' : '–';
       const price = (i.price ?? 0).toLocaleString(i.currency === 'KRW' ? 'ko-KR' : 'en-US', { maximumFractionDigits: 2 });
@@ -225,7 +225,16 @@ async function loadMarket() {
       return `<div class="idx"><div class="nm">${i.name}</div>
         <div class="pv ${c}-c">${price}</div>
         <div class="ch ${c}-c">${arrow} ${fmtChange({ change: i.change, currency: cur })} (${fmtPct(i.changePct)})</div></div>`;
-    }).join('') || '<div class="muted">지수 데이터를 불러오지 못했습니다.</div>';
+    }).join('');
+    const fxHtml = (m.forex || []).map((f) => {
+      const c = dirClass(f.changePct);
+      const arrow = f.changePct > 0 ? '▲' : f.changePct < 0 ? '▼' : '–';
+      const price = (f.price ?? 0).toLocaleString('ko-KR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return `<div class="idx fx"><div class="nm">💱 ${f.name}</div>
+        <div class="pv ${c}-c">${price}<span class="fx-u">원</span></div>
+        <div class="ch ${c}-c">${arrow} ${fmtChange({ change: f.change, currency: 'KRW2' })} (${fmtPct(f.changePct)})</div></div>`;
+    }).join('');
+    $('#indices').innerHTML = (idxHtml + fxHtml) || '<div class="muted">지수 데이터를 불러오지 못했습니다.</div>';
     renderBriefs(m.briefs);
   } catch (e) {
     $('#moodLabel').textContent = '시장 데이터 대기 중'; $('#moodSummary').textContent = '아직 데이터가 생성되지 않았을 수 있어요(첫 갱신 대기).';
