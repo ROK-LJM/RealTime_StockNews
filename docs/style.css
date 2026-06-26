@@ -86,6 +86,43 @@ button:hover { border-color: var(--accent); }
 .spark { margin: 8px 0 4px; height: 40px; }
 .spark canvas { width: 100%; height: 40px; display: block; }
 
+/* 코스피·코스닥 급등락 핵심 이유 배너 */
+.briefs { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 0 20px 8px; }
+.brief { background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: 12px; padding: 12px 16px; box-shadow: var(--shadow); }
+.brief-down { border-left-color: var(--down); }
+.brief-up { border-left-color: var(--up); }
+.brief-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.brief-name { font-size: 17px; font-weight: 800; }
+.brief-chg { font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.brief-tag { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; margin-left: auto; }
+.brief-tag.down { background: rgba(74,163,255,.16); color: var(--down); }
+.brief-tag.up { background: rgba(255,91,91,.16); color: var(--up); }
+.brief-tag.flat { background: var(--panel-2); color: var(--muted); }
+.brief-reason { font-size: 16px; font-weight: 700; line-height: 1.4; margin: 8px 0 4px; }
+.brief-reason a { color: var(--text); text-decoration: none; }
+.brief-reason a:hover { color: var(--accent); text-decoration: underline; }
+.brief-src { font-size: 11px; font-weight: 400; color: var(--muted); margin-left: 4px; }
+.brief-more { font-size: 12px; color: var(--muted); line-height: 1.5; }
+.brief-more a { color: var(--muted); text-decoration: none; }
+.brief-more a:hover { color: var(--accent); }
+.brief-more .dot { margin: 0 6px; }
+.brief-flow { font-size: 12.5px; color: var(--muted); margin-top: 8px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.brief-flow .u { font-size: 10px; margin: 0 4px 0 2px; }
+.brief-flow i { font-style: normal; margin-right: 3px; }
+.brief-flow b { font-variant-numeric: tabular-nums; }
+
+/* 종목 카드 수급 행 */
+.flow { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 12px; margin: 4px 0 2px; }
+.flow-label { color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 0 6px; }
+.flow i { font-style: normal; color: var(--muted); margin-right: 3px; }
+.flow b { font-variant-numeric: tabular-nums; }
+
+/* 차트 호버 툴팁 */
+.chart-tip { position: fixed; display: none; z-index: 1000; pointer-events: none; background: #0f1622; border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; box-shadow: 0 4px 16px rgba(0,0,0,.5); }
+.chart-tip .tt-d { font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+.chart-tip .tt-p { font-size: 17px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; }
+.chart-tip .tt-r { font-size: 11px; color: #ffb454; margin-top: 2px; }
+
 .rets { display: flex; gap: 14px; margin: 8px 0 2px; font-size: 12px; flex-wrap: wrap; }
 .ret i { color: var(--muted); font-style: normal; margin-right: 3px; }
 .ret b { font-variant-numeric: tabular-nums; }
@@ -128,4 +165,5 @@ button:hover { border-color: var(--accent); }
 
 @media (max-width: 720px) {
   .market { grid-template-columns: 1fr; }
+  .briefs { grid-template-columns: 1fr; }
 }

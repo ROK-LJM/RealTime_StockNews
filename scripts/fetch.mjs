@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getMarket, getQuotes, getNews, getHistory } from './sources.mjs';
+import { getMarket, getQuotes, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason } from './sources.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dataDir = path.join(root, 'docs', 'data');
@@ -38,11 +38,22 @@ async function run() {
   if (!items) return;
   console.log(`[fetch] ${items.length}개 종목 갱신 시작…`);
 
-  // 1) 지수 + 분위기
+  // 1) 지수 + 분위기 + 급등락 핵심 이유/수급 브리핑
   try {
     const market = await getMarket();
-    if (market?.indices?.length) write('market.json', market);
-    else console.warn('  ! 지수 데이터 비어 있음 — market.json 유지');
+    if (market?.indices?.length) {
+      try {
+        const briefs = [];
+        for (const [naverSym, ySym, nm] of [['KOSPI', '^KS11', '코스피'], ['KOSDAQ', '^KQ11', '코스닥']]) {
+          const idx = market.indices.find((i) => i.symbol === ySym);
+          const changePct = idx?.changePct ?? 0;
+          const [flow, reason] = await Promise.all([getIndexFlow(naverSym), getIndexReason(nm, changePct)]);
+          briefs.push({ key: naverSym, name: nm, changePct, price: idx?.price ?? null, flow, reason });
+        }
+        market.briefs = briefs;
+      } catch (e) { console.error('    브리핑 실패:', e.message); }
+      write('market.json', market);
+    } else console.warn('  ! 지수 데이터 비어 있음 — market.json 유지');
   } catch (e) { console.error('  ✗ 지수 실패 — market.json 유지:', e.message); }
 
   // 2) 보유 종목 시세
@@ -63,7 +74,18 @@ async function run() {
     else console.warn('  ! 과거시세 전부 비어 있음 — history.json 유지');
   } catch (e) { console.error('  ✗ 과거시세 실패 — history.json 유지:', e.message); }
 
-  // 4) 종목별 뉴스 (순차 수집으로 과호출 방지)
+  // 4) 종목별 투자자 순매매(수급) — 한국 종목만, 해외 IP에서 막히면 자동 생략
+  try {
+    const investors = {};
+    for (const it of items) {
+      try { const v = await getStockInvestors(it); if (v) investors[it.code] = v; }
+      catch (e) { console.error(`    수급 실패(${it.code}):`, e.message); }
+    }
+    if (Object.keys(investors).length) write('investors.json', investors);
+    else console.warn('  ! 수급 데이터 없음(해외 IP 차단 가능) — investors.json 유지');
+  } catch (e) { console.error('  ✗ 수급 실패 — investors.json 유지:', e.message); }
+
+  // 5) 종목별 뉴스 (순차 수집으로 과호출 방지)
   try {
     const news = {};
     for (const it of items) {

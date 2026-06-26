@@ -6,7 +6,7 @@ const FORECAST_DAYS = 20; // 예측 지평(거래일)
 const DRIFT_DAMP = 0.35;  // 추세 감쇠 계수 — 최근 급등락이 그대로 이어진다고 보지 않도록 보수적으로
 
 const $ = (s) => document.querySelector(s);
-const state = { timer: null, intervalSec: 60, hist: {}, news: {} };
+const state = { timer: null, intervalSec: 60, hist: {}, news: {}, inv: {} };
 
 // ---------- 포맷 ----------
 function fmtPrice(q) {
@@ -31,6 +31,16 @@ function fmtVol(v) {
   return v.toLocaleString();
 }
 function fmtCompact(v) { return v >= 1000 ? Math.round(v).toLocaleString() : v.toFixed(2); }
+function fmtFlow(v) { // 지수 순매매(억원)
+  if (v == null) return '—';
+  return (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toLocaleString() + '억';
+}
+function fmtShares(v) { // 종목 순매매(주) → 만주
+  if (v == null) return '—';
+  const s = v > 0 ? '+' : v < 0 ? '−' : '', a = Math.abs(v);
+  if (a >= 10000) return s + (a / 10000).toFixed(a >= 1e6 ? 0 : 1) + '만주';
+  return s + a.toLocaleString() + '주';
+}
 function cssId(code) { return String(code).replace(/[^a-zA-Z0-9]/g, '_'); }
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
@@ -92,7 +102,7 @@ function drawGauge(canvas, score, tone) {
 }
 
 // ---------- 과거 + 예측 차트 ----------
-function drawChart(canvas, closes, fc) {
+function drawChart(canvas, closes, fc, opts = {}) {
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
   const W = canvas.clientWidth || 300, H = 150;
@@ -101,6 +111,7 @@ function drawChart(canvas, closes, fc) {
   if (!closes || closes.length < 2) {
     ctx.fillStyle = '#6f7d90'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
     ctx.fillText('과거 시세 수집 중…', W / 2, H / 2);
+    canvas.__c = null;
     return;
   }
   const hist = closes, HN = hist.length, FN = fc ? fc.median.length : 0, N = HN + FN;
@@ -111,6 +122,8 @@ function drawChart(canvas, closes, fc) {
   const y = (v) => padTop + (1 - (v - lo) / span) * (H - padTop - padBot);
   const up = hist[HN - 1] >= hist[Math.max(0, HN - 64)];
   const histCol = up ? '#ff5b5b' : '#4aa3ff';
+  // 호버용 메타데이터 저장
+  canvas.__c = { hist, fc, dates: opts.dates, currency: opts.currency, geom: { padL, padR, W, padTop, padBot, lo, span, N, HN, FN } };
 
   if (fc) {
     // ±1σ 밴드
@@ -139,6 +152,60 @@ function drawChart(canvas, closes, fc) {
   ctx.textAlign = 'left'; ctx.fillText('최고 ' + fmtCompact(hi), 2, padTop);
   ctx.fillText('최저 ' + fmtCompact(lo), 2, H - 5);
   if (fc) { ctx.fillStyle = '#ffb454'; ctx.textAlign = 'right'; ctx.fillText('예측 →', W - 2, padTop); }
+
+  // 호버 커서(세로선 + 점)
+  if (opts.cursor != null && opts.cursor >= 0 && opts.cursor < N) {
+    const i = opts.cursor;
+    const val = i < HN ? hist[i] : (fc ? fc.median[i - HN] : null);
+    if (val != null) {
+      ctx.beginPath(); ctx.moveTo(x(i), padTop); ctx.lineTo(x(i), H - padBot);
+      ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 1; ctx.setLineDash([]); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x(i), y(val), 4, 0, 2 * Math.PI);
+      ctx.fillStyle = i < HN ? histCol : '#ffb454'; ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.4; ctx.stroke();
+    }
+  }
+}
+
+// ---------- 차트 호버 툴팁 ----------
+let _tip;
+function getTip() {
+  if (!_tip) { _tip = document.createElement('div'); _tip.className = 'chart-tip'; document.body.appendChild(_tip); }
+  return _tip;
+}
+function hideTip() { if (_tip) _tip.style.display = 'none'; }
+function showTip(c, i, e) {
+  const HN = c.geom.HN;
+  let html;
+  if (i < HN) {
+    const ms = c.dates && c.dates[i];
+    const ds = ms ? new Date(ms).toLocaleDateString('ko-KR', { year: '2-digit', month: '2-digit', day: '2-digit' }) : `${i + 1}일차`;
+    html = `<div class="tt-d">${ds}</div><div class="tt-p">${fmtPrice({ price: c.hist[i], currency: c.currency })}</div>`;
+  } else {
+    const j = i - HN, m = c.fc.median[j], lo = c.fc.lower[j], up = c.fc.upper[j];
+    html = `<div class="tt-d">🔮 예측 +${j + 1}거래일</div><div class="tt-p">${fmtPrice({ price: m, currency: c.currency })}</div>
+      <div class="tt-r">범위 ${fmtPrice({ price: lo, currency: c.currency })} ~ ${fmtPrice({ price: up, currency: c.currency })}</div>`;
+  }
+  const tip = getTip(); tip.innerHTML = html; tip.style.display = 'block';
+  let x = e.clientX + 14, yy = e.clientY - 12;
+  if (x + tip.offsetWidth > window.innerWidth - 8) x = e.clientX - tip.offsetWidth - 14;
+  if (yy + tip.offsetHeight > window.innerHeight - 8) yy = window.innerHeight - tip.offsetHeight - 8;
+  tip.style.left = x + 'px'; tip.style.top = Math.max(8, yy) + 'px';
+}
+function attachHover(cv) {
+  cv.onmousemove = (e) => {
+    const c = cv.__c; if (!c || !c.hist) return;
+    const rect = cv.getBoundingClientRect();
+    const { padL, padR, W, N } = c.geom;
+    let i = Math.round((e.clientX - rect.left - padL) / (W - padL - padR) * (N - 1));
+    i = Math.max(0, Math.min(N - 1, i));
+    drawChart(cv, c.hist, c.fc, { dates: c.dates, currency: c.currency, cursor: i });
+    showTip(c, i, e);
+  };
+  cv.onmouseleave = () => {
+    const c = cv.__c; if (c) drawChart(cv, c.hist, c.fc, { dates: c.dates, currency: c.currency });
+    hideTip();
+  };
 }
 
 // ---------- 시장 분위기 + 지수 ----------
@@ -159,19 +226,59 @@ async function loadMarket() {
         <div class="pv ${c}-c">${price}</div>
         <div class="ch ${c}-c">${arrow} ${fmtChange({ change: i.change, currency: cur })} (${fmtPct(i.changePct)})</div></div>`;
     }).join('') || '<div class="muted">지수 데이터를 불러오지 못했습니다.</div>';
+    renderBriefs(m.briefs);
   } catch (e) {
     $('#moodLabel').textContent = '시장 데이터 대기 중'; $('#moodSummary').textContent = '아직 데이터가 생성되지 않았을 수 있어요(첫 갱신 대기).';
   }
 }
 
+// ---------- 코스피·코스닥 급등락 핵심 이유 + 수급 (메인 배너) ----------
+function renderBriefs(briefs) {
+  const el = $('#briefs');
+  if (!el) return;
+  if (!briefs || !briefs.length) { el.innerHTML = ''; return; }
+  el.innerHTML = briefs.map((b) => {
+    const pct = b.changePct ?? 0;
+    const dirCls = pct < 0 ? 'down' : pct > 0 ? 'up' : 'flat';
+    const cardCls = pct < 0 ? 'brief-down' : pct > 0 ? 'brief-up' : '';
+    const arrow = pct > 0 ? '▲' : pct < 0 ? '▼' : '–';
+    const label = pct <= -1 ? '급락 핵심 이유' : pct >= 1 ? '급등 핵심 이유' : '오늘의 핵심';
+    const icon = pct < 0 ? '📉' : pct > 0 ? '📈' : '📊';
+    const heads = (b.reason && b.reason.headlines) || [];
+    const top = heads[0];
+    const reasonHtml = top
+      ? `<a href="${top.link}" target="_blank" rel="noopener">${esc(top.title)}</a> <span class="brief-src">${esc(top.source || '')}</span>`
+      : '<span class="muted">관련 뉴스를 찾지 못했습니다.</span>';
+    const more = heads.slice(1, 3).map((h) => `<a href="${h.link}" target="_blank" rel="noopener">${esc(h.title)}</a>`).join('<span class="dot">·</span>');
+    const f = b.flow;
+    const flowHtml = f
+      ? `<div class="brief-flow">수급<span class="u">(억원)</span>
+          <span><i>외국인</i> <b class="${dirClass(f.foreign)}-c">${fmtFlow(f.foreign)}</b></span>
+          <span><i>기관</i> <b class="${dirClass(f.institution)}-c">${fmtFlow(f.institution)}</b></span>
+          <span><i>개인</i> <b class="${dirClass(f.personal)}-c">${fmtFlow(f.personal)}</b></span></div>`
+      : '<div class="brief-flow muted">수급 데이터 없음</div>';
+    return `<div class="brief ${cardCls}">
+      <div class="brief-head">
+        <span class="brief-name">${b.name}</span>
+        <span class="brief-chg ${dirCls}-c">${arrow} ${fmtPct(pct)}</span>
+        <span class="brief-tag ${dirCls}">${icon} ${label}</span>
+      </div>
+      <div class="brief-reason">${reasonHtml}</div>
+      ${more ? `<div class="brief-more">${more}</div>` : ''}
+      ${flowHtml}
+    </div>`;
+  }).join('');
+}
+
 // ---------- 보유 종목 ----------
 async function loadQuotes() {
-  let data, news, hist;
+  let data, news, hist, inv;
   try {
-    [data, news, hist] = await Promise.all([
+    [data, news, hist, inv] = await Promise.all([
       loadJson('quotes.json'),
       loadJson('news.json').catch(() => ({})),
       loadJson('history.json').catch(() => ({})),
+      loadJson('investors.json').catch(() => ({})),
     ]);
   } catch (e) {
     $('#grid').innerHTML = `<div class="muted">아직 데이터가 없습니다. GitHub Actions 첫 실행을 기다려주세요.</div>`;
@@ -179,6 +286,7 @@ async function loadQuotes() {
   }
   state.news = news || {};
   state.hist = hist || {};
+  state.inv = inv || {};
   const quotes = data.quotes || [];
   if (!quotes.length) { $('#grid').innerHTML = '<div class="muted">추적 종목이 없습니다. config/watchlist.json을 편집하세요.</div>'; return; }
 
@@ -190,11 +298,15 @@ async function loadQuotes() {
   }
   $('#clock').textContent = '확인 ' + new Date().toLocaleTimeString('ko-KR');
 
-  $('#grid').innerHTML = quotes.map((q) => renderCard(q, state.hist[q.code])).join('');
+  $('#grid').innerHTML = quotes.map((q) => renderCard(q, state.hist[q.code], state.inv[q.code])).join('');
   for (const q of quotes) {
     const h = state.hist[q.code];
     const cv = document.getElementById('chart-' + cssId(q.code));
-    if (cv) drawChart(cv, h && h.closes, h && h.closes ? forecast(h.closes, FORECAST_DAYS) : null);
+    if (cv) {
+      const fc = h && h.closes ? forecast(h.closes, FORECAST_DAYS) : null;
+      drawChart(cv, h && h.closes, fc, { dates: h && h.dates, currency: q.currency });
+      attachHover(cv);
+    }
   }
   for (const q of quotes) renderNews(q, state.news[q.code]);
 }
@@ -204,7 +316,7 @@ function retSpan(label, v) {
   return `<span class="ret"><i>${label}</i> <b class="${dirClass(v)}-c">${fmtPct(v)}</b></span>`;
 }
 
-function renderCard(q, hist) {
+function renderCard(q, hist, inv) {
   const id = cssId(q.code);
   if (!q.ok) {
     return `<div class="stock">
@@ -235,6 +347,11 @@ function renderCard(q, hist) {
       <span class="muted">· 변동범위 ±${fc.endBandPct.toFixed(1)}%</span>
       <span class="fc-note" title="최근 60거래일 추세·변동성 기반 단순 통계 추정. 실제와 다를 수 있으며 투자조언 아님.">ⓘ 참고용</span></div>`;
   }
+  const flowRow = inv ? `<div class="flow"><span class="flow-label">수급</span>
+      <span><i>외국인</i> <b class="${dirClass(inv.foreign)}-c">${fmtShares(inv.foreign)}</b></span>
+      <span><i>기관</i> <b class="${dirClass(inv.institution)}-c">${fmtShares(inv.institution)}</b></span>
+      <span><i>개인</i> <b class="${dirClass(inv.individual)}-c">${fmtShares(inv.individual)}</b></span>
+      ${inv.foreignRatio ? `<span class="muted">외인 ${inv.foreignRatio}</span>` : ''}</div>` : '';
 
   return `<div class="stock ${moverCls}">
     <div class="stock-head" style="padding-right:0">
@@ -248,6 +365,7 @@ function renderCard(q, hist) {
     ${retRow}
     <div class="chart"><canvas id="chart-${id}"></canvas></div>
     ${fcRow}
+    ${flowRow}
     <div class="meta">
       <span>고 <b>${q.high != null ? fmtPrice({ price: q.high, currency: q.currency }) : '—'}</b></span>
       <span>저 <b>${q.low != null ? fmtPrice({ price: q.low, currency: q.currency }) : '—'}</b></span>
@@ -290,7 +408,11 @@ function restartTimer() {
 
 $('#refreshBtn').addEventListener('click', tick);
 $('#interval').addEventListener('change', (e) => { state.intervalSec = +e.target.value; restartTimer(); });
-window.addEventListener('resize', () => { for (const code in state.hist) { const h = state.hist[code]; const cv = document.getElementById('chart-' + cssId(code)); if (cv) drawChart(cv, h.closes, h.closes ? forecast(h.closes, FORECAST_DAYS) : null); } });
+window.addEventListener('resize', () => {
+  document.querySelectorAll('.chart canvas').forEach((cv) => {
+    const c = cv.__c; if (c) drawChart(cv, c.hist, c.fc, { dates: c.dates, currency: c.currency });
+  });
+});
 
 tick();
 restartTimer();

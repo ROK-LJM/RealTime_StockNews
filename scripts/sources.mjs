@@ -208,3 +208,40 @@ export async function getNews(item) {
     return { items: [], summary: null, ok: false, error: String(e.message || e) };
   }
 }
+
+// ---------- 투자자별 순매매(수급) — 네이버 ----------
+// 종목별 외국인/기관/개인 순매수 수량(최근 거래일). 한국 종목만. (해외 IP에서 막히면 null)
+export async function getStockInvestors(item) {
+  const code = String(item.code).trim();
+  if (!isKRCode(code)) return null;
+  try {
+    const arr = await http(`https://m.stock.naver.com/api/stock/${code}/trend`, { as: 'json' });
+    if (!Array.isArray(arr) || !arr.length) return null;
+    const r = arr[0];
+    return {
+      date: r.bizdate || null,
+      foreign: num(r.foreignerPureBuyQuant),
+      institution: num(r.organPureBuyQuant),
+      individual: num(r.individualPureBuyQuant),
+      foreignRatio: r.foreignerHoldRatio || null,
+    };
+  } catch { return null; }
+}
+
+// 지수(코스피/코스닥) 투자자별 순매매(억원). symbol: 'KOSPI' | 'KOSDAQ'
+export async function getIndexFlow(symbol) {
+  try {
+    const r = await http(`https://m.stock.naver.com/api/index/${symbol}/trend`, { as: 'json' });
+    return { date: r.bizdate || null, personal: num(r.personalValue), foreign: num(r.foreignValue), institution: num(r.institutionalValue) };
+  } catch { return null; }
+}
+
+// 지수 급등락 "핵심 이유" — 등락 방향에 맞춘 구글뉴스 헤드라인. (전 세계 접근 가능)
+export async function getIndexReason(name, changePct) {
+  const dir = changePct <= -1 ? 'down' : changePct >= 1 ? 'up' : 'flat';
+  const q = dir === 'down' ? `${name} 급락 이유` : dir === 'up' ? `${name} 급등 이유` : `${name} 증시 마감`;
+  try {
+    const items = await googleNews(q, true);
+    return { dir, query: q, headlines: items.slice(0, 4) };
+  } catch { return { dir, query: q, headlines: [] }; }
+}
