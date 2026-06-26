@@ -57,12 +57,19 @@ function normalize(symbol, m, fallbackName) {
 // 한국 6자리 코드 -> 야후 심볼(.KS 우선, 실패 시 .KQ)
 async function resolveKR(code) {
   if (krSuffix.has(code)) return code + krSuffix.get(code);
+  let fallback = null;
   for (const sfx of ['.KS', '.KQ']) {
     try {
       const m = await yahoo(code + sfx);
-      if (m.regularMarketPrice != null) { krSuffix.set(code, sfx); return code + sfx; }
+      if (m.regularMarketPrice != null) {
+        // 같은 6자리 코드가 코스피·코스닥에 모두 존재할 수 있고, 한쪽이 펀드(MUTUALFUND)인
+        // 경우가 있어 주식(EQUITY)을 우선 선택한다. (예: 440110 → .KS는 펀드, .KQ가 파두)
+        if (m.instrumentType === 'EQUITY' || m.instrumentType == null) { krSuffix.set(code, sfx); return code + sfx; }
+        if (!fallback) fallback = sfx;
+      }
     } catch {}
   }
+  if (fallback) { krSuffix.set(code, fallback); return code + fallback; }
   throw new Error(`한국 종목을 찾지 못함: ${code}`);
 }
 
