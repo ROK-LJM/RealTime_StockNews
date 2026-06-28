@@ -253,12 +253,23 @@ function renderBriefs(briefs) {
     const arrow = pct > 0 ? '▲' : pct < 0 ? '▼' : '–';
     const label = pct <= -1 ? '급락 핵심 이유' : pct >= 1 ? '급등 핵심 이유' : '오늘의 핵심';
     const icon = pct < 0 ? '📉' : pct > 0 ? '📈' : '📊';
-    const heads = (b.reason && b.reason.headlines) || [];
-    const top = heads[0];
-    const reasonHtml = top
-      ? `<a href="${top.link}" target="_blank" rel="noopener">${esc(top.title)}</a> <span class="brief-src">${esc(top.source || '')}</span>`
-      : '<span class="muted">관련 뉴스를 찾지 못했습니다.</span>';
-    const more = heads.slice(1, 3).map((h) => `<a href="${h.link}" target="_blank" rel="noopener">${esc(h.title)}</a>`).join('<span class="dot">·</span>');
+    const ai = b.reason && b.reason.ai;
+    let reasonBlock;
+    if (ai && ai.items && ai.items.length) {
+      const items = ai.items.map((it) => `<div class="ai-item">
+        <a href="${it.link}" target="_blank" rel="noopener">${esc(it.title)}</a>
+        ${it.why ? `<span class="ai-why">— ${esc(it.why)}</span>` : ''}</div>`).join('');
+      reasonBlock = `<div class="brief-reason"><span class="ai-badge">🤖 AI 핵심</span> ${esc(ai.summary)}</div>
+        <div class="ai-items">${items}</div>`;
+    } else {
+      const heads = (b.reason && b.reason.headlines) || [];
+      const top = heads[0];
+      const reasonHtml = top
+        ? `<a href="${top.link}" target="_blank" rel="noopener">${esc(top.title)}</a> <span class="brief-src">${esc(top.source || '')}</span>`
+        : '<span class="muted">관련 뉴스를 찾지 못했습니다.</span>';
+      const more = heads.slice(1, 3).map((h) => `<a href="${h.link}" target="_blank" rel="noopener">${esc(h.title)}</a>`).join('<span class="dot">·</span>');
+      reasonBlock = `<div class="brief-reason">${reasonHtml}</div>${more ? `<div class="brief-more">${more}</div>` : ''}`;
+    }
     const f = b.flow;
     const flowHtml = f
       ? `<div class="brief-flow">수급<span class="u">(억원)</span>
@@ -272,8 +283,7 @@ function renderBriefs(briefs) {
         <span class="brief-chg ${dirCls}-c">${arrow} ${fmtPct(pct)}</span>
         <span class="brief-tag ${dirCls}">${icon} ${label}</span>
       </div>
-      <div class="brief-reason">${reasonHtml}</div>
-      ${more ? `<div class="brief-more">${more}</div>` : ''}
+      ${reasonBlock}
       ${flowHtml}
     </div>`;
   }).join('');

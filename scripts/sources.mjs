@@ -251,12 +251,59 @@ export async function getIndexFlow(symbol) {
   } catch { return null; }
 }
 
-// 지수 급등락 "핵심 이유" — 등락 방향에 맞춘 구글뉴스 헤드라인. (전 세계 접근 가능)
+// ---------- 무료 AI(Gemini) — 당일 핵심 뉴스 판단 ----------
+// GEMINI_API_KEY(저장소 Secret)가 있으면 AI가 가치 있는 핵심 뉴스를 골라 요약. 없거나 실패하면 null → 헤드라인 폴백.
+const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+
+async function geminiJSON(prompt) {
+  if (!GEMINI_KEY) return null;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20000);
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
+      method: 'POST', signal: ctrl.signal,
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_KEY },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
+      }),
+    });
+    if (!res.ok) throw new Error('Gemini HTTP ' + res.status);
+    const j = await res.json();
+    const txt = j?.candidates?.[0]?.content?.parts?.[0]?.text;
+    return txt ? JSON.parse(txt) : null;
+  } catch (e) { console.error('    Gemini 실패:', e.message); return null; }
+  finally { clearTimeout(timer); }
+}
+
+// 헤드라인 목록을 주고 "오늘 가장 가치 있는 핵심 뉴스 1~3개 + 한 줄 요약"을 JSON으로 받는다.
+export async function aiCoreNews(name, changePct, headlines) {
+  if (!GEMINI_KEY || !headlines || !headlines.length) return null;
+  const dir = changePct <= -1 ? '급락' : changePct >= 1 ? '급등' : '보합';
+  const list = headlines.map((h, i) => `${i + 1}. ${h.title}${h.source ? ` (${h.source})` : ''}`).join('\n');
+  const prompt =
+    `너는 한국 증시 애널리스트다. 오늘 ${name}이(가) ${changePct.toFixed(2)}% ${dir}했다.\n` +
+    `아래 뉴스 제목 중 오늘 이 움직임을 설명하는, 투자자에게 가장 가치 있고 핵심적인 것만 1~3개 골라라.\n` +
+    `광고·홍보·중복·단순 시황중계·무관한 것은 제외하고, 실제 원인/재료가 되는 것만 고른다.\n` +
+    `반드시 이 JSON만 출력: {"summary":"오늘 ${name} ${dir} 핵심 이유 한 문장(한국어, 45자 내외)","items":[{"index":뉴스번호,"why":"왜 핵심인지 한 줄(한국어)"}]}\n\n` +
+    `뉴스 목록:\n${list}`;
+  const parsed = await geminiJSON(prompt);
+  if (!parsed || !Array.isArray(parsed.items)) return null;
+  const items = parsed.items
+    .map((it) => { const h = headlines[(parseInt(it.index, 10) || 0) - 1]; return h ? { title: h.title, source: h.source, link: h.link, why: String(it.why || '') } : null; })
+    .filter(Boolean).slice(0, 3);
+  if (!items.length) return null;
+  return { summary: String(parsed.summary || ''), items, model: GEMINI_MODEL };
+}
+
+// 지수 급등락 "핵심 이유" — 구글뉴스 헤드라인 + (키 있으면) AI 핵심 판단. (전 세계 접근 가능)
 export async function getIndexReason(name, changePct) {
   const dir = changePct <= -1 ? 'down' : changePct >= 1 ? 'up' : 'flat';
   const q = dir === 'down' ? `${name} 급락 이유` : dir === 'up' ? `${name} 급등 이유` : `${name} 증시 마감`;
   try {
     const items = await googleNews(q, true);
-    return { dir, query: q, headlines: items.slice(0, 4) };
-  } catch { return { dir, query: q, headlines: [] }; }
+    const ai = await aiCoreNews(name, changePct, items);
+    return { dir, query: q, headlines: items.slice(0, 4), ai };
+  } catch { return { dir, query: q, headlines: [], ai: null }; }
 }

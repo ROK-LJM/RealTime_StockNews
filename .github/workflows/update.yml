@@ -31,6 +31,9 @@ jobs:
 
       - name: 시세·뉴스 받아 JSON 생성
         run: node scripts/fetch.mjs
+        env:
+          # 저장소 Secret에 GEMINI_API_KEY를 넣으면 AI 핵심뉴스 판단이 켜짐 (없으면 헤드라인 폴백)
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
       - name: 변경분 커밋 & 푸시
         run: |
