@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getMarket, getQuotes, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason } from './sources.mjs';
+import { getMarket, getQuotes, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis, STOCK_ANALYSIS_THRESHOLD } from './sources.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dataDir = path.join(root, 'docs', 'data');
@@ -19,6 +19,17 @@ fs.mkdirSync(dataDir, { recursive: true });
 function write(name, obj) {
   fs.writeFileSync(path.join(dataDir, name), JSON.stringify(obj));
   console.log(`  ✓ data/${name} 갱신`);
+}
+
+function readJson(name) {
+  try { return JSON.parse(fs.readFileSync(path.join(dataDir, name), 'utf8')); } catch { return null; }
+}
+
+// 분석 입력(등락·가격·뉴스 제목·수급)의 시그니처 — 직전과 같으면 Gemini 재호출 없이 이전 분석을 재사용한다.
+function analysisSig(q, news, flow) {
+  const heads = (news?.items || []).slice(0, 5).map((it) => it.title).join('|');
+  const f = flow ? `${flow.date}:${flow.foreign}:${flow.institution}:${flow.individual}` : 'x';
+  return `${(q.changePct ?? 0).toFixed(2)}|${q.price}|${f}|${heads}`;
 }
 
 function readConfig() {
@@ -38,6 +49,9 @@ async function run() {
   if (!items) return;
   console.log(`[fetch] ${items.length}개 종목 갱신 시작…`);
   const quotesByCode = {}; // 종목별 등락률을 뉴스 AI 판단에 넘기기 위해 보관
+  const history = {};      // 종합분석에서 추세 입력으로 재사용
+  const investors = {};    // 종합분석에서 수급 입력으로 재사용
+  const news = {};         // 종합분석에서 뉴스 입력으로 재사용
 
   // 1) 지수 + 분위기 + 급등락 핵심 이유/수급 브리핑
   try {
@@ -67,7 +81,6 @@ async function run() {
 
   // 3) 종목별 과거 시세(일봉 6개월) — 등락 차트 + 예측 입력
   try {
-    const history = {};
     for (const it of items) {
       try { const h = await getHistory(it); if (h) history[it.code] = h; }
       catch (e) { console.error(`    과거시세 실패(${it.code}):`, e.message); }
@@ -78,7 +91,6 @@ async function run() {
 
   // 4) 종목별 투자자 순매매(수급) — 한국 종목만, 해외 IP에서 막히면 자동 생략
   try {
-    const investors = {};
     for (const it of items) {
       try { const v = await getStockInvestors(it); if (v) investors[it.code] = v; }
       catch (e) { console.error(`    수급 실패(${it.code}):`, e.message); }
@@ -89,7 +101,6 @@ async function run() {
 
   // 5) 종목별 뉴스 (순차 수집으로 과호출 방지)
   try {
-    const news = {};
     for (const it of items) {
       try { news[it.code] = await getNews(it, quotesByCode[it.code]?.changePct ?? 0); }
       catch (e) { console.error(`    뉴스 실패(${it.code}):`, e.message); }
@@ -98,6 +109,25 @@ async function run() {
     if (anyNews) write('news.json', news);
     else console.warn('  ! 뉴스 전부 비어 있음 — news.json 유지');
   } catch (e) { console.error('  ✗ 뉴스 실패 — news.json 유지:', e.message); }
+
+  // 6) 급등락 종목 AI 종합분석 (뉴스+수급+추세+시세 종합) — Gemini 키 있을 때만, ±임계치 이상만.
+  //    입력 시그니처가 직전과 같으면 재호출 없이 이전 분석 재사용 → 과호출·장마감 무한커밋 방지.
+  try {
+    const prev = readJson('analysis.json') || {};
+    const analysis = {};
+    for (const it of items) {
+      const q = quotesByCode[it.code];
+      if (!q || !q.ok || Math.abs(q.changePct ?? 0) < STOCK_ANALYSIS_THRESHOLD) continue; // 변동 작으면 분석 생략(엔트리 제거)
+      const sig = analysisSig(q, news[it.code], investors[it.code]);
+      if (prev[it.code]?.sig === sig) { analysis[it.code] = prev[it.code]; continue; } // 입력 동일 → 재사용
+      try {
+        const a = await aiStockAnalysis({ quote: q, news: news[it.code], flow: investors[it.code], history: history[it.code] });
+        if (a) analysis[it.code] = { ...a, sig };
+        else if (prev[it.code]) analysis[it.code] = prev[it.code]; // 일시적 실패 시 기존 분석 유지
+      } catch (e) { console.error(`    종합분석 실패(${it.code}):`, e.message); if (prev[it.code]) analysis[it.code] = prev[it.code]; }
+    }
+    write('analysis.json', analysis);
+  } catch (e) { console.error('  ✗ 종합분석 실패 — analysis.json 유지:', e.message); }
 
   console.log('[fetch] 완료');
 }

@@ -6,7 +6,7 @@ const FORECAST_DAYS = 20; // 예측 지평(거래일)
 const DRIFT_DAMP = 0.35;  // 추세 감쇠 계수 — 최근 급등락이 그대로 이어진다고 보지 않도록 보수적으로
 
 const $ = (s) => document.querySelector(s);
-const state = { timer: null, intervalSec: 60, hist: {}, news: {}, inv: {} };
+const state = { timer: null, intervalSec: 60, hist: {}, news: {}, inv: {}, analysis: {} };
 
 // ---------- 포맷 ----------
 function fmtPrice(q) {
@@ -291,13 +291,14 @@ function renderBriefs(briefs) {
 
 // ---------- 보유 종목 ----------
 async function loadQuotes() {
-  let data, news, hist, inv;
+  let data, news, hist, inv, analysis;
   try {
-    [data, news, hist, inv] = await Promise.all([
+    [data, news, hist, inv, analysis] = await Promise.all([
       loadJson('quotes.json'),
       loadJson('news.json').catch(() => ({})),
       loadJson('history.json').catch(() => ({})),
       loadJson('investors.json').catch(() => ({})),
+      loadJson('analysis.json').catch(() => ({})),
     ]);
   } catch (e) {
     $('#grid').innerHTML = `<div class="muted">아직 데이터가 없습니다. GitHub Actions 첫 실행을 기다려주세요.</div>`;
@@ -306,6 +307,7 @@ async function loadQuotes() {
   state.news = news || {};
   state.hist = hist || {};
   state.inv = inv || {};
+  state.analysis = analysis || {};
   const quotes = data.quotes || [];
   if (!quotes.length) { $('#grid').innerHTML = '<div class="muted">추적 종목이 없습니다. config/watchlist.json을 편집하세요.</div>'; return; }
 
@@ -327,7 +329,35 @@ async function loadQuotes() {
       attachHover(cv);
     }
   }
+  for (const q of quotes) renderAnalysis(q, state.analysis[q.code]);
   for (const q of quotes) renderNews(q, state.news[q.code]);
+}
+
+// 급등락 종목 AI 종합분석 — 한 줄 진단은 항상 보이고, 클릭하면 종합분석·핵심요인·관전포인트가 펼쳐진다.
+function renderAnalysis(q, data) {
+  const el = document.getElementById('analysis-' + cssId(q.code));
+  if (!el) return;
+  if (!data || !data.headline) { el.innerHTML = ''; return; } // 분석은 변동 큰 종목에만 생성됨
+  const dirCls = (q.changePct ?? 0) < 0 ? 'down' : (q.changePct ?? 0) > 0 ? 'up' : 'flat';
+  const factors = (data.factors || []).map((f) => `<li>${esc(f)}</li>`).join('');
+  const detail = `${data.summary ? `<p class="an-summary">${esc(data.summary)}</p>` : ''}`
+    + `${factors ? `<ul class="an-factors">${factors}</ul>` : ''}`
+    + `${data.outlook ? `<p class="an-outlook">📌 ${esc(data.outlook)}</p>` : ''}`
+    + `<p class="an-disc">AI가 뉴스·수급·추세를 종합한 추정입니다. 투자조언이 아닙니다.</p>`;
+  el.innerHTML = `<button class="an-toggle ${dirCls}" type="button" aria-expanded="false">
+      <span class="an-badge">🧠 AI 종합분석</span>
+      <span class="an-head">${esc(data.headline)}</span>
+      <span class="an-caret">▾</span>
+    </button>
+    <div class="an-detail" hidden>${detail}</div>`;
+  const btn = el.querySelector('.an-toggle');
+  const box = el.querySelector('.an-detail');
+  btn.addEventListener('click', () => {
+    const open = box.hasAttribute('hidden');
+    if (open) box.removeAttribute('hidden'); else box.setAttribute('hidden', '');
+    btn.setAttribute('aria-expanded', String(open));
+    el.classList.toggle('open', open);
+  });
 }
 
 function retSpan(label, v) {
@@ -391,6 +421,7 @@ function renderCard(q, hist, inv) {
       <span>거래량 <b>${fmtVol(q.volume)}</b></span>
       <span>${status}</span>
     </div>
+    <div class="analysis" id="analysis-${id}"></div>
     <div class="news" id="news-${id}"></div>
   </div>`;
 }

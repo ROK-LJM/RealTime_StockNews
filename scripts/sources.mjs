@@ -355,6 +355,59 @@ export async function aiCoreNews(name, changePct, headlines) {
   return { summary: String(parsed.summary || ''), items, model: GEMINI_MODEL };
 }
 
+// 보유 종목 ±이 임계치 이상 변동 시, 뉴스만이 아니라 수급·추세·시세를 종합해 "왜 오르내리는지" 분석.
+export const STOCK_ANALYSIS_THRESHOLD = 2;
+
+// 과거 일봉에서 기간별 등락·고점대비 위치를 뽑아 분석 입력으로 쓴다.
+function historyStats(history) {
+  const c = history && history.closes;
+  if (!Array.isArray(c) || c.length < 2) return null;
+  const last = c[c.length - 1];
+  const ret = (n) => { const i = c.length - 1 - n; return i >= 0 && c[i] ? ((last - c[i]) / c[i]) * 100 : null; };
+  const hi = Math.max(...c);
+  return { w1: ret(5), m1: ret(21), m3: ret(63), fromHigh: hi ? ((last - hi) / hi) * 100 : null };
+}
+
+// 뉴스·수급·추세·시세를 모두 넘겨 Gemini가 "오늘 왜 이렇게 움직이는지"를 종합 분석. 키 없거나 실패 시 null.
+export async function aiStockAnalysis({ quote, news, flow, history }) {
+  if (!GEMINI_KEY || !quote) return null;
+  const name = quote.name || quote.code;
+  const pct = quote.changePct ?? 0;
+  const dir = pct < 0 ? '하락' : pct > 0 ? '상승' : '보합';
+  const cur = quote.currency === 'KRW' ? '원' : '달러';
+  const p = (v) => v == null ? 'N/A' : `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
+  const n = (v) => v == null ? 'N/A' : `${v >= 0 ? '+' : ''}${Math.round(v).toLocaleString('ko-KR')}`;
+  const st = historyStats(history);
+  const heads = (news?.items || []).slice(0, 6).map((it, i) => `${i + 1}. ${it.title}`).join('\n') || '(수집된 뉴스 없음)';
+  const flowLine = flow
+    ? `외국인 ${n(flow.foreign)}주, 기관 ${n(flow.institution)}주, 개인 ${n(flow.individual)}주${flow.foreignRatio ? ` · 외국인지분 ${flow.foreignRatio}` : ''} (${flow.date || '최근 거래일'})`
+    : '(수급 데이터 없음)';
+  const histLine = st
+    ? `1주 ${p(st.w1)} · 1개월 ${p(st.m1)} · 3개월 ${p(st.m3)} · 6개월 고점대비 ${p(st.fromHigh)}`
+    : '(과거 시세 없음)';
+  const prompt =
+    `너는 한국 증시 애널리스트다. 아래 정보를 종합해 '${name}'이(가) 오늘 왜 ${dir}하는지 핵심 원인을 분석하라.\n` +
+    `오늘 등락: ${pct.toFixed(2)}% · 현재가 ${quote.price != null ? Math.round(quote.price).toLocaleString('ko-KR') : 'N/A'}${cur} (고가 ${quote.high ?? 'N/A'} / 저가 ${quote.low ?? 'N/A'})\n` +
+    `과거 흐름: ${histLine}\n` +
+    `수급(순매수): ${flowLine}\n` +
+    `최근 뉴스 제목:\n${heads}\n\n` +
+    `단순 시황 중계가 아니라 '원인'에 집중하라. 뉴스·수급·추세를 서로 연결해 설명하고, 근거가 약하면 단정하지 말 것.\n` +
+    `반드시 이 JSON만 출력:\n` +
+    `{"headline":"오늘 왜 ${dir}하는지 한 문장 진단(한국어, 50자 내외)",` +
+    `"summary":"종합 분석 2~3문장(한국어, 뉴스+수급+추세를 연결)",` +
+    `"factors":["핵심 요인 2~4개, 각 25자 내외"],` +
+    `"outlook":"단기 관전 포인트 한 줄(조심스럽게, 단정·투자권유 금지)"}`;
+  const parsed = await geminiJSON(prompt);
+  if (!parsed || !parsed.headline) return null;
+  return {
+    headline: String(parsed.headline).slice(0, 140),
+    summary: String(parsed.summary || ''),
+    factors: Array.isArray(parsed.factors) ? parsed.factors.map((x) => String(x)).filter(Boolean).slice(0, 4) : [],
+    outlook: String(parsed.outlook || ''),
+    model: GEMINI_MODEL,
+  };
+}
+
 // 지수 급등락 "핵심 이유" — 구글뉴스 헤드라인 + (키 있으면) AI 핵심 판단. (전 세계 접근 가능)
 export async function getIndexReason(name, changePct) {
   const dir = changePct <= -1 ? 'down' : changePct >= 1 ? 'up' : 'flat';
