@@ -234,38 +234,50 @@ export function tagSentiment(text) {
   return { label, tone, score, keywords: [...new Set([...hits.pos, ...hits.neg])].slice(0, 4) };
 }
 
-async function googleNews(query, ko) {
+// recentDays>0 이면 최근 N일 뉴스만(구글 when: 연산자 + pubDate 필터), 최신순 정렬.
+async function googleNews(query, ko, recentDays = 0) {
   const hl = ko ? 'ko' : 'en-US', gl = ko ? 'KR' : 'US', ceid = ko ? 'KR:ko' : 'US:en';
-  const xml = await http(`https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=${hl}&gl=${gl}&ceid=${ceid}`, { as: 'text' });
+  const q = recentDays > 0 ? `${query} when:${recentDays}d` : query;
+  const xml = await http(`https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=${hl}&gl=${gl}&ceid=${ceid}`, { as: 'text' });
   const items = [];
-  for (const b of xml.split('<item>').slice(1, 7)) {
+  for (const b of xml.split('<item>').slice(1, 13)) {
     const pick = (tag) => { const m = b.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`)); return m ? decodeEntities(m[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim()) : ''; };
     let title = pick('title');
     let source = pick('source');
     if (!source) { const idx = title.lastIndexOf(' - '); if (idx > 0) source = title.slice(idx + 3); }
     for (let i = 0; i < 3 && source && title.endsWith(source); i++) title = title.slice(0, -source.length).replace(/[\s\-–—|]+$/, '');
     const pub = pick('pubDate');
-    items.push({ title, source, time: pub ? new Date(pub).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '', link: pick('link'), sentiment: tagSentiment(title) });
+    const pubMs = pub ? Date.parse(pub) : null;
+    items.push({ title, source, time: pub ? new Date(pub).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '', pubMs, link: pick('link'), sentiment: tagSentiment(title) });
   }
-  return items;
+  let out = items;
+  if (recentDays > 0) {
+    const cutoff = Date.now() - recentDays * 86400000;
+    out = items.filter((it) => it.pubMs == null || it.pubMs >= cutoff);
+  }
+  out.sort((a, b) => (b.pubMs || 0) - (a.pubMs || 0));
+  return out.slice(0, 8);
 }
 
-export async function getNews(item) {
+export async function getNews(item, changePct = 0) {
   const code = String(item.code).trim();
   const market = item.market || (isKRCode(code) ? 'KR' : 'US');
   const key = `news:${code}`;
   const cached = getCache(key, 180000);
   if (cached) return cached;
   try {
+    // 당일 위주(최근 2일) 뉴스만
     const items = market === 'KR'
-      ? await googleNews(`${item.name || code} 주가`, true)
-      : await googleNews(`${item.name || code} ${code} stock`, false);
+      ? await googleNews(`${item.name || code} 주가`, true, 2)
+      : await googleNews(`${item.name || code} ${code} stock`, false, 2);
     let pos = 0, neg = 0;
     for (const it of items) { if (it.sentiment.tone === 'pos') pos++; else if (it.sentiment.tone === 'neg') neg++; }
     const summary = { label: pos > neg ? '호재 우세' : neg > pos ? '악재 우세' : '중립', tone: pos > neg ? 'pos' : neg > pos ? 'neg' : 'neutral', pos, neg, total: items.length };
-    return setCache(key, { items, summary, ok: true });
+    // 급락/급등 종목(±임계치 이상)이면 Gemini로 당일 핵심 뉴스만 선별·요약
+    const ai = Math.abs(changePct) >= STOCK_AI_THRESHOLD ? await aiCoreNews(item.name || code, changePct, items) : null;
+    return setCache(key, { items, summary, ai, ok: true });
   } catch (e) {
-    return { items: [], summary: null, ok: false, error: String(e.message || e) };
+    return { items: [], summary: null, ai: null, ok: false, error: String(e.message || e) };
   }
 }
 
@@ -300,6 +312,7 @@ export async function getIndexFlow(symbol) {
 // GEMINI_API_KEY(저장소 Secret)가 있으면 AI가 가치 있는 핵심 뉴스를 골라 요약. 없거나 실패하면 null → 헤드라인 폴백.
 const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const STOCK_AI_THRESHOLD = 3; // 보유종목 ±3% 이상 변동(급락/급등) 시 Gemini로 핵심뉴스 판단
 
 async function geminiJSON(prompt) {
   if (!GEMINI_KEY) return null;
@@ -336,7 +349,7 @@ export async function aiCoreNews(name, changePct, headlines) {
   const parsed = await geminiJSON(prompt);
   if (!parsed || !Array.isArray(parsed.items)) return null;
   const items = parsed.items
-    .map((it) => { const h = headlines[(parseInt(it.index, 10) || 0) - 1]; return h ? { title: h.title, source: h.source, link: h.link, why: String(it.why || '') } : null; })
+    .map((it) => { const h = headlines[(parseInt(it.index, 10) || 0) - 1]; return h ? { title: h.title, source: h.source, time: h.time, link: h.link, why: String(it.why || '') } : null; })
     .filter(Boolean).slice(0, 3);
   if (!items.length) return null;
   return { summary: String(parsed.summary || ''), items, model: GEMINI_MODEL };
@@ -347,7 +360,7 @@ export async function getIndexReason(name, changePct) {
   const dir = changePct <= -1 ? 'down' : changePct >= 1 ? 'up' : 'flat';
   const q = dir === 'down' ? `${name} 급락 이유` : dir === 'up' ? `${name} 급등 이유` : `${name} 증시 마감`;
   try {
-    const items = await googleNews(q, true);
+    const items = await googleNews(q, true, 2);
     const ai = await aiCoreNews(name, changePct, items);
     return { dir, query: q, headlines: items.slice(0, 4), ai };
   } catch { return { dir, query: q, headlines: [], ai: null }; }

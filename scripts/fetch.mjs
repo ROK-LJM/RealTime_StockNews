@@ -37,6 +37,7 @@ async function run() {
   const items = readConfig();
   if (!items) return;
   console.log(`[fetch] ${items.length}개 종목 갱신 시작…`);
+  const quotesByCode = {}; // 종목별 등락률을 뉴스 AI 판단에 넘기기 위해 보관
 
   // 1) 지수 + 분위기 + 급등락 핵심 이유/수급 브리핑
   try {
@@ -59,6 +60,7 @@ async function run() {
   // 2) 보유 종목 시세
   try {
     const quotes = await getQuotes(items);
+    quotes.forEach((q) => { quotesByCode[q.code] = q; });
     if (quotes.some((q) => q.ok)) write('quotes.json', { quotes });
     else console.warn('  ! 시세 전부 실패 — quotes.json 유지');
   } catch (e) { console.error('  ✗ 시세 실패 — quotes.json 유지:', e.message); }
@@ -89,7 +91,7 @@ async function run() {
   try {
     const news = {};
     for (const it of items) {
-      try { news[it.code] = await getNews(it); }
+      try { news[it.code] = await getNews(it, quotesByCode[it.code]?.changePct ?? 0); }
       catch (e) { console.error(`    뉴스 실패(${it.code}):`, e.message); }
     }
     const anyNews = Object.values(news).some((n) => n && n.items && n.items.length);

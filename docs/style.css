@@ -115,6 +115,8 @@ button:hover { border-color: var(--accent); }
 .ai-item a { color: var(--text); text-decoration: none; font-weight: 600; }
 .ai-item a:hover { color: var(--accent); text-decoration: underline; }
 .ai-why { color: var(--muted); font-weight: 400; }
+.news-ai { background: rgba(91,140,255,.07); border: 1px solid rgba(91,140,255,.18); border-radius: 8px; padding: 7px 9px; margin-bottom: 8px; }
+.news-ai-sum { font-size: 13.5px; font-weight: 700; line-height: 1.4; }
 .brief-flow { font-size: 12.5px; color: var(--muted); margin-top: 8px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
 .brief-flow .u { font-size: 10px; margin: 0 4px 0 2px; }
 .brief-flow i { font-style: normal; margin-right: 3px; }
