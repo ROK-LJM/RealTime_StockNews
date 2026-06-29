@@ -61,6 +61,7 @@ function periodReturn(closes, n) {
 // 기하 랜덤워크 중앙값과 ±1σ(≈68%) 밴드를 horizon일까지 투영. (참고용, 투자조언 아님)
 function forecast(closes, horizon) {
   if (!closes || closes.length < 25) return null;
+  if (!(closes[closes.length - 1] > 0)) return null; // 마지막 종가가 0/비정상이면 0으로 나눠 NaN이 되므로 중단
   const rets = [];
   for (let i = 1; i < closes.length; i++) if (closes[i - 1] > 0) rets.push(Math.log(closes[i] / closes[i - 1]));
   const recent = rets.slice(-60);
@@ -235,7 +236,7 @@ async function loadMarket() {
         <div class="ch ${c}-c">${arrow} ${fmtChange({ change: f.change, currency: 'KRW2' })} (${fmtPct(f.changePct)})</div></div>`;
     }).join('');
     $('#indices').innerHTML = (idxHtml + fxHtml) || '<div class="muted">지수 데이터를 불러오지 못했습니다.</div>';
-    renderBriefs(m.briefs);
+    try { renderBriefs(m.briefs); } catch (e) { console.warn('브리핑 렌더 실패:', e); } // 브리핑이 깨져도 게이지·지수는 유지
   } catch (e) {
     $('#moodLabel').textContent = '시장 데이터 대기 중'; $('#moodSummary').textContent = '아직 데이터가 생성되지 않았을 수 있어요(첫 갱신 대기).';
   }
@@ -319,18 +320,31 @@ async function loadQuotes() {
   }
   $('#clock').textContent = '확인 ' + new Date().toLocaleTimeString('ko-KR');
 
-  $('#grid').innerHTML = quotes.map((q) => renderCard(q, state.hist[q.code], state.inv[q.code])).join('');
+  // 비공식 API라 한 종목의 데이터가 이상해도 대시보드 전체가 깨지지 않도록 항목별로 격리한다.
+  $('#grid').innerHTML = quotes.map((q) => {
+    try { return renderCard(q, state.hist[q.code], state.inv[q.code]); }
+    catch (e) { console.warn('카드 렌더 실패:', q && q.code, e); return errCard(q); }
+  }).join('');
   for (const q of quotes) {
-    const h = state.hist[q.code];
-    const cv = document.getElementById('chart-' + cssId(q.code));
-    if (cv) {
-      const fc = h && h.closes ? forecast(h.closes, FORECAST_DAYS) : null;
-      drawChart(cv, h && h.closes, fc, { dates: h && h.dates, currency: q.currency });
-      attachHover(cv);
-    }
+    try {
+      const h = state.hist[q.code];
+      const cv = document.getElementById('chart-' + cssId(q.code));
+      if (cv) {
+        const fc = h && h.closes ? forecast(h.closes, FORECAST_DAYS) : null;
+        drawChart(cv, h && h.closes, fc, { dates: h && h.dates, currency: q.currency });
+        attachHover(cv);
+      }
+    } catch (e) { console.warn('차트 렌더 실패:', q && q.code, e); }
   }
-  for (const q of quotes) renderAnalysis(q, state.analysis[q.code]);
-  for (const q of quotes) renderNews(q, state.news[q.code]);
+  for (const q of quotes) { try { renderAnalysis(q, state.analysis[q.code]); } catch (e) { console.warn('분석 렌더 실패:', q && q.code, e); } }
+  for (const q of quotes) { try { renderNews(q, state.news[q.code]); } catch (e) { console.warn('뉴스 렌더 실패:', q && q.code, e); } }
+}
+
+// 카드 렌더가 예기치 못한 데이터로 실패했을 때 보여줄 최소 안전 카드.
+function errCard(q) {
+  const name = esc((q && (q.name || q.code)) || '종목');
+  return `<div class="stock"><div class="stock-head"><div class="nm">${name}</div></div>
+    <div class="err">표시 중 오류가 발생했습니다.</div></div>`;
 }
 
 // 급등락 종목 AI 종합분석 — 한 줄 진단은 항상 보이고, 클릭하면 종합분석·핵심요인·관전포인트가 펼쳐진다.
@@ -450,19 +464,27 @@ function renderNews(q, data) {
 }
 
 // ---------- 루프 ----------
-function tick() { loadMarket(); loadQuotes(); }
+// 한 번의 갱신 실패가 자동갱신 루프(setInterval)를 멈추지 않도록 각 호출의 거부를 삼킨다.
+function tick() {
+  loadMarket().catch((e) => console.warn('시장 갱신 실패:', e));
+  loadQuotes().catch((e) => console.warn('종목 갱신 실패:', e));
+}
 function restartTimer() {
   if (state.timer) clearInterval(state.timer);
   if (state.intervalSec > 0) state.timer = setInterval(tick, state.intervalSec * 1000);
 }
 
-$('#refreshBtn').addEventListener('click', tick);
-$('#interval').addEventListener('change', (e) => { state.intervalSec = +e.target.value; restartTimer(); });
+// index.html 구조 변경 등으로 요소가 없어도 스크립트 초기화가 중단되지 않도록 옵셔널 체이닝으로 보호.
+$('#refreshBtn')?.addEventListener('click', tick);
+$('#interval')?.addEventListener('change', (e) => { state.intervalSec = +e.target.value; restartTimer(); });
 window.addEventListener('resize', () => {
   document.querySelectorAll('.chart canvas').forEach((cv) => {
-    const c = cv.__c; if (c) drawChart(cv, c.hist, c.fc, { dates: c.dates, currency: c.currency });
+    try { const c = cv.__c; if (c) drawChart(cv, c.hist, c.fc, { dates: c.dates, currency: c.currency }); }
+    catch (e) { console.warn('리사이즈 차트 재렌더 실패:', e); }
   });
 });
+// 최후의 안전망: 어디서든 처리되지 않은 비동기 오류가 나도 콘솔 경고만 남기고 페이지는 동작 유지.
+window.addEventListener('unhandledrejection', (e) => console.warn('처리되지 않은 비동기 오류:', e.reason));
 
 tick();
 restartTimer();
