@@ -73,6 +73,40 @@ async function resolveKR(code) {
   throw new Error(`한국 종목을 찾지 못함: ${code}`);
 }
 
+// 한국 종목 실시간 시세 (네이버 polling, 지연 0분). 미국 IP에서도 동작 확인됨.
+async function krStockNaver(code) {
+  const j = await http(`https://polling.finance.naver.com/api/realtime/domestic/stock/${code}`, { as: 'json' });
+  const d = j?.datas?.[0];
+  if (!d || d.closePrice == null) throw new Error('네이버 종목 응답 없음: ' + code);
+  const price = num(d.closePrice);
+  let change = num(d.compareToPreviousClosePrice);
+  let changePct = num(d.fluctuationsRatio);
+  const dir = d.compareToPreviousPrice?.name;
+  if (dir === 'FALLING') { change = -Math.abs(change ?? 0); changePct = -Math.abs(changePct ?? 0); }
+  else if (dir === 'RISING') { change = Math.abs(change ?? 0); changePct = Math.abs(changePct ?? 0); }
+  const prevClose = price != null && change != null ? price - change : null;
+  return {
+    name: d.stockName || code, currency: 'KRW', price, prevClose, change, changePct,
+    open: num(d.openPrice), high: num(d.highPrice), low: num(d.lowPrice),
+    volume: num(d.accumulatedTradingVolume),
+    marketStatus: d.marketStatus || null,
+    asOf: d.localTradedAt || new Date().toISOString(),
+  };
+}
+
+// 한국 지수 실시간 (네이버). naverSym: 'KOSPI' | 'KOSDAQ'
+async function krIndexNaver(naverSym) {
+  const j = await http(`https://polling.finance.naver.com/api/realtime/domestic/index/${naverSym}`, { as: 'json' });
+  const d = j?.datas?.[0];
+  if (!d) throw new Error('네이버 지수 응답 없음: ' + naverSym);
+  return {
+    price: num(d.closePriceRaw ?? d.closePrice),
+    change: num(d.compareToPreviousClosePriceRaw ?? d.compareToPreviousClosePrice),
+    changePct: num(d.fluctuationsRatioRaw ?? d.fluctuationsRatio),
+    marketStatus: d.marketStatus || null,
+  };
+}
+
 export async function getQuote(item) {
   const code = String(item.code).trim();
   const market = item.market || (isKRCode(code) ? 'KR' : 'US');
@@ -80,9 +114,14 @@ export async function getQuote(item) {
   const cached = getCache(key, 8000);
   if (cached) return item.name ? { ...cached, name: item.name } : cached;
   try {
-    const symbol = market === 'KR' && isKRCode(code) ? await resolveKR(code) : code;
-    const m = await yahoo(symbol);
-    const q = { code, market, ...normalize(symbol, m, item.name), ok: true };
+    let q;
+    if (market === 'KR' && isKRCode(code)) {
+      // 한국 종목: 네이버 실시간 우선, 실패하면 야후(.KS/.KQ, 20분 지연)로 폴백
+      try { q = { code, market, ...(await krStockNaver(code)), ok: true }; }
+      catch { const symbol = await resolveKR(code); q = { code, market, ...normalize(symbol, await yahoo(symbol), item.name), ok: true }; }
+    } else {
+      q = { code, market, ...normalize(code, await yahoo(code), item.name), ok: true };
+    }
     setCache(key, q);
     return item.name ? { ...q, name: item.name } : q;
   } catch (e) {
@@ -115,15 +154,21 @@ export async function getHistory(item, range = '6mo') {
 export async function getMarket() {
   const cached = getCache('market', 8000);
   if (cached) return cached;
-  const defs = [
-    ['^KS11', '코스피', 'KRW'], ['^KQ11', '코스닥', 'KRW'],
-    ['^GSPC', 'S&P 500', 'USD'], ['^IXIC', '나스닥', 'USD'], ['^VIX', 'VIX', 'USD'],
-  ];
-  const settled = await Promise.all(defs.map(async ([sym, name, cur]) => {
-    try { const m = await yahoo(sym); const n = normalize(sym, m, name); return { name, symbol: sym, currency: cur, price: n.price, change: n.change, changePct: n.changePct, marketStatus: n.marketStatus }; }
+  // 한국 지수: 네이버 실시간 우선(야후 폴백) / 미국 지수·VIX: 야후
+  const krDefs = [['KOSPI', '^KS11', '코스피'], ['KOSDAQ', '^KQ11', '코스닥']];
+  const usDefs = [['^GSPC', 'S&P 500'], ['^IXIC', '나스닥'], ['^VIX', 'VIX']];
+  const krIdx = await Promise.all(krDefs.map(async ([naverSym, ySym, name]) => {
+    try { return { name, symbol: ySym, currency: 'KRW', ...(await krIndexNaver(naverSym)) }; }
+    catch {
+      try { const n = normalize(ySym, await yahoo(ySym), name); return { name, symbol: ySym, currency: 'KRW', price: n.price, change: n.change, changePct: n.changePct, marketStatus: n.marketStatus }; }
+      catch { return null; }
+    }
+  }));
+  const usIdx = await Promise.all(usDefs.map(async ([sym, name]) => {
+    try { const n = normalize(sym, await yahoo(sym), name); return { name, symbol: sym, currency: 'USD', price: n.price, change: n.change, changePct: n.changePct, marketStatus: n.marketStatus }; }
     catch { return null; }
   }));
-  const indices = settled.filter(Boolean);
+  const indices = [...krIdx, ...usIdx].filter(Boolean);
   const vix = indices.find((i) => i.symbol === '^VIX');
   const mood = computeMood(indices.filter((i) => i.symbol !== '^VIX'), vix?.price);
 
