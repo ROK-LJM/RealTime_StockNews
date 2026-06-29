@@ -25,11 +25,12 @@ function readJson(name) {
   try { return JSON.parse(fs.readFileSync(path.join(dataDir, name), 'utf8')); } catch { return null; }
 }
 
-// 분석 입력(등락·가격·뉴스 제목·수급)의 시그니처 — 직전과 같으면 Gemini 재호출 없이 이전 분석을 재사용한다.
+// 분석 입력의 시그니처 — 직전과 같으면 Gemini 재호출 없이 이전 분석을 재사용(과호출·잦은커밋 방지).
+// 등락은 1% 버킷으로 거칠게 본다(매 틱 재계산 방지). 뉴스·수급이 바뀌거나 등락 구간이 바뀔 때만 재분석.
 function analysisSig(q, news, flow) {
   const heads = (news?.items || []).slice(0, 5).map((it) => it.title).join('|');
   const f = flow ? `${flow.date}:${flow.foreign}:${flow.institution}:${flow.individual}` : 'x';
-  return `${(q.changePct ?? 0).toFixed(2)}|${q.price}|${f}|${heads}`;
+  return `${Math.round(q.changePct ?? 0)}|${f}|${heads}`;
 }
 
 function readConfig() {
@@ -48,12 +49,13 @@ async function run() {
   const items = readConfig();
   if (!items) return;
   console.log(`[fetch] ${items.length}개 종목 갱신 시작…`);
-  const quotesByCode = {}; // 종목별 등락률을 뉴스 AI 판단에 넘기기 위해 보관
+  const quotesByCode = {}; // 종목별 등락률을 종합분석 대상 선별에 사용
   const history = {};      // 종합분석에서 추세 입력으로 재사용
   const investors = {};    // 종합분석에서 수급 입력으로 재사용
   const news = {};         // 종합분석에서 뉴스 입력으로 재사용
 
   // 1) 지수 + 분위기 + 급등락 핵심 이유/수급 브리핑
+  const prevBriefs = (readJson('market.json') || {}).briefs || []; // 지수 AI 재사용용(직전 reason)
   try {
     const market = await getMarket();
     if (market?.indices?.length) {
@@ -62,7 +64,8 @@ async function run() {
         for (const [naverSym, ySym, nm] of [['KOSPI', '^KS11', '코스피'], ['KOSDAQ', '^KQ11', '코스닥']]) {
           const idx = market.indices.find((i) => i.symbol === ySym);
           const changePct = idx?.changePct ?? 0;
-          const [flow, reason] = await Promise.all([getIndexFlow(naverSym), getIndexReason(nm, changePct)]);
+          const prevReason = prevBriefs.find((b) => b.key === naverSym)?.reason || null;
+          const [flow, reason] = await Promise.all([getIndexFlow(naverSym), getIndexReason(nm, changePct, prevReason)]);
           briefs.push({ key: naverSym, name: nm, changePct, price: idx?.price ?? null, flow, reason });
         }
         market.briefs = briefs;
@@ -102,7 +105,7 @@ async function run() {
   // 5) 종목별 뉴스 (순차 수집으로 과호출 방지)
   try {
     for (const it of items) {
-      try { news[it.code] = await getNews(it, quotesByCode[it.code]?.changePct ?? 0); }
+      try { news[it.code] = await getNews(it); }
       catch (e) { console.error(`    뉴스 실패(${it.code}):`, e.message); }
     }
     const anyNews = Object.values(news).some((n) => n && n.items && n.items.length);

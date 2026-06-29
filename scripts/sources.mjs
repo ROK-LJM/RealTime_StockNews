@@ -259,25 +259,23 @@ async function googleNews(query, ko, recentDays = 0) {
   return out.slice(0, 8);
 }
 
-export async function getNews(item, changePct = 0) {
+export async function getNews(item) {
   const code = String(item.code).trim();
   const market = item.market || (isKRCode(code) ? 'KR' : 'US');
   const key = `news:${code}`;
   const cached = getCache(key, 180000);
   if (cached) return cached;
   try {
-    // 당일 위주(최근 2일) 뉴스만
+    // 당일 위주(최근 2일) 뉴스만. (급등락 종목의 "왜?"는 aiStockAnalysis가 종합 분석 — 여기선 헤드라인만)
     const items = market === 'KR'
       ? await googleNews(`${item.name || code} 주가`, true, 2)
       : await googleNews(`${item.name || code} ${code} stock`, false, 2);
     let pos = 0, neg = 0;
     for (const it of items) { if (it.sentiment.tone === 'pos') pos++; else if (it.sentiment.tone === 'neg') neg++; }
     const summary = { label: pos > neg ? '호재 우세' : neg > pos ? '악재 우세' : '중립', tone: pos > neg ? 'pos' : neg > pos ? 'neg' : 'neutral', pos, neg, total: items.length };
-    // 급락/급등 종목(±임계치 이상)이면 Gemini로 당일 핵심 뉴스만 선별·요약
-    const ai = Math.abs(changePct) >= STOCK_AI_THRESHOLD ? await aiCoreNews(item.name || code, changePct, items) : null;
-    return setCache(key, { items, summary, ai, ok: true });
+    return setCache(key, { items, summary, ok: true });
   } catch (e) {
-    return { items: [], summary: null, ai: null, ok: false, error: String(e.message || e) };
+    return { items: [], summary: null, ok: false, error: String(e.message || e) };
   }
 }
 
@@ -308,31 +306,41 @@ export async function getIndexFlow(symbol) {
   } catch { return null; }
 }
 
-// ---------- 무료 AI(Gemini) — 당일 핵심 뉴스 판단 ----------
-// GEMINI_API_KEY(저장소 Secret)가 있으면 AI가 가치 있는 핵심 뉴스를 골라 요약. 없거나 실패하면 null → 헤드라인 폴백.
+// ---------- 무료 AI(Gemini) — 핵심 뉴스/종합 분석 판단 ----------
+// GEMINI_API_KEY(저장소 Secret)가 있으면 AI가 핵심을 분석. 없거나 실패하면 null → 헤드라인 폴백.
+// 모델 기본값은 flash-lite: 무료 일일한도(RPD)가 flash(250)보다 4배 큰 1,000이라 Action 반복 호출에 적합.
 const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-const STOCK_AI_THRESHOLD = 3; // 보유종목 ±3% 이상 변동(급락/급등) 시 Gemini로 핵심뉴스 판단
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function geminiJSON(prompt) {
+// 429(RPM 초과)/503은 잠깐 쉬고 재시도 — 한 번의 일시적 한도 초과로 분석이 통째로 비지 않도록.
+async function geminiJSON(prompt, { retries = 2 } = {}) {
   if (!GEMINI_KEY) return null;
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 20000);
-  try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
-      method: 'POST', signal: ctrl.signal,
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_KEY },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
-      }),
-    });
-    if (!res.ok) throw new Error('Gemini HTTP ' + res.status);
-    const j = await res.json();
-    const txt = j?.candidates?.[0]?.content?.parts?.[0]?.text;
-    return txt ? JSON.parse(txt) : null;
-  } catch (e) { console.error('    Gemini 실패:', e.message); return null; }
-  finally { clearTimeout(timer); }
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 20000);
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
+        method: 'POST', signal: ctrl.signal,
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_KEY },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
+        }),
+      });
+      clearTimeout(timer);
+      if ((res.status === 429 || res.status === 503) && attempt < retries) { await sleep(1500 * (attempt + 1)); continue; }
+      if (!res.ok) throw new Error('Gemini HTTP ' + res.status);
+      const j = await res.json();
+      const txt = j?.candidates?.[0]?.content?.parts?.[0]?.text;
+      return txt ? JSON.parse(txt) : null;
+    } catch (e) {
+      clearTimeout(timer);
+      if (attempt < retries && e.name === 'AbortError') { await sleep(1500); continue; }
+      console.error('    Gemini 실패:', e.message); return null;
+    }
+  }
+  return null;
 }
 
 // 헤드라인 목록을 주고 "오늘 가장 가치 있는 핵심 뉴스 1~3개 + 한 줄 요약"을 JSON으로 받는다.
@@ -409,12 +417,14 @@ export async function aiStockAnalysis({ quote, news, flow, history }) {
 }
 
 // 지수 급등락 "핵심 이유" — 구글뉴스 헤드라인 + (키 있으면) AI 핵심 판단. (전 세계 접근 가능)
-export async function getIndexReason(name, changePct) {
+// prev(직전 reason)를 넘기면, 등락 구간(1% 버킷)·헤드라인이 동일할 때 Gemini 재호출 없이 이전 AI를 재사용한다.
+export async function getIndexReason(name, changePct, prev = null) {
   const dir = changePct <= -1 ? 'down' : changePct >= 1 ? 'up' : 'flat';
   const q = dir === 'down' ? `${name} 급락 이유` : dir === 'up' ? `${name} 급등 이유` : `${name} 증시 마감`;
   try {
     const items = await googleNews(q, true, 2);
-    const ai = await aiCoreNews(name, changePct, items);
-    return { dir, query: q, headlines: items.slice(0, 4), ai };
-  } catch { return { dir, query: q, headlines: [], ai: null }; }
+    const sig = `${Math.round(changePct ?? 0)}|${items.slice(0, 4).map((i) => i.title).join('|')}`;
+    const ai = prev && prev.sig === sig ? prev.ai : await aiCoreNews(name, changePct, items);
+    return { dir, query: q, headlines: items.slice(0, 4), ai, sig };
+  } catch { return { dir, query: q, headlines: [], ai: prev?.ai ?? null, sig: prev?.sig ?? null }; }
 }

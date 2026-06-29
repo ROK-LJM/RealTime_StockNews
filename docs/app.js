@@ -434,18 +434,8 @@ function renderNews(q, data) {
   const isMover = Math.abs(q.changePct ?? 0) >= MOVER_THRESHOLD;
   const head = isMover ? `<span>${q.changePct > 0 ? '📈 급등' : '📉 급락'} 관련 뉴스</span>` : `<span>📰 최근 뉴스</span>`;
   const sumHtml = sum ? `<span class="news-sum ${sum.tone}">${sum.label} (호재 ${sum.pos}·악재 ${sum.neg})</span>` : '';
-  const ai = data && data.ai;
-  let aiHtml = '';
-  if (ai && ai.items && ai.items.length) {
-    const aiItems = ai.items.map((it) => `<div class="ai-item">
-      <a href="${it.link}" target="_blank" rel="noopener">${esc(it.title)}</a>
-      ${it.why ? `<span class="ai-why">— ${esc(it.why)}</span>` : ''}</div>`).join('');
-    aiHtml = `<div class="news-ai">
-      <div class="news-ai-sum"><span class="ai-badge">🤖 AI 핵심</span>${esc(ai.summary)}</div>
-      <div class="ai-items">${aiItems}</div></div>`;
-  }
   if (!items.length) {
-    el.innerHTML = `<div class="news-head">${head}${sumHtml}</div>${aiHtml || '<div class="muted" style="font-size:12px">관련 뉴스를 찾지 못했습니다.</div>'}`;
+    el.innerHTML = `<div class="news-head">${head}${sumHtml}</div><div class="muted" style="font-size:12px">관련 뉴스를 찾지 못했습니다.</div>`;
     return;
   }
   const rows = items.slice(0, isMover ? 5 : 3).map((it) => {
@@ -456,7 +446,7 @@ function renderNews(q, data) {
       <span><a href="${it.link}" target="_blank" rel="noopener">${esc(it.title)}</a>
         <span class="news-time">${esc(it.source || '')} ${esc(it.time || '')}</span>${kw}</span></div>`;
   }).join('');
-  el.innerHTML = `<div class="news-head">${head}${sumHtml}</div>${aiHtml}${rows}`;
+  el.innerHTML = `<div class="news-head">${head}${sumHtml}</div>${rows}`;
 }
 
 // ---------- 루프 ----------
