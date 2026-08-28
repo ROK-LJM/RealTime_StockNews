@@ -21,6 +21,10 @@ function write(name, obj) {
   console.log(`  ✓ data/${name} 갱신`);
 }
 
+// 한 회차에 새로 호출할 AI 종합분석 최대 건수. 무료 일일한도(flash-lite 1,000회/일) 대비 여유를
+// 두려는 상한 — 초과분은 이전 분석을 유지한 채 다음 회차로 미룬다. 종목이 늘어도 한도를 넘지 않는다.
+const AI_CALLS_PER_RUN = 4;
+
 function readJson(name) {
   try { return JSON.parse(fs.readFileSync(path.join(dataDir, name), 'utf8')); } catch { return null; }
 }
@@ -114,21 +118,33 @@ async function run() {
   } catch (e) { console.error('  ✗ 뉴스 실패 — news.json 유지:', e.message); }
 
   // 6) 급등락 종목 AI 종합분석 (뉴스+수급+추세+시세 종합) — Gemini 키 있을 때만, ±임계치 이상만.
-  //    입력 시그니처가 직전과 같으면 재호출 없이 이전 분석 재사용 → 과호출·장마감 무한커밋 방지.
+  //    ① 입력 시그니처가 직전과 같으면 재호출 없이 이전 분석 재사용(과호출·장마감 무한커밋 방지)
+  //    ② 새로 호출하는 건수는 회차당 AI_CALLS_PER_RUN개로 제한하고 변동이 큰 종목부터 처리한다.
+  //       종목 수가 늘어도 무료 일일한도를 넘지 않게 하려는 것. 한도에 걸린 종목은 이전 분석을
+  //       그대로 유지하고 다음 회차에 갱신되므로 화면에서 사라지지 않는다.
   try {
     const prev = readJson('analysis.json') || {};
     const analysis = {};
-    for (const it of items) {
-      const q = quotesByCode[it.code];
-      if (!q || !q.ok || Math.abs(q.changePct ?? 0) < STOCK_ANALYSIS_THRESHOLD) continue; // 변동 작으면 분석 생략(엔트리 제거)
+    const movers = items
+      .map((it) => ({ it, q: quotesByCode[it.code] }))
+      .filter(({ q }) => q && q.ok && Math.abs(q.changePct ?? 0) >= STOCK_ANALYSIS_THRESHOLD)
+      .sort((a, b) => Math.abs(b.q.changePct ?? 0) - Math.abs(a.q.changePct ?? 0));
+    let calls = 0, deferred = 0;
+    for (const { it, q } of movers) {
       const sig = analysisSig(q, news[it.code], investors[it.code]);
       if (prev[it.code]?.sig === sig) { analysis[it.code] = prev[it.code]; continue; } // 입력 동일 → 재사용
+      if (calls >= AI_CALLS_PER_RUN) { // 회차 한도 초과 → 기존 분석 유지, 다음 회차에 갱신
+        if (prev[it.code]) analysis[it.code] = prev[it.code];
+        deferred++; continue;
+      }
+      calls++;
       try {
         const a = await aiStockAnalysis({ quote: q, news: news[it.code], flow: investors[it.code], history: history[it.code] });
         if (a) analysis[it.code] = { ...a, sig };
         else if (prev[it.code]) analysis[it.code] = prev[it.code]; // 일시적 실패 시 기존 분석 유지
       } catch (e) { console.error(`    종합분석 실패(${it.code}):`, e.message); if (prev[it.code]) analysis[it.code] = prev[it.code]; }
     }
+    console.log(`  · 종합분석 대상 ${movers.length}건 — 신규 호출 ${calls}건, 다음 회차로 미룸 ${deferred}건`);
     write('analysis.json', analysis);
   } catch (e) { console.error('  ✗ 종합분석 실패 — analysis.json 유지:', e.message); }
 

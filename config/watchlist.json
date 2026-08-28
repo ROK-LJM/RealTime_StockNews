@@ -4,6 +4,19 @@
     { "code": "000660", "market": "KR", "name": "SK하이닉스" },
     { "code": "066575", "market": "KR", "name": "LG전자우" },
     { "code": "440110", "market": "KR", "name": "파두" },
-    { "code": "PLUG", "market": "US", "name": "플러그파워" }
+    { "code": "034020", "market": "KR", "name": "두산에너빌리티" },
+    { "code": "009150", "market": "KR", "name": "삼성전기" },
+    { "code": "010120", "market": "KR", "name": "LS ELECTRIC" },
+    { "code": "329180", "market": "KR", "name": "HD현대중공업" },
+    { "code": "042660", "market": "KR", "name": "한화오션" },
+    { "code": "017670", "market": "KR", "name": "SK텔레콤" },
+    { "code": "267270", "market": "KR", "name": "HD건설기계" },
+    { "code": "028050", "market": "KR", "name": "삼성E&A" },
+    { "code": "009830", "market": "KR", "name": "한화솔루션" },
+    { "code": "PLUG", "market": "US", "name": "플러그파워" },
+    { "code": "TSLA", "market": "US", "name": "테슬라" },
+    { "code": "AAPL", "market": "US", "name": "애플" },
+    { "code": "MSFT", "market": "US", "name": "마이크로소프트" },
+    { "code": "AMZN", "market": "US", "name": "아마존닷컴" }
   ]
 }
