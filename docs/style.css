@@ -70,6 +70,20 @@ button:hover { border-color: var(--accent); }
 
 /* 종목 그리드 */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; padding: 12px 20px 30px; }
+
+/* #grid의 상태 안내문(로딩·데이터 없음 등)은 카드와 같은 좌우 여백을 갖도록 한 곳에서 관리 */
+#grid > .muted { padding: 12px 20px 30px; }
+
+/* 시장(국장·미장) 구분 그룹 */
+.mgroup + .mgroup { border-top: 1px solid var(--border); margin-top: 8px; }
+.mgroup-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 14px 20px 0; }
+.mgroup-title { font-size: 15px; font-weight: 800; letter-spacing: -.2px; margin: 0; }
+.mgroup-fail { font-size: 12px; font-weight: 700; color: var(--neg); }
+.mgroup-hint { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; }
+.mgroup-count { font-size: 12.5px; color: var(--muted); }
+.mgroup-updown { font-size: 12.5px; font-weight: 700; }
+.mgroup-status { margin-left: auto; font-size: 12px; color: var(--muted); }
+.mgroup .grid { padding-top: 10px; padding-bottom: 18px; }
 .stock { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; box-shadow: var(--shadow); position: relative; transition: border-color .2s; }
 .stock.mover-up { border-color: rgba(255,91,91,.6); box-shadow: 0 0 0 1px rgba(255,91,91,.25), var(--shadow); }
 .stock.mover-down { border-color: rgba(74,163,255,.6); box-shadow: 0 0 0 1px rgba(74,163,255,.25), var(--shadow); }
@@ -80,7 +94,6 @@ button:hover { border-color: var(--accent); }
 .badge.up { background: rgba(255,91,91,.16); color: var(--up); }
 .badge.down { background: rgba(74,163,255,.16); color: var(--down); }
 .badge.flat { background: var(--panel-2); color: var(--muted); }
-.market-tag { font-size: 10px; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 1px 5px; margin-left: 6px; }
 
 .price-row { display: flex; align-items: baseline; gap: 10px; margin-top: 8px; }
 .price { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }

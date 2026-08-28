@@ -6,7 +6,9 @@ const FORECAST_DAYS = 20; // 예측 지평(거래일)
 const DRIFT_DAMP = 0.35;  // 추세 감쇠 계수 — 최근 급등락이 그대로 이어진다고 보지 않도록 보수적으로
 
 const $ = (s) => document.querySelector(s);
-const state = { timer: null, intervalSec: 60, hist: {}, news: {}, inv: {}, analysis: {} };
+// openAnalysis: 펼쳐 둔 AI 종합분석의 종목코드. 자동 새로고침으로 카드를 다시 그려도 접히지 않게 유지한다.
+// loadedOnce: 한 번이라도 시세를 그렸는지. 이후의 일시적 로드 실패로 화면을 비우지 않기 위한 표시.
+const state = { timer: null, intervalSec: 60, hist: {}, news: {}, inv: {}, analysis: {}, openAnalysis: new Set(), loadedOnce: false };
 
 // ---------- 포맷 ----------
 function fmtPrice(q) {
@@ -302,7 +304,11 @@ async function loadQuotes() {
       loadJson('analysis.json').catch(() => ({})),
     ]);
   } catch (e) {
-    $('#grid').innerHTML = `<div class="muted">아직 데이터가 없습니다. GitHub Actions 첫 실행을 기다려주세요.</div>`;
+    // 자동 새로고침 중 일시적 실패(5xx·오프라인 등)로 이미 그려진 화면을 지우지 않는다.
+    // 첫 로딩 전이라면 안내를 띄우고, 이미 표시 중이라면 기존 시세를 유지한 채 실패만 알린다.
+    console.warn('시세 로드 실패:', e);
+    if (state.loadedOnce) $('#clock').textContent = '⚠ 갱신 실패 · 마지막 시세';
+    else $('#grid').innerHTML = `<div class="muted">아직 데이터가 없습니다. GitHub Actions 첫 실행을 기다려주세요.</div>`;
     return;
   }
   state.news = news || {};
@@ -312,19 +318,25 @@ async function loadQuotes() {
   const quotes = data.quotes || [];
   if (!quotes.length) { $('#grid').innerHTML = '<div class="muted">추적 종목이 없습니다. config/watchlist.json을 편집하세요.</div>'; return; }
 
-  const times = quotes.map((q) => q.asOf).filter(Boolean).map((s) => +new Date(s)).filter(Number.isFinite);
-  if (times.length) {
-    const t = new Date(Math.max(...times)).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-    const open = quotes.some((q) => q.marketStatus === 'OPEN');
-    $('#updated').textContent = `${t} ${open ? '🟢 장중' : '⚪ 장마감'}`;
-  }
+  // 갱신 시각·장 상태는 시장마다 다르므로(국내 마감인데 미국은 장중 등) 그룹 헤더에서 각각 보여준다.
+  $('#updated').textContent = `총 ${quotes.length}종목`;
   $('#clock').textContent = '확인 ' + new Date().toLocaleTimeString('ko-KR');
 
-  // 비공식 API라 한 종목의 데이터가 이상해도 대시보드 전체가 깨지지 않도록 항목별로 격리한다.
-  $('#grid').innerHTML = quotes.map((q) => {
-    try { return renderCard(q, state.hist[q.code], state.inv[q.code]); }
-    catch (e) { console.warn('카드 렌더 실패:', q && q.code, e); return errCard(q); }
+  // 국장·미장을 나눠 렌더 — 종목이 많아져도 한눈에 구분되도록.
+  const groups = {};
+  for (const q of quotes) { const m = marketOf(q); (groups[m] = groups[m] || []).push(q); }
+  const known = MARKET_GROUPS.map((g) => g.key);
+  // 예상하지 못한 시장 값이 들어와도 종목이 사라지지 않도록 별도 그룹으로 함께 표시한다.
+  const extra = Object.keys(groups).filter((k) => !known.includes(k)).map((k) => ({ key: k, label: k, hint: '' }));
+  const html = [...MARKET_GROUPS, ...extra].map((g) => {
+    const list = groups[g.key];
+    if (!list || !list.length) return ''; // 빈 그룹은 헤더도 만들지 않음
+    try { return renderGroup(g, list); }
+    catch (e) { console.warn('그룹 렌더 실패:', g.key, e); return ''; }
   }).join('');
+  $('#grid').innerHTML = html || '<div class="muted">표시할 종목이 없습니다.</div>';
+  if (html) state.loadedOnce = true; // 실제로 카드를 그린 뒤에만 '표시 중' 상태로 본다
+
   for (const q of quotes) {
     try {
       const h = state.hist[q.code];
@@ -338,6 +350,52 @@ async function loadQuotes() {
   }
   for (const q of quotes) { try { renderAnalysis(q, state.analysis[q.code]); } catch (e) { console.warn('분석 렌더 실패:', q && q.code, e); } }
   for (const q of quotes) { try { renderNews(q, state.news[q.code]); } catch (e) { console.warn('뉴스 렌더 실패:', q && q.code, e); } }
+}
+
+// ---------- 시장(국장·미장) 그룹 ----------
+const MARKET_GROUPS = [
+  { key: 'KR', label: '🇰🇷 국내 증시', hint: '코스피·코스닥' },
+  { key: 'US', label: '🇺🇸 해외 증시', hint: '미국' },
+];
+// market 값이 없어도 통화로 시장을 추정한다(카드 표시 로직과 동일 규칙).
+function marketOf(q) { return q.market || (q.currency === 'KRW' ? 'KR' : 'US'); }
+
+function lastTimeOf(list) {
+  const times = list.map((q) => q.asOf).filter(Boolean).map((s) => +new Date(s)).filter(Number.isFinite);
+  if (!times.length) return '';
+  return new Date(Math.max(...times)).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+// 시장별 묶음: 헤더(종목수·상승/하락 개수·해당 시장 장상태·갱신시각) + 그 시장의 카드 그리드
+function renderGroup(g, list) {
+  // 수집 실패(ok:false) 종목은 집계에서 뺀다 — 넣으면 '전 종목 보합·마감'처럼 잘못 단정된다.
+  const valid = list.filter((q) => q && q.ok);
+  const failed = list.length - valid.length;
+  const up = valid.filter((q) => (q.changePct ?? 0) > 0).length;
+  const down = valid.filter((q) => (q.changePct ?? 0) < 0).length;
+  const t = lastTimeOf(valid);
+  // '장중 아님'과 '상태를 알 수 없음'을 구분한다(전부 실패했는데 마감이라고 하지 않도록).
+  let status;
+  if (!valid.length) status = '⚠️ 수집 실패';
+  else if (valid.some((q) => q.marketStatus === 'OPEN')) status = '🟢 장중';
+  else if (valid.some((q) => q.marketStatus)) status = '⚪ 마감';
+  else status = '';
+  const titleId = 'mg-' + cssId(g.key);
+  const cards = list.map((q) => {
+    try { return renderCard(q, state.hist[q.code], state.inv[q.code]); }
+    catch (e) { console.warn('카드 렌더 실패:', q && q.code, e); return errCard(q); }
+  }).join('');
+  return `<section class="mgroup" aria-labelledby="${titleId}">
+    <div class="mgroup-head">
+      <h3 class="mgroup-title" id="${titleId}">${esc(g.label)}</h3>
+      ${g.hint ? `<span class="mgroup-hint">${esc(g.hint)}</span>` : ''}
+      <span class="mgroup-count">${list.length}종목</span>
+      ${failed && valid.length ? `<span class="mgroup-fail">${failed}개 수집 실패</span>` : ''}
+      ${valid.length ? `<span class="mgroup-updown"><b class="up-c">▲ ${up}</b> <b class="down-c">▼ ${down}</b></span>` : ''}
+      <span class="mgroup-status">${status}${t ? ` · ${t}` : ''}</span>
+    </div>
+    <div class="grid">${cards}</div>
+  </section>`;
 }
 
 // 카드 렌더가 예기치 못한 데이터로 실패했을 때 보여줄 최소 안전 카드.
@@ -358,17 +416,20 @@ function renderAnalysis(q, data) {
     + `${factors ? `<ul class="an-factors">${factors}</ul>` : ''}`
     + `${data.outlook ? `<p class="an-outlook">📌 ${esc(data.outlook)}</p>` : ''}`
     + `<p class="an-disc">AI가 뉴스·수급·추세를 종합한 추정입니다. 투자조언이 아닙니다.</p>`;
-  el.innerHTML = `<button class="an-toggle ${dirCls}" type="button" aria-expanded="false">
+  const wasOpen = state.openAnalysis.has(q.code); // 새로고침 전에 펼쳐 뒀다면 그대로 유지
+  el.innerHTML = `<button class="an-toggle ${dirCls}" type="button" aria-expanded="${wasOpen}">
       <span class="an-badge">🧠 AI 종합분석</span>
       <span class="an-head">${esc(data.headline)}</span>
       <span class="an-caret">▾</span>
     </button>
-    <div class="an-detail" hidden>${detail}</div>`;
+    <div class="an-detail"${wasOpen ? '' : ' hidden'}>${detail}</div>`;
+  el.classList.toggle('open', wasOpen);
   const btn = el.querySelector('.an-toggle');
   const box = el.querySelector('.an-detail');
   btn.addEventListener('click', () => {
     const open = box.hasAttribute('hidden');
-    if (open) box.removeAttribute('hidden'); else box.setAttribute('hidden', '');
+    if (open) { box.removeAttribute('hidden'); state.openAnalysis.add(q.code); }
+    else { box.setAttribute('hidden', ''); state.openAnalysis.delete(q.code); }
     btn.setAttribute('aria-expanded', String(open));
     el.classList.toggle('open', open);
   });
@@ -395,7 +456,6 @@ function renderCard(q, hist, inv) {
     : `<span class="badge down">🔻 급락 ${fmtPct(q.changePct)}</span>`;
   const arrow = q.changePct > 0 ? '▲' : q.changePct < 0 ? '▼' : '–';
   const status = q.marketStatus === 'OPEN' ? '🟢 장중' : '⚪ 마감';
-  const market = q.market || (q.currency === 'KRW' ? 'KR' : 'US');
 
   const closes = hist && hist.closes;
   const retRow = closes
@@ -418,7 +478,7 @@ function renderCard(q, hist, inv) {
 
   return `<div class="stock ${moverCls}">
     <div class="stock-head" style="padding-right:0">
-      <div class="nm">${esc(q.name)}<span class="code">${q.code}</span><span class="market-tag">${market}</span></div>
+      <div class="nm">${esc(q.name)}<span class="code">${q.code}</span></div>
       ${badge}
     </div>
     <div class="price-row">
@@ -477,11 +537,17 @@ function restartTimer() {
 // index.html 구조 변경 등으로 요소가 없어도 스크립트 초기화가 중단되지 않도록 옵셔널 체이닝으로 보호.
 $('#refreshBtn')?.addEventListener('click', tick);
 $('#interval')?.addEventListener('change', (e) => { state.intervalSec = +e.target.value; restartTimer(); });
+// 리사이즈는 드래그 중 초당 수십 번 발생한다. 종목이 늘면 그때마다 차트를 전부 다시 그려 버벅이므로
+// 크기 조절이 멈춘 뒤 한 번만 다시 그린다(디바운스).
+let _resizeTimer;
 window.addEventListener('resize', () => {
-  document.querySelectorAll('.chart canvas').forEach((cv) => {
-    try { const c = cv.__c; if (c) drawChart(cv, c.hist, c.fc, { dates: c.dates, currency: c.currency }); }
-    catch (e) { console.warn('리사이즈 차트 재렌더 실패:', e); }
-  });
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(() => {
+    document.querySelectorAll('.chart canvas').forEach((cv) => {
+      try { const c = cv.__c; if (c) drawChart(cv, c.hist, c.fc, { dates: c.dates, currency: c.currency }); }
+      catch (e) { console.warn('리사이즈 차트 재렌더 실패:', e); }
+    });
+  }, 150);
 });
 // 최후의 안전망: 어디서든 처리되지 않은 비동기 오류가 나도 콘솔 경고만 남기고 페이지는 동작 유지.
 window.addEventListener('unhandledrejection', (e) => console.warn('처리되지 않은 비동기 오류:', e.reason));
