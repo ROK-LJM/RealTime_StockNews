@@ -67,6 +67,12 @@
     ⚠️ 예측선(점선·밴드)은 과거 60거래일 추세·변동성으로 계산한 <b>단순 통계 추정</b>일 뿐, 실제 주가와 다를 수 있으며 <b>투자 조언이 아닙니다</b>.
   </footer>
 
+  <!-- 시장 간 이동·맨 위로. #grid 바깥에 둔다 — 갱신 때 #grid가 통째로 교체되기 때문. -->
+  <div id="jump" class="jump" hidden>
+    <button id="jumpMkt" type="button"></button>
+    <button id="jumpTop" type="button" aria-label="맨 위로">↑</button>
+  </div>
+
   <script src="./app.js"></script>
 </body>
 </html>

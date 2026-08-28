@@ -4,6 +4,7 @@
 const MOVER_THRESHOLD = 3;
 const FORECAST_DAYS = 20; // 예측 지평(거래일)
 const DRIFT_DAMP = 0.35;  // 추세 감쇠 계수 — 최근 급등락이 그대로 이어진다고 보지 않도록 보수적으로
+const CHART_H = 120;      // 차트 높이(px). style.css의 .chart/.chart canvas 높이와 반드시 같아야 한다.
 
 const $ = (s) => document.querySelector(s);
 // openAnalysis: 펼쳐 둔 AI 종합분석의 종목코드. 자동 새로고침으로 카드를 다시 그려도 접히지 않게 유지한다.
@@ -32,7 +33,12 @@ function fmtVol(v) {
   if (v >= 1e4) return (v / 1e4).toFixed(0) + '만';
   return v.toLocaleString();
 }
-function fmtCompact(v) { return v >= 1000 ? Math.round(v).toLocaleString() : v.toFixed(2); }
+// 차트 축 라벨용. 통화를 알면 카드 상단의 가격 표기와 같은 형식으로 맞춘다.
+function fmtCompact(v, cur) {
+  if (cur === 'KRW') return Math.round(v).toLocaleString('ko-KR');
+  if (cur) return '$' + (v >= 1000 ? Math.round(v).toLocaleString() : v.toFixed(2));
+  return v >= 1000 ? Math.round(v).toLocaleString() : v.toFixed(2);
+}
 function fmtFlow(v) { // 지수 순매매(억원)
   if (v == null) return '—';
   return (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toLocaleString() + '억';
@@ -108,34 +114,48 @@ function drawGauge(canvas, score, tone) {
 function drawChart(canvas, closes, fc, opts = {}) {
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
-  const W = canvas.clientWidth || 300, H = 150;
+  const W = canvas.clientWidth || 300, H = CHART_H;
   canvas.width = W * dpr; canvas.height = H * dpr; ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, W, H);
   if (!closes || closes.length < 2) {
-    ctx.fillStyle = '#6f7d90'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillStyle = '#9aa7b8'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
     ctx.fillText('과거 시세 수집 중…', W / 2, H / 2);
     canvas.__c = null;
     return;
   }
   const hist = closes, HN = hist.length, FN = fc ? fc.median.length : 0, N = HN + FN;
-  let lo = Math.min(...hist), hi = Math.max(...hist);
-  if (fc) { lo = Math.min(lo, ...fc.lower); hi = Math.max(hi, ...fc.upper); }
+  // 실제 시세의 최고/최저 — 라벨은 반드시 이 값을 쓴다(예측 밴드를 섞으면 없던 가격이 표시된다).
+  const hHi = Math.max(...hist), hLo = Math.min(...hist);
+  let lo = hLo, hi = hHi;
+  if (fc) {
+    // 예측 밴드가 y축을 통째로 잠식해 실제 시세선이 납작해지지 않도록 기여도를 30%로 제한한다.
+    const hSpan = (hHi - hLo) || 1;
+    hi = Math.max(hHi, Math.min(Math.max(...fc.upper), hHi + hSpan * 0.30));
+    lo = Math.min(hLo, Math.max(Math.min(...fc.lower), hLo - hSpan * 0.30));
+  }
   const padTop = 10, padBot = 18, padL = 2, padR = 2, span = (hi - lo) || 1;
   const x = (i) => padL + (i / (N - 1)) * (W - padL - padR);
   const y = (v) => padTop + (1 - (v - lo) / span) * (H - padTop - padBot);
-  const up = hist[HN - 1] >= hist[Math.max(0, HN - 64)];
+  // 색 판정은 '화면에 그려진 구간'(6개월) 기준이어야 한다. 다른 구간을 쓰면 보이는 방향과 색이 어긋난다.
+  const up = hist[HN - 1] >= hist[0];
   const histCol = up ? '#ff5b5b' : '#4aa3ff';
   // 호버용 메타데이터 저장
   canvas.__c = { hist, fc, dates: opts.dates, currency: opts.currency, geom: { padL, padR, W, padTop, padBot, lo, span, N, HN, FN } };
 
   if (fc) {
-    // ±1σ 밴드
+    // ±1σ 밴드 — y축을 clamp했으므로 밖으로 새지 않게 클립한 뒤, 경계선을 그려 형태가 보이게 한다.
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, padTop, W, H - padTop - padBot); ctx.clip();
     ctx.beginPath();
     ctx.moveTo(x(HN - 1), y(hist[HN - 1]));
     fc.upper.forEach((v, i) => ctx.lineTo(x(HN + i), y(v)));
     for (let i = FN - 1; i >= 0; i--) ctx.lineTo(x(HN + i), y(fc.lower[i]));
     ctx.closePath();
-    ctx.fillStyle = 'rgba(255,180,84,0.13)'; ctx.fill();
+    const grad = ctx.createLinearGradient(x(HN - 1), 0, x(N - 1), 0);
+    grad.addColorStop(0, 'rgba(255,180,84,0.24)'); grad.addColorStop(1, 'rgba(255,180,84,0.06)');
+    ctx.fillStyle = grad; ctx.fill();
+    ctx.strokeStyle = 'rgba(255,180,84,0.5)'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.restore();
   }
   // 과거 라인
   ctx.beginPath(); ctx.moveTo(x(0), y(hist[0]));
@@ -148,12 +168,12 @@ function drawChart(canvas, closes, fc, opts = {}) {
     ctx.setLineDash([4, 3]); ctx.strokeStyle = '#ffb454'; ctx.lineWidth = 1.6; ctx.stroke(); ctx.setLineDash([]);
     // 오늘 구분선
     ctx.beginPath(); ctx.moveTo(x(HN - 1), padTop); ctx.lineTo(x(HN - 1), H - padBot);
-    ctx.setLineDash([2, 3]); ctx.strokeStyle = 'rgba(255,255,255,0.2)'; ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]);
+    ctx.setLineDash([2, 3]); ctx.strokeStyle = 'rgba(255,255,255,0.34)'; ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]);
   }
-  // 라벨
-  ctx.font = '10px sans-serif'; ctx.fillStyle = '#6f7d90';
-  ctx.textAlign = 'left'; ctx.fillText('최고 ' + fmtCompact(hi), 2, padTop);
-  ctx.fillText('최저 ' + fmtCompact(lo), 2, H - 5);
+  // 라벨 — 반드시 실제 시세의 최고/최저(hHi/hLo). y축 상한(hi/lo)은 예측 밴드가 섞여 있어 쓰면 안 된다.
+  ctx.font = '10px sans-serif'; ctx.fillStyle = '#9aa7b8';
+  ctx.textAlign = 'left'; ctx.fillText('6개월 최고 ' + fmtCompact(hHi, opts.currency), 2, padTop);
+  ctx.fillText('6개월 최저 ' + fmtCompact(hLo, opts.currency), 2, H - 5);
   if (fc) { ctx.fillStyle = '#ffb454'; ctx.textAlign = 'right'; ctx.fillText('예측 →', W - 2, padTop); }
 
   // 호버 커서(세로선 + 점)
@@ -334,8 +354,10 @@ async function loadQuotes() {
     try { return renderGroup(g, list); }
     catch (e) { console.warn('그룹 렌더 실패:', g.key, e); return ''; }
   }).join('');
+  hideTip(); // 카드를 통째로 교체하므로, 가리키던 종목의 툴팁이 화면에 남지 않게 먼저 지운다
   $('#grid').innerHTML = html || '<div class="muted">표시할 종목이 없습니다.</div>';
   if (html) state.loadedOnce = true; // 실제로 카드를 그린 뒤에만 '표시 중' 상태로 본다
+  if (window.syncJump) window.syncJump(); // 그룹 수가 바뀌었을 수 있으므로 이동 버튼 상태를 다시 맞춘다
 
   for (const q of quotes) {
     try {
@@ -477,7 +499,7 @@ function renderCard(q, hist, inv) {
       ${inv.foreignRatio ? `<span class="muted">외인 ${inv.foreignRatio}</span>` : ''}</div>` : '';
 
   return `<div class="stock ${moverCls}">
-    <div class="stock-head" style="padding-right:0">
+    <div class="stock-head">
       <div class="nm">${esc(q.name)}<span class="code">${q.code}</span></div>
       ${badge}
     </div>
@@ -551,6 +573,70 @@ window.addEventListener('resize', () => {
 });
 // 최후의 안전망: 어디서든 처리되지 않은 비동기 오류가 나도 콘솔 경고만 남기고 페이지는 동작 유지.
 window.addEventListener('unhandledrejection', (e) => console.warn('처리되지 않은 비동기 오류:', e.reason));
+
+// ---------- 상단바 높이 동기화 ----------
+// 스티키 그룹 헤더가 상단바 바로 아래에 붙어야 한다. 좁은 창에서 상단바가 줄바꿈되면
+// 높이가 변하므로 하드코딩하지 않고 실제 높이를 CSS 변수로 계속 맞춘다.
+const _topbar = document.querySelector('.topbar');
+let syncTopbar = () => {};
+if (_topbar) {
+  let _lastTbH = -1;
+  syncTopbar = () => {
+    const h = _topbar.offsetHeight;
+    if (h && h !== _lastTbH) { _lastTbH = h; document.documentElement.style.setProperty('--topbar-h', h + 'px'); }
+  };
+  syncTopbar();
+  // ResizeObserver는 렌더링이 멈춘 상태(백그라운드 탭 등)에서 발화하지 않아 값이 굳을 수 있다.
+  // 그래서 관찰자에만 의존하지 않고, 스크롤·갱신 시점(syncJump)에서도 다시 맞춘다.
+  if (window.ResizeObserver) new ResizeObserver(syncTopbar).observe(_topbar);
+  window.addEventListener('resize', syncTopbar);
+}
+
+// ---------- 시장 간 이동 · 맨 위로 ----------
+// 목적지가 국내·해외 둘뿐이라 버튼 2개를 고정하면 늘 하나는 '지금 보고 있는 곳'이라 낭비다.
+// 그래서 버튼 하나가 '반대 시장'으로 라벨을 바꿔가며 일하고, 남는 자리는 '맨 위로'에 쓴다.
+const _jump = $('#jump'), _jumpMkt = $('#jumpMkt'), _jumpTop = $('#jumpTop');
+if (_jump && _jumpMkt && _jumpTop) {
+  // #grid는 갱신 때 통째로 교체되므로 절대 캐싱하지 않고 그때그때 다시 찾는다.
+  const sections = () => [...document.querySelectorAll('#grid .mgroup')];
+  const topbarH = () => (_topbar ? _topbar.offsetHeight : 56);
+  const smooth = () => (window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
+  const LAND_GAP = 8; // 착지 시 상단바 아래로 띄우는 여백
+  // 판정선은 착지 위치보다 넉넉히 아래여야 한다. 그렇지 않으면 방금 이동해 온 그룹이
+  // '현재'로 인식되지 않아 버튼이 계속 같은 곳을 가리킨다.
+  const currentIdx = (list) => {
+    const line = topbarH() + LAND_GAP + 16; let i = -1;
+    list.forEach((s, n) => { if (s.getBoundingClientRect().top <= line) i = n; });
+    return i;
+  };
+  const goTo = (el) => window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - topbarH() - LAND_GAP, behavior: smooth() });
+  const nextOf = (list) => list[(currentIdx(list) + 1 + list.length) % list.length];
+
+  window.syncJump = function syncJump() {
+    syncTopbar(); // 스티키 헤더 위치가 어긋나지 않도록 상단바 높이를 여기서도 확인
+    const list = sections();
+    if (window.scrollY < window.innerHeight * 0.8) { _jump.hidden = true; return; } // 첫 화면에서는 방해하지 않는다
+    _jump.hidden = false;
+    if (list.length < 2) { _jumpMkt.hidden = true; return; } // 시장이 하나뿐이면 이동 버튼은 무의미
+    _jumpMkt.hidden = false;
+    const next = nextOf(list);
+    const name = (next.querySelector('.mgroup-title')?.textContent || '다음 시장').trim();
+    _jumpMkt.textContent = name + (next.getBoundingClientRect().top > 0 ? ' ↓' : ' ↑');
+  };
+  _jumpMkt.addEventListener('click', () => { const l = sections(); if (l.length) goTo(nextOf(l)); });
+  _jumpTop.addEventListener('click', () => window.scrollTo({ top: 0, behavior: smooth() }));
+  // requestAnimationFrame은 탭이 백그라운드이거나 렌더링이 멈추면 호출되지 않아 버튼 상태가 굳는다.
+  // 시간 기반 스로틀 + 마지막 위치 보정(트레일링)으로 rAF 없이도 항상 갱신되게 한다.
+  let _jLast = 0, _jTimer;
+  const onScroll = () => { syncJump(); hideTip(); };
+  window.addEventListener('scroll', () => {
+    clearTimeout(_jTimer);
+    const now = Date.now();
+    if (now - _jLast > 120) { _jLast = now; onScroll(); }
+    else _jTimer = setTimeout(() => { _jLast = Date.now(); onScroll(); }, 120);
+  }, { passive: true });
+  syncJump();
+}
 
 tick();
 restartTimer();

@@ -64,9 +64,6 @@ button:hover { border-color: var(--accent); }
 /* 보유종목 헤더 */
 .holdings-head { display: flex; justify-content: space-between; align-items: center; padding: 6px 20px; flex-wrap: wrap; gap: 10px; }
 .holdings-head h2 { margin: 0; font-size: 17px; }
-.add { display: flex; gap: 8px; flex-wrap: wrap; }
-.add input { width: 200px; }
-.add input#addName { width: 120px; }
 
 /* 종목 그리드 */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; padding: 12px 20px 30px; }
@@ -76,7 +73,17 @@ button:hover { border-color: var(--accent); }
 
 /* 시장(국장·미장) 구분 그룹 */
 .mgroup + .mgroup { border-top: 1px solid var(--border); margin-top: 8px; }
-.mgroup-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 14px 20px 0; }
+/* 그룹 헤더는 스크롤 중에도 붙어 있어야 '지금 어느 시장인지'를 계속 알 수 있다.
+   background 없으면 카드가 뒤로 비치고, z-index 없으면 position:relative인 .stock이 위로 올라온다.
+   (상단바 10보다 낮고 .chart-tip 1000보다 낮게) */
+.mgroup-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 20px; position: sticky; top: var(--topbar-h, 56px); z-index: 5;
+  background: var(--bg); border-bottom: 1px solid var(--border); }
+.mgroup-title { scroll-margin-top: calc(var(--topbar-h, 56px) + 8px); }
+@media (max-height: 600px) { /* 낮은 창에서 상단바+헤더가 화면을 과하게 먹지 않도록 */
+  .mgroup-head { padding: 6px 20px; }
+  .mgroup-hint, .mgroup-count { display: none; }
+}
 .mgroup-title { font-size: 15px; font-weight: 800; letter-spacing: -.2px; margin: 0; }
 .mgroup-fail { font-size: 12px; font-weight: 700; color: var(--neg); }
 .mgroup-hint { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; }
@@ -84,10 +91,21 @@ button:hover { border-color: var(--accent); }
 .mgroup-updown { font-size: 12.5px; font-weight: 700; }
 .mgroup-status { margin-left: auto; font-size: 12px; color: var(--muted); }
 .mgroup .grid { padding-top: 10px; padding-bottom: 18px; }
+
+/* 우측 하단 이동 버튼 — 첫 화면에서는 숨고, 스크롤한 뒤에만 나타난다.
+   z-index는 차트 툴팁(1000)보다 낮게 두어 툴팁이 가려지지 않게 한다. */
+.jump { position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  z-index: 30; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+.jump[hidden] { display: none; }
+.jump button { min-height: 44px; padding: 0 14px; border-radius: 999px;
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+  box-shadow: var(--shadow); font-size: 13px; opacity: .92; }
+.jump button:hover { opacity: 1; border-color: var(--accent); }
+#jumpTop { width: 44px; padding: 0; font-size: 16px; }
 .stock { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; box-shadow: var(--shadow); position: relative; transition: border-color .2s; }
 .stock.mover-up { border-color: rgba(255,91,91,.6); box-shadow: 0 0 0 1px rgba(255,91,91,.25), var(--shadow); }
 .stock.mover-down { border-color: rgba(74,163,255,.6); box-shadow: 0 0 0 1px rgba(74,163,255,.25), var(--shadow); }
-.stock-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding-right: 22px; }
+.stock-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
 .stock .nm { font-weight: 700; font-size: 16px; }
 .stock .code { color: var(--muted); font-size: 12px; margin-left: 6px; font-weight: 400; }
 .badge { font-size: 11px; padding: 2px 7px; border-radius: 999px; font-weight: 700; white-space: nowrap; }
@@ -102,8 +120,6 @@ button:hover { border-color: var(--accent); }
 .down-c { color: var(--down); }
 .flat-c { color: var(--muted); }
 
-.spark { margin: 8px 0 4px; height: 40px; }
-.spark canvas { width: 100%; height: 40px; display: block; }
 
 /* 코스피·코스닥 급등락 핵심 이유 배너 */
 .briefs { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 0 20px 8px; }
@@ -152,10 +168,10 @@ button:hover { border-color: var(--accent); }
 .ret i { color: var(--muted); font-style: normal; margin-right: 3px; }
 .ret b { font-variant-numeric: tabular-nums; }
 
-.chart { margin: 6px 0 4px; height: 150px; }
-.chart canvas { width: 100%; height: 150px; display: block; }
+.chart { margin: 6px 0 4px; height: 120px; }
+.chart canvas { width: 100%; height: 120px; display: block; }
 
-.fc { font-size: 12px; color: var(--text); margin: 2px 0 6px; line-height: 1.5; }
+.fc { font-size: 11.5px; color: var(--text); margin: 2px 0 4px; line-height: 1.45; }
 .fc b { font-weight: 700; }
 .fc-note { color: #ffb454; cursor: help; margin-left: 4px; border-bottom: 1px dotted #ffb45488; }
 
@@ -195,8 +211,6 @@ button:hover { border-color: var(--accent); }
 .news-time { color: var(--muted); font-size: 11px; flex-shrink: 0; }
 .kw { color: var(--muted); font-size: 11px; }
 
-.del { position: absolute; top: 10px; right: 12px; background: none; border: none; color: var(--muted); font-size: 14px; padding: 2px 6px; }
-.del:hover { color: var(--neg); border: none; }
 
 .err { color: var(--neg); font-size: 13px; }
 .foot { text-align: center; color: var(--muted); font-size: 12px; padding: 18px; border-top: 1px solid var(--border); }
@@ -209,4 +223,10 @@ button:hover { border-color: var(--accent); }
 @media (max-width: 720px) {
   .market { grid-template-columns: 1fr; }
   .briefs { grid-template-columns: 1fr; }
+  /* 좁은 화면에서 상단바가 줄바꿈되지 않아 제목이 세로로 찌그러지던 문제.
+     min-width:0이 flex 아이템의 세로 붕괴를 막는 핵심이다. */
+  .topbar { flex-wrap: wrap; row-gap: 8px; padding: 10px 14px; }
+  .brand { flex: 1 1 100%; min-width: 0; font-size: 15px; }
+  .controls { flex: 1 1 100%; gap: 8px; justify-content: flex-end; }
+  .clock { min-width: 0; }
 }
