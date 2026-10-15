@@ -520,13 +520,25 @@ await test('잘못된 설정: 유효 종목 0개·깨진 JSON → 아무것도 �
 
 // ===== 종목 검색 목록(stocklist) =====
 // 국내: 네이버 시가총액 목록(KOSPI 150개 = 2쪽, KOSDAQ 30개, 형식이 다른 코드 1개 섞음) / KIND(EUC-KR 표)
-const krPage = (market, page) => {
+// 시가총액(억원, 쉼표 문자열): KOSPI i번째 (150−i)×1000, 맨 앞 005930은 9,000,000 / KOSDAQ i번째 (30−i)×3000+500
+//  → 합친 시가총액 순위: 005930 1위, KOSDAQ 첫 종목(90,500)은 KOSPI 1~59번째(149,000~91,000) 다음인 61위
+// caps: 'normal' | 'none'(시가총액 값 없음) | 'flip'(KOSDAQ이 모두 더 큼 — 순위만 바뀐 상황)
+const krCap = (market, i, caps) => {
+  if (caps === 'none') return undefined;
+  if (market === 'KOSPI') return i === 0 ? 9000000 : (150 - i) * 1000;
+  return caps === 'flip' ? 20000000 - i : (30 - i) * 3000 + 500;
+};
+const krPage = (market, page, caps = 'normal') => {
   const total = market === 'KOSPI' ? 150 : 30;
   const from = (page - 1) * 100, to = Math.min(total, page * 100);
   const stocks = [];
-  for (let i = from; i < to; i++) stocks.push({ itemCode: String((market === 'KOSPI' ? 100000 : 200000) + i), stockName: `${market}종목${i}`, stockEndType: 'stock' });
-  if (market === 'KOSPI' && page === 1) stocks[0] = { itemCode: '005930', stockName: '삼성전자', stockEndType: 'stock' };
-  if (market === 'KOSDAQ' && page === 1) stocks.push({ itemCode: '0000J0', stockName: '새형식코드', stockEndType: 'stock' });
+  for (let i = from; i < to; i++) {
+    const cap = krCap(market, i, caps);
+    stocks.push({ itemCode: i === 0 && market === 'KOSPI' ? '005930' : String((market === 'KOSPI' ? 100000 : 200000) + i),
+      stockName: i === 0 && market === 'KOSPI' ? '삼성전자' : `${market}종목${i}`, stockEndType: 'stock',
+      ...(cap === undefined ? {} : { marketValue: cap.toLocaleString('en-US') }) });
+  }
+  if (market === 'KOSDAQ' && page === 1) stocks.push({ itemCode: '0000J0', stockName: '새형식코드', stockEndType: 'stock', marketValue: '1' });
   return { stocks, totalCount: total };
 };
 const EUCKR_SAMSUNG = [0xBB, 0xEF, 0xBC, 0xBA, 0xC0, 0xFC, 0xC0, 0xDA]; // '삼성전자'
@@ -543,6 +555,7 @@ const NASDAQ_TXT = [
   'AAPL|Apple Inc. - Common Stock|Q|N|N|100|N|N',
   'GOOGL|Alphabet Inc. - Class A Common Stock|Q|N|N|100|N|N',
   'QQQ|Invesco QQQ Trust, Series 1|G|N|N|100|Y|N',
+  'PLUG|Plug Power, Inc. - Common Stock|Q|N|N|100|N|N',
   'ZXZZT|NASDAQ TEST STOCK|G|Y|N|100|N|N',
   'ABCDW|ABC Acquisition Corp - Warrants|S|N|N|100|N|N',
   'ABCDU|ABC Acquisition Corp - Units|S|N|N|100|N|N',
@@ -557,12 +570,14 @@ const OTHER_TXT = [
   'XYZP|XYZ Corp 5% Series A Preferred Stock|N|XYZP|N|100|N|XYZP',
   'File Creation Time: 1015202608:00|||||||',
 ].join('\n');
-const US_KO = { NASDAQ: [{ symbolCode: 'NVDA', stockName: '엔비디아', stockNameEng: 'NVIDIA Corp' }, { symbolCode: 'AAPL', stockName: '애플' }],
-  NYSE: [{ symbolCode: 'BRK.B', stockName: '버크셔 해서웨이 B' }, { symbolCode: 'KO', stockName: 'Coca-Cola' }] };
-function listRoutes({ naverKr = true, kind = true, nasdaq = true, usKo = true } = {}) {
+// 네이버 해외 목록(시가총액 순) — 합친 순위: NVDA 1 · AAPL 2 · BRK-B 3 · KO 4 · PLUG 5 (GOOGL·QQQ·SPY는 목록 밖 → 순위 없음)
+const US_KO = { NASDAQ: [{ symbolCode: 'NVDA', stockName: '엔비디아', stockNameEng: 'NVIDIA Corp', marketValue: '4,500' }, { symbolCode: 'AAPL', stockName: '애플', marketValue: '3,500' },
+  { symbolCode: 'PLUG', stockName: '플러그 파워', marketValue: '5' }],
+  NYSE: [{ symbolCode: 'BRK.B', stockName: '버크셔 해서웨이 B', marketValue: '1,000' }, { symbolCode: 'KO', stockName: 'Coca-Cola', marketValue: '300' }] };
+function listRoutes({ naverKr = true, kind = true, nasdaq = true, usKo = true, caps = 'normal' } = {}) {
   const fail = () => text('blocked', 403);
   return [
-    { re: /m\.stock\.naver\.com\/api\/stocks\/marketValue\/(KOSPI|KOSDAQ)\?page=(\d+)/, fn: (m) => (naverKr ? json(krPage(m[1], +m[2])) : fail()) },
+    { re: /m\.stock\.naver\.com\/api\/stocks\/marketValue\/(KOSPI|KOSDAQ)\?page=(\d+)/, fn: (m) => (naverKr ? json(krPage(m[1], +m[2], caps)) : fail()) },
     { re: /kind\.krx\.co\.kr\/corpgeneral\/corpList\.do\?.*marketType=(stockMkt|kosdaqMkt)/, fn: (m) => (kind ? new Response(kindBytes(m[1] === 'stockMkt' ? 'KOSPI' : 'KOSDAQ'), { headers: { 'content-type': 'text/html; charset=euc-kr' } }) : fail()) },
     { re: /nasdaqtrader\.com\/dynamic\/SymDir\/(nasdaqlisted|otherlisted)\.txt/, fn: (m) => (nasdaq ? text(m[1] === 'nasdaqlisted' ? NASDAQ_TXT : OTHER_TXT) : fail()) },
     { re: /api\.stock\.naver\.com\/stock\/exchange\/(NASDAQ|NYSE|AMEX)\/marketValue\?page=(\d+)/, fn: (m) => (usKo && US_KO[m[1]] && m[2] === '1' ? json({ stocks: US_KO[m[1]] }) : text('not found', 404)) },
@@ -581,16 +596,21 @@ await test('검색 목록: 네이버 국내(쪽 넘김·새 형식 코드 제외
   assert.equal(value.written, true);
   const l = listOf(root);
   assert.equal(l.kr.length, 180, 'KOSPI 150 + KOSDAQ 30');
-  assert.deepEqual(l.kr.find((r) => r[0] === '005930'), ['005930', '삼성전자', 'KOSPI']);
+  assert.deepEqual(l.kr.find((r) => r[0] === '005930'), ['005930', '삼성전자', 'KOSPI', 1], '시가총액 1위');
   assert.ok(!l.kr.some((r) => r[0] === '0000J0'), '6자리 숫자가 아닌 코드는 제외(파이프라인이 처리 못함)');
-  assert.deepEqual(l.us.map((r) => r[0]).sort(), ['AAPL', 'BRK-B', 'GOOGL', 'KO', 'NVDA', 'QQQ', 'SPY']);
-  assert.deepEqual(usRow(l, 'NVDA'), ['NVDA', '엔비디아', 'NVIDIA Corporation', 'NASDAQ'], '한글명은 네이버 우선');
-  assert.deepEqual(usRow(l, 'GOOGL'), ['GOOGL', '알파벳 A(구글)', 'Alphabet Inc. Class A', 'NASDAQ'], '네이버에 없으면 기본 별칭');
-  assert.deepEqual(usRow(l, 'BRK-B'), ['BRK-B', '버크셔 해서웨이 B', 'Berkshire Hathaway Inc. Class B', 'NYSE'], 'BRK.B → 야후 표기 BRK-B');
-  assert.deepEqual(usRow(l, 'KO'), ['KO', '코카콜라', 'Coca-Cola Company (The)', 'NYSE'], '한글이 아닌 이름은 별칭으로');
+  const krRank = (code) => l.kr.find((r) => r[0] === code)[3];
+  assert.deepEqual([krRank('200000'), krRank('100060')], [61, 62], '두 시장을 합쳐 시가총액 순(코스닥 1위 90,500 > 코스피 90,000)');
+  assert.deepEqual(l.kr.map((r) => r[3]).sort((a, b) => a - b), Array.from({ length: 180 }, (_, i) => i + 1), '순위는 1~180 빠짐없이');
+  assert.deepEqual(l.us.map((r) => r[0]).sort(), ['AAPL', 'BRK-B', 'GOOGL', 'KO', 'NVDA', 'PLUG', 'QQQ', 'SPY']);
+  assert.deepEqual(usRow(l, 'NVDA'), ['NVDA', '엔비디아', 'NVIDIA Corporation', 'NASDAQ', 1], '한글명은 네이버 우선 · 시가총액 1위');
+  assert.deepEqual(usRow(l, 'PLUG'), ['PLUG', '플러그 파워', 'Plug Power, Inc.', 'NASDAQ', 5], '네이버 이름이 별칭보다 우선');
+  assert.deepEqual(usRow(l, 'GOOGL'), ['GOOGL', '알파벳 A(구글)', 'Alphabet Inc. Class A', 'NASDAQ'], '네이버에 없으면 기본 별칭 · 순위 없음');
+  assert.deepEqual(usRow(l, 'BRK-B'), ['BRK-B', '버크셔 해서웨이 B', 'Berkshire Hathaway Inc. Class B', 'NYSE', 3], 'BRK.B → 야후 표기 BRK-B · 거래소 합쳐 순위');
+  assert.deepEqual(usRow(l, 'KO'), ['KO', '코카콜라', 'Coca-Cola Company (The)', 'NYSE', 4], '한글이 아닌 이름은 별칭으로');
   assert.equal(usRow(l, 'SPY')[3], 'NYSE Arca ETF');
   assert.equal(usRow(l, 'QQQ')[3], 'NASDAQ ETF');
-  assert.deepEqual([l.meta.src.KOSPI, l.meta.src.KOSDAQ, l.meta.src.US], ['naver-KOSPI:150', 'naver-KOSDAQ:30', 'nasdaqtrader:7']);
+  assert.deepEqual([l.meta.src.KOSPI, l.meta.src.KOSDAQ, l.meta.src.US, l.meta.src.krCap, l.meta.src.usCap], ['naver-KOSPI:150', 'naver-KOSDAQ:30', 'nasdaqtrader:8', 180, 5]);
+  assert.equal(l.v, 2);
   assert.equal(NET.blocked.length, 0, `차단된 호출: ${NET.blocked.join(', ')}`);
 });
 await test('검색 목록: 네이버 국내가 막히면 KRX KIND(EUC-KR) 목록으로 · 한글명 소스가 막혀도 별칭으로', async () => {
@@ -600,7 +620,8 @@ await test('검색 목록: 네이버 국내가 막히면 KRX KIND(EUC-KR) 목록
   assert.deepEqual(l.kr.find((r) => r[0] === '005930'), ['005930', '삼성전자', 'KOSPI'], 'EUC-KR 한글 해독');
   assert.equal(l.kr.length, 25, 'KOSPI 13 + KOSDAQ 12');
   assert.equal(l.meta.src.KOSPI, 'kind-KOSPI:13');
-  assert.equal(usRow(l, 'NVDA')[1], '엔비디아', '별칭');
+  assert.ok(l.kr.every((r) => r.length === 3), 'KIND엔 시가총액이 없어 순위 없음');
+  assert.deepEqual(usRow(l, 'NVDA'), ['NVDA', '엔비디아', 'NVIDIA Corporation', 'NASDAQ'], '별칭 · 순위 없음');
   assert.equal(usRow(l, 'SPY')[1], 'SPDR S&P500 ETF');
 });
 await test('검색 목록: 너무 적거나 실패한 시장은 기존 목록 유지 · 전부 실패면 파일 그대로 · 내용이 같으면 다시 안 씀', async () => {
@@ -614,7 +635,8 @@ await test('검색 목록: 너무 적거나 실패한 시장은 기존 목록 �
   assert.equal(allFail.value.written, true, '소스 상태(실패)는 기록');
   const l = listOf(root);
   assert.equal(l.kr.length, 180, '국내 기존 목록 유지');
-  assert.equal(l.us.length, 7, '미국 기존 목록 유지');
+  assert.equal(l.us.length, 8, '미국 기존 목록 유지');
+  assert.equal(l.kr.find((r) => r[0] === '005930')[3], 1, '유지한 목록의 순위도 그대로');
   assert.equal(l.meta.src.krKept, true);
   const empty = workspace();
   const none = await buildList(empty, { naverKr: false, kind: false, nasdaq: false });
@@ -622,6 +644,39 @@ await test('검색 목록: 너무 적거나 실패한 시장은 기존 목록 �
   assert.equal(fs.existsSync(file(empty, 'stocklist.json')), false, '만들 게 없으면 파일을 만들지 않음');
   const few = await buildList(workspace(), {}, { minKr: 500 });
   assert.equal(few.value.kr, 0, '기준(500)보다 적으면 국내는 기존(없음) 유지');
+});
+
+await test('검색 순위: 시가총액 값이 없으면 목록 순서 · 순위만 바뀐 건 7일마다 반영 · 한글명 유지 · 옛 형식은 바로 갱신', async () => {
+  const rk = (l, code) => l.kr.find((r) => r[0] === code)[3];
+  const none = workspace();
+  await buildList(none, { caps: 'none' });
+  const ln = listOf(none);
+  assert.deepEqual([rk(ln, '005930'), rk(ln, '200000'), rk(ln, '100001'), rk(ln, '200001')], [1, 2, 3, 4], '값이 없으면 시장별 목록 순서를 번갈아(같은 순번은 코스피 먼저)');
+  assert.equal(ln.meta.src.krCap, 0);
+
+  const root = workspace();
+  await buildList(root);
+  assert.equal(rk(listOf(root), '200000'), 61);
+  const flip1 = await buildList(root, { caps: 'flip' }, { now: NOW_KR + 86400e3 });
+  assert.equal(flip1.value.written, false, '종목·이름이 같고 순위만 바뀌면 7일 안에는 다시 쓰지 않음');
+  const flip8 = await buildList(root, { caps: 'flip' }, { now: NOW_KR + 8 * 86400e3 });
+  assert.equal(flip8.value.written, true, '7일이 지나면 순위 갱신');
+  assert.equal(rk(listOf(root), '200000'), 1, '코스닥이 모두 커진 순위 반영');
+  // 네이버 해외 목록이 막혀도 전에 받은 한글명은 그대로(별칭으로 바뀌지 않음) — 순위만 빠짐
+  const noKo = await buildList(root, { caps: 'flip', usKo: false }, { now: NOW_KR + 9 * 86400e3 });
+  assert.equal(noKo.value.written, false, '이름이 그대로라 바뀐 것 없음');
+  const noKo2 = await buildList(root, { caps: 'flip', usKo: false }, { now: NOW_KR + 16 * 86400e3 });
+  assert.equal(noKo2.value.written, true);
+  assert.deepEqual(usRow(listOf(root), 'PLUG'), ['PLUG', '플러그 파워', 'Plug Power, Inc.', 'NASDAQ'], '네이버 한글명 유지 · 순위 없음');
+
+  // 옛 형식(v1, 순위 없음) 파일은 내용이 같아도 바로 새 형식으로
+  const old = workspace();
+  await buildList(old);
+  const v1 = listOf(old);
+  writeData(old, 'stocklist.json', { v: 1, kr: v1.kr.map((r) => r.slice(0, 3)), us: v1.us.map((r) => r.slice(0, 4)), meta: v1.meta });
+  const up = await buildList(old, {}, { now: NOW_KR + 3600e3 });
+  assert.equal(up.value.written, true);
+  assert.deepEqual([listOf(old).v, rk(listOf(old), '005930')], [2, 1]);
 });
 
 // ===== 종목 편집 요청 반영(watchlist-apply) =====

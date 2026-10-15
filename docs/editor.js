@@ -57,16 +57,18 @@
     if (!dirLoading) {
       dirLoading = loadJson('stocklist.json').then((j) => {
         const rows = [];
+        // 행 끝의 숫자는 시가총액 순위(1이 가장 큼). 없으면(옛 형식·상위 목록 밖) 맨 뒤로.
+        const rankOf = (v) => (Number.isInteger(v) && v > 0 ? v : Infinity);
         for (const r of Array.isArray(j?.kr) ? j.kr : []) {
           if (!Array.isArray(r) || !KR_RE.test(String(r[0]))) continue;
           const name = String(r[1] ?? '').slice(0, 40);
-          rows.push({ code: String(r[0]), market: 'KR', name: name || String(r[0]), en: '', sub: MK[r[2]] || '국내', k: [String(r[0]), norm(name), ''] });
+          rows.push({ code: String(r[0]), market: 'KR', name: name || String(r[0]), en: '', sub: MK[r[2]] || '국내', rank: rankOf(r[3]), k: [String(r[0]), norm(name), ''] });
         }
         for (const r of Array.isArray(j?.us) ? j.us : []) {
           const code = Array.isArray(r) ? String(r[0] ?? '').toUpperCase() : '';
           if (!US_RE.test(code)) continue;
           const ko = String(r[1] ?? '').slice(0, 40), en = String(r[2] ?? '').slice(0, 60);
-          rows.push({ code, market: 'US', name: ko || en || code, en: ko ? en : '', sub: String(r[3] ?? '미국').slice(0, 20), k: [code.toLowerCase(), norm(ko), norm(en)] });
+          rows.push({ code, market: 'US', name: ko || en || code, en: ko ? en : '', sub: String(r[3] ?? '미국').slice(0, 20), rank: rankOf(r[4]), k: [code.toLowerCase(), norm(ko), norm(en)] });
         }
         dir = rows; dirFailed = false;
         return dir;
@@ -76,6 +78,7 @@
   }
 
   // 점수: 코드 일치 0 · 코드 앞부분 1 · 이름 앞부분 2 · 영문명 앞부분 3 · 이름 포함 4 · 영문명 포함 5
+  // 점수가 같으면 시가총액 순위가 높은(숫자가 작은) 종목 먼저 → 국내 먼저 → 이름이 짧은 것 먼저
   function find(raw) {
     const s = norm(raw);
     if (!s || !dir) return [];
@@ -91,7 +94,8 @@
       else if (s.length >= 2 && e && e.includes(s)) sc = 5;
       if (sc >= 0) hits.push([sc, it]);
     }
-    hits.sort((a, b) => a[0] - b[0] || (a[1].market === b[1].market ? 0 : a[1].market === 'KR' ? -1 : 1) || a[1].name.length - b[1].name.length);
+    const byRank = (x, y) => (x.rank === y.rank ? 0 : x.rank < y.rank ? -1 : 1); // Infinity끼리도 안전하게
+    hits.sort((a, b) => a[0] - b[0] || byRank(a[1], b[1]) || (a[1].market === b[1].market ? 0 : a[1].market === 'KR' ? -1 : 1) || a[1].name.length - b[1].name.length);
     return hits.slice(0, 30).map((h) => h[1]);
   }
   // 목록에 없을 때 코드·티커 그대로 추가 — 국내 6자리 숫자, 미국 티커 형식만

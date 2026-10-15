@@ -4,6 +4,7 @@
 // 소스 — 모두 무료·키 불필요(일부 비공식, 개인 용도):
 //  · 국내: 네이버 증권 시가총액 목록(코스피·코스닥) → 실패하면 KRX KIND 상장법인 목록
 //  · 미국: 나스닥 트레이더 종목 디렉터리(나스닥·NYSE 등, 영문명) + 네이버 해외주식 목록(한글명, 실패해도 무방)
+// 검색 순위: 네이버 목록의 시가총액으로 매긴다('삼성' → 삼성전자 먼저). 순위를 모르는 종목(KIND·상위 목록 밖)은 뒤로.
 // 예외 처리: 소스별로 격리. 결과가 너무 적으면(차단·형식 변경 의심) 그 시장은 기존 목록을 유지한다.
 //
 // `node scripts/stocklist.mjs`로 실행하면 바로 1회 갱신. 자체 테스트는 build()를 가져다 쓴다.
@@ -34,8 +35,11 @@ async function get(url, { as = 'text', timeout = 15000 } = {}) {
 const clean = (s) => String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim();
 const HANGUL = /[가-힣]/;
 
+// 시가총액 문자열("3,343,123") → 숫자. 없거나 이상하면 null
+const capOf = (v) => { const n = Number(String(v ?? '').replace(/[^0-9.]/g, '')); return Number.isFinite(n) && n > 0 ? n : null; };
+
 // ---------- 국내 ----------
-// 네이버 증권 시가총액 목록 — 시장별로 100개씩 넘겨 받는다.
+// 네이버 증권 시가총액 목록 — 시장별로 100개씩 넘겨 받는다. 시가총액(cap)·목록 순서(pos)는 검색 순위용.
 async function krNaver(market) {
   const out = [];
   for (let page = 1; page <= MAX_PAGES; page++) {
@@ -44,7 +48,7 @@ async function krNaver(market) {
     for (const s of list) {
       const code = clean(s.itemCode ?? s.reutersCode);
       const name = clean(s.stockName ?? s.itemName).slice(0, 40);
-      if (KR_RE.test(code) && name) out.push([code, name, market]);
+      if (KR_RE.test(code) && name) out.push({ code, name, market, cap: capOf(s.marketValue), pos: out.length });
     }
     if (list.length < 100) break;
     await sleep(120); // 과호출 방지
@@ -71,10 +75,10 @@ export function parseKind(html, market) {
   }
   return out;
 }
-async function krKind(market) {
+async function krKind(market) { // 시가총액 정보가 없어 검색 순위는 매기지 않는다
   const type = market === 'KOSPI' ? 'stockMkt' : 'kosdaqMkt';
   const bytes = await get(`https://kind.krx.co.kr/corpgeneral/corpList.do?method=download&searchType=13&marketType=${type}`, { as: 'bytes' });
-  return parseKind(decodeKr(bytes), market);
+  return parseKind(decodeKr(bytes), market).map(([code, name]) => ({ code, name, market, cap: null, pos: null }));
 }
 
 // ---------- 미국 ----------
@@ -121,21 +125,31 @@ async function usDirectory() {
   return [...parseNasdaqDir(nas, 'nasdaq'), ...parseNasdaqDir(other, 'other')];
 }
 
-// 네이버 해외주식 목록 — 한글 종목명(엔비디아 등)으로도 찾을 수 있게. 실패해도 영문명·기본 별칭으로 검색된다.
-async function usKoreanNames(exchange, pages = 15) {
-  const map = {};
+// 네이버 해외주식 시가총액 목록(거래소별 상위 1,500) — 한글 종목명(엔비디아 등)과 검색 순위용 시가총액.
+// 실패해도 영문명·기본 별칭으로 검색되고 순위만 빠진다.
+async function usNaverList(exchange, pages = 15) {
+  const out = [];
   for (let page = 1; page <= pages; page++) {
     const j = await get(`https://api.stock.naver.com/stock/exchange/${exchange}/marketValue?page=${page}&pageSize=100`, { as: 'json' });
     const list = Array.isArray(j?.stocks) ? j.stocks : [];
     for (const s of list) {
       const sym = clean(s.symbolCode).toUpperCase().replace(/\./g, '-');
       const ko = clean(s.stockName).slice(0, 40);
-      if (sym && HANGUL.test(ko)) map[sym] = ko;
+      if (sym) out.push({ sym, ko: HANGUL.test(ko) ? ko : '', cap: capOf(s.marketValue), pos: out.length, ex: exchange });
     }
     if (list.length < 100) break;
     await sleep(120);
   }
-  return map;
+  return out;
+}
+
+// 검색 순위 — 시가총액이 있는 것은 큰 순서, 없는 것은 그 뒤에 목록 순서(같은 순번이면 앞 시장 먼저). 1부터.
+const MARKET_ORDER = { KOSPI: 0, KOSDAQ: 1, NASDAQ: 0, NYSE: 1, AMEX: 2 };
+function rankEntries(list) {
+  const ranked = list.filter((e) => e.pos != null);
+  ranked.sort((a, b) => (b.cap ?? -1) - (a.cap ?? -1) || a.pos - b.pos || (MARKET_ORDER[a.market ?? a.ex] ?? 9) - (MARKET_ORDER[b.market ?? b.ex] ?? 9));
+  ranked.forEach((e, i) => { e.rank = i + 1; });
+  return ranked.filter((e) => e.cap != null).length; // 시가총액으로 매긴 개수(점검용)
 }
 
 // 자주 찾는 미국 종목·ETF의 한글 이름 — 네이버 목록을 못 받아도 한글로 검색되게 하는 최소 별칭
@@ -175,6 +189,11 @@ async function tryAll(steps) { // 앞에서부터 시도, 처음 성공(비어 �
   return { name: null, rows: [] };
 }
 
+// 파일 형식: v2 = 행 끝에 검색 순위(시가총액 순, 1부터. 순위를 모르면 생략)
+//  kr: [code, name, market, rank?] · us: [ticker, 한글명, 영문명, 거래소, rank?]
+const FORMAT = 2;
+const RANK_REFRESH_MS = 7 * 86400e3; // 순위만 바뀐 경우엔 이 간격으로만 다시 쓴다(시가총액 순서는 날마다 조금씩 바뀌므로)
+
 // 1회 생성. minKr/minUs: 이보다 적으면 그 시장은 기존 목록 유지(차단·형식 변경으로 일부만 받은 결과로 덮지 않게)
 export async function build({ root = ROOT, dataDir = path.join(root, 'docs', 'data'), now = Date.now(), minKr = 1500, minUs = 3000 } = {}) {
   fs.mkdirSync(dataDir, { recursive: true });
@@ -184,39 +203,53 @@ export async function build({ root = ROOT, dataDir = path.join(root, 'docs', 'da
   const prevKr = Array.isArray(prev?.kr) ? prev.kr : [], prevUs = Array.isArray(prev?.us) ? prev.us : [];
   const src = {};
 
-  // 국내: 시장별로 네이버 → KIND 순서로 시도
-  let kr = [];
+  // 국내: 시장별로 네이버 → KIND 순서로 시도. 순위는 두 시장을 합쳐 시가총액 순으로.
+  const krAll = [];
   for (const market of ['KOSPI', 'KOSDAQ']) {
     const r = await tryAll([[`naver-${market}`, () => krNaver(market)], [`kind-${market}`, () => krKind(market)]]);
     src[market] = r.name ? `${r.name}:${r.rows.length}` : 'fail';
-    kr.push(...r.rows);
+    krAll.push(...r.rows);
   }
-  kr = uniqSorted(kr);
+  src.krCap = rankEntries(krAll);
+  let kr = uniqSorted(krAll.map((e) => (e.rank ? [e.code, e.name, e.market, e.rank] : [e.code, e.name, e.market])));
   if (kr.length < minKr) { console.warn(`  ! 국내 ${kr.length}개 — 너무 적어 기존 목록(${prevKr.length}개) 유지`); kr = prevKr; src.krKept = true; }
 
-  // 미국: 디렉터리 + 한글명
+  // 미국: 디렉터리 + 네이버 목록(한글명·순위)
   let us = [];
   try { us = await usDirectory(); src.US = `nasdaqtrader:${us.length}`; }
   catch (e) { console.warn('  ! 미국 종목 디렉터리 실패:', e.message); src.US = 'fail'; }
   us = uniqSorted(us);
   if (us.length < minUs) { console.warn(`  ! 미국 ${us.length}개 — 너무 적어 기존 목록(${prevUs.length}개) 유지`); us = prevUs; src.usKept = true; }
   else {
-    const ko = {};
+    const naver = [];
     for (const ex of ['NASDAQ', 'NYSE', 'AMEX']) {
-      try { Object.assign(ko, await usKoreanNames(ex)); }
-      catch (e) { console.warn(`  ! 한글명(${ex}) 실패:`, e.message); }
+      try { naver.push(...await usNaverList(ex)); }
+      catch (e) { console.warn(`  ! 네이버 해외 목록(${ex}) 실패:`, e.message); }
     }
-    src.usKo = Object.keys(ko).length;
-    us = us.map(([sym, , en, ex]) => [sym, ko[sym] || KO_ALIAS[sym] || '', en, ex]);
+    src.usCap = rankEntries(naver);
+    const info = new Map();
+    for (const e of naver) if (!info.has(e.sym)) info.set(e.sym, e);
+    // 한글명은 한 번 얻으면 유지 — 상위 목록 경계를 오가며 이름이 생겼다 사라졌다 하는 것 방지
+    const prevKo = new Map(prevUs.filter((r) => Array.isArray(r) && r[1]).map((r) => [r[0], r[1]]));
+    us = us.map(([sym, , en, ex]) => {
+      const n = info.get(sym);
+      const ko = n?.ko || prevKo.get(sym) || KO_ALIAS[sym] || '';
+      return n?.rank ? [sym, ko, en, ex, n.rank] : [sym, ko, en, ex];
+    });
+    src.usKo = us.filter((r) => r[1]).length;
   }
 
   console.log(`[stocklist] 국내 ${kr.length} · 미국 ${us.length} — ${JSON.stringify(src)}`);
   if (!kr.length && !us.length) { console.warn('  ✗ 목록을 만들지 못함 — 파일 유지'); return { written: false, kr: 0, us: 0, src }; }
 
-  // 목록 내용이나 소스 상태가 바뀌었을 때만 쓴다(날짜만 바뀌는 커밋 방지)
-  const sig = (o) => JSON.stringify([o?.kr, o?.us, o?.meta?.src]);
-  const next = { v: 1, kr, us, meta: { updated: new Date(now).toISOString().slice(0, 10), src } };
-  if (prev && sig(prev) === sig(next)) { console.log('  · 변경 없음'); return { written: false, kr: kr.length, us: us.length, src }; }
+  // 목록 내용(종목·이름)이나 소스 상태가 바뀌었을 때만 쓴다. 순위만 바뀐 건 RANK_REFRESH_MS마다 반영(잦은 큰 커밋 방지).
+  const rows = (list, n) => (Array.isArray(list) ? list.map((r) => (Array.isArray(r) ? r.slice(0, n) : r)) : []);
+  const state = (s = {}) => [s.KOSPI, s.KOSDAQ, s.US, !!s.krKept, !!s.usKept];
+  const sig = (o) => JSON.stringify([o?.v, rows(o?.kr, 3), rows(o?.us, 4), state(o?.meta?.src)]);
+  const updated = new Date(now).toISOString().slice(0, 10);
+  const next = { v: FORMAT, kr, us, meta: { updated, src } };
+  const age = now - Date.parse(prev?.meta?.updated ?? '');
+  if (prev && sig(prev) === sig(next) && age < RANK_REFRESH_MS) { console.log('  · 변경 없음'); return { written: false, kr: kr.length, us: us.length, src }; }
   writeJsonAtomic(file, next);
   console.log('  ✓ data/stocklist.json 갱신');
   return { written: true, kr: kr.length, us: us.length, src };
