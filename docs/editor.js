@@ -77,25 +77,26 @@
     return dirLoading;
   }
 
-  // 점수: 코드 일치 0 · 코드 앞부분 1 · 이름 앞부분 2 · 영문명 앞부분 3 · 이름 포함 4 · 영문명 포함 5
-  // 점수가 같으면 시가총액 순위가 높은(숫자가 작은) 종목 먼저 → 국내 먼저 → 이름이 짧은 것 먼저
+  // 점수: 0 = 코드가 정확히 맞는 '알려진' 종목(국내 · 시가총액 순위 있음 · 한글명 있음)
+  //       1 = 코드·이름·영문명이 앞부분부터 맞음(그 밖의 코드 정확 일치 포함) · 2 = 이름·영문명에 들어 있음(2글자 이상)
+  // 같은 점수 안에서는 시가총액 순위(숫자가 작을수록 큼) → 코드 정확 일치 → 국내 먼저 → 이름이 짧은 것 먼저.
+  // ('SK'를 치면 이름 모를 미국 티커 SK보다 SK하이닉스, '두산'을 치면 시가총액이 큰 두산에너빌리티가 먼저)
   function find(raw) {
     const s = norm(raw);
     if (!s || !dir) return [];
     const hits = [];
     for (const it of dir) {
       const [c, n, e] = it.k;
+      const exact = c === s;
       let sc = -1;
-      if (c === s) sc = 0;
-      else if (c.startsWith(s)) sc = 1;
-      else if (n.startsWith(s)) sc = 2;
-      else if (e && e.startsWith(s)) sc = 3;
-      else if (s.length >= 2 && n.includes(s)) sc = 4;
-      else if (s.length >= 2 && e && e.includes(s)) sc = 5;
-      if (sc >= 0) hits.push([sc, it]);
+      if (exact && (it.market === 'KR' || it.rank !== Infinity || n)) sc = 0;
+      else if (exact || c.startsWith(s) || n.startsWith(s) || (e && e.startsWith(s))) sc = 1;
+      else if (s.length >= 2 && (n.includes(s) || (e && e.includes(s)))) sc = 2;
+      if (sc >= 0) hits.push([sc, it, exact ? 1 : 0]);
     }
     const byRank = (x, y) => (x.rank === y.rank ? 0 : x.rank < y.rank ? -1 : 1); // Infinity끼리도 안전하게
-    hits.sort((a, b) => a[0] - b[0] || byRank(a[1], b[1]) || (a[1].market === b[1].market ? 0 : a[1].market === 'KR' ? -1 : 1) || a[1].name.length - b[1].name.length);
+    hits.sort((a, b) => a[0] - b[0] || byRank(a[1], b[1]) || b[2] - a[2]
+      || (a[1].market === b[1].market ? 0 : a[1].market === 'KR' ? -1 : 1) || a[1].name.length - b[1].name.length);
     return hits.slice(0, 30).map((h) => h[1]);
   }
   // 목록에 없을 때 코드·티커 그대로 추가 — 국내 6자리 숫자, 미국 티커 형식만
