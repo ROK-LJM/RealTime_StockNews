@@ -247,6 +247,13 @@ await test('AI 할당량 소진(429): 재시도 2회 후 회차 내 중지', asy
   assert.equal(value.ai.disabled, 'quota');
   assert.equal(read(root, 'status.json').ai.state, 'quota');
 });
+await test('지수 브리핑: 이전 AI 실패(null)는 재사용하지 않고 한도 회복 후 다시 생성', async () => {
+  const root = workspace();
+  await pipeline(root, { gemini: () => json({ error: { code: 429 } }, 429) }); // 한도 소진 → 브리핑 AI 실패
+  assert.equal(read(root, 'market.json').briefs[0].reason.ai, null);
+  await pipeline(root);                                                         // 한도 회복, 입력은 그대로
+  assert.ok(read(root, 'market.json').briefs[0].reason.ai, '실패했던 브리핑 AI를 다시 생성해야 함');
+});
 await test('AI 상태: 호출할 일 없는 첫 회차는 대기(idle) 기록, 이후 호출 없으면 유지', async () => {
   const root = workspace();
   const quietNews = () => text('<?xml version="1.0"?><rss><channel></channel></rss>'); // 헤드라인 0건 → 지수 AI 호출 없음

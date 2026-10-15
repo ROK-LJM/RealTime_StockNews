@@ -473,7 +473,8 @@ export async function getIndexReason(name, changePct, prev = null) {
   try {
     const items = await googleNews(q, true, 2);
     const sig = `${Math.round(changePct ?? 0)}|${items.slice(0, 4).map((i) => i.title).join('|')}`;
-    const ai = prev && prev.sig === sig ? prev.ai : await aiCoreNews(name, changePct, items);
+    // 재사용은 이전에 AI가 '성공'했을 때만. 실패(null)까지 재사용하면 한도가 풀려도 헤드라인이 바뀔 때까지 재시도하지 않는다.
+    const ai = prev && prev.sig === sig && prev.ai ? prev.ai : await aiCoreNews(name, changePct, items);
     return { dir, query: q, headlines: items.slice(0, 4), ai, sig };
   } catch { return { dir, query: q, headlines: [], ai: prev?.ai ?? null, sig: prev?.sig ?? null }; }
 }
