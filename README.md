@@ -4,7 +4,7 @@
 
 - **GitHub Actions 봇**이 약 5분마다 시세·뉴스를 받아 `docs/data/*.json`으로 저장 (공개 저장소는 Actions 무제한 무료)
 - **GitHub Pages**가 그 JSON을 정적으로 서빙 (무료)
-- 데이터: 네이버 금융(국내 실시간 시세·수급) · Yahoo Finance(해외 시세·과거 일봉·환율) · Google 뉴스 RSS · Google Gemini(선택, AI 요약 — `GEMINI_API_KEY` Secret)
+- 데이터: 네이버 금융(국내 실시간 시세·수급) · Yahoo Finance(해외 시세·과거 일봉·환율) · Google 뉴스 RSS · Google Gemini(선택, AI 요약 — `GEMINI_API_KEY` Secret, 무료 한도를 국내 장 시간 우선으로 배분)
 - 추적 종목: `config/watchlist.json` 파일로 관리
 
 > ⚠️ 무료 Pages는 **공개(public) 저장소**여야 합니다. 종목 코드 목록이 공개되니(수량·금액은 아님) 감안하세요.
@@ -74,6 +74,7 @@ node scripts/serve.mjs      # http://localhost:5175 에서 확인
 - 깃허브 예약작업 특성상 **갱신은 약 5분 주기**(실시간 10~30초 아님). "왜 급등/급락했는지" 파악엔 충분합니다.
 - 야후·구글뉴스는 비공식 공개 데이터입니다(개인용).
 - 저장소가 60일간 활동이 없으면 예약작업이 자동 비활성화됩니다(봇이 매 5분 커밋하므로 보통 유지됨).
+- Gemini 무료 한도는 모델당 하루 수십 회뿐이라 주·대체 모델을 함께 쓰고 국내 장 시간에 우선 배분합니다(매일 16:00 KST, 겨울 17:00 초기화). 사용량·상태는 화면 하단 'AI 상태'에서 확인.
 - 매매·주문 기능 없음(모니터링 전용).
 
 ## 구조
@@ -84,6 +85,7 @@ pages/
   scripts/
     fetch.mjs                    시세·뉴스 → docs/data/*.json 생성
     sources.mjs                  시세·뉴스·수급 수집, 태깅, 분위기 산출, AI(Gemini)
+    aibudget.mjs                 AI 무료 한도 하루 배분(장 시간 가중치·모델 배분)
     util.mjs                     설정 검증·원자적 쓰기 등 공통 유틸
     selftest.mjs                 오프라인 자체 테스트(가짜 네트워크)
     serve.mjs                    로컬 미리보기용(배포 미사용)

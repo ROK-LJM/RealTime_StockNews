@@ -13,13 +13,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getMarket, getQuotes, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis, aiStatus, resetState, STOCK_ANALYSIS_THRESHOLD } from './sources.mjs';
-import { validateWatchlist, writeJsonAtomic, analysisSig } from './util.mjs';
+import {
+  getMarket, getQuotes, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis,
+  aiStatus, aiGate, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD,
+} from './sources.mjs';
+import { startBudget, toStored, totalUsed, capacity, inSession } from './aibudget.mjs';
+import { validateWatchlist, writeJsonAtomic, analysisSig, sigMove } from './util.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-// 한 회차에 새로 호출할 AI 종합분석 최대 건수. 무료 일일한도(flash-lite 1,000회/일) 대비 여유를
-// 두려는 상한 — 초과분은 이전 분석을 유지한 채 다음 회차로 미룬다. 종목이 늘어도 한도를 넘지 않는다.
+// 한 회차에 새로 호출할 AI 종합분석 최대 건수 — 한 번에 몰아 쓰지 않게 하는 상한. 초과분은 이전 분석을
+// 유지한 채 다음 회차로 미룬다. 하루 총량은 aibudget.mjs가 장 시간에 맞춰 나눠 준다(무료 한도가 하루 수십 회뿐).
 const AI_CALLS_PER_RUN = 4;
 
 // 설정 검증: 고칠 수 있는 항목(앞자리 0 누락·소문자 티커)은 고치고, 틀린 항목은 빼며 이유를 로그로 남긴다.
@@ -37,7 +41,8 @@ function readConfig(root) {
 }
 
 // 1회 갱신. root/dataDir를 바꿔 임시 폴더에서도 돌릴 수 있다(자체 테스트용). 쓴 파일 목록을 돌려준다.
-export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data') } = {}) {
+// now: 이번 회차 기준 시각 — AI 예산 배분·분석 시각 기록에 쓴다(테스트는 고정 시각을 넘긴다).
+export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data'), now = Date.now() } = {}) {
   resetState(); // 회차마다 캐시·AI 상태를 새로 시작
   fs.mkdirSync(dataDir, { recursive: true });
   const written = [];
@@ -49,6 +54,11 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
   const readJson = (name) => {
     try { return JSON.parse(fs.readFileSync(path.join(dataDir, name), 'utf8')); } catch { return null; }
   };
+
+  // AI 하루 예산 — 직전 회차까지 쓴 기록(status.json)을 이어받는다. 한도일(미 태평양시 날짜)이 바뀌었으면 새로 시작.
+  const prevStatus = readJson('status.json');
+  const budget = startBudget(prevStatus?.budget, now);
+  setAiBudget(budget);
 
   const items = readConfig(root);
   if (!items) return { written, items: 0 };
@@ -69,7 +79,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
           const idx = market.indices.find((i) => i.symbol === ySym);
           const changePct = idx?.changePct ?? 0;
           const prevReason = prevBriefs.find((b) => b.key === naverSym)?.reason || null;
-          const [flow, reason] = await Promise.all([getIndexFlow(naverSym), getIndexReason(nm, changePct, prevReason)]);
+          const [flow, reason] = await Promise.all([getIndexFlow(naverSym), getIndexReason(nm, changePct, prevReason, now)]);
           briefs.push({ key: naverSym, name: nm, changePct, price: idx?.price ?? null, flow, reason });
         }
         market.briefs = briefs;
@@ -118,11 +128,13 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
   } catch (e) { console.error('  ✗ 뉴스 실패 — news.json 유지:', e.message); }
 
   // 6) 급등락 종목 AI 종합분석 (뉴스+수급+추세+시세 종합) — Gemini 키 있을 때만, ±임계치 이상만.
-  //    ① 입력 시그니처가 직전과 같으면 재호출 없이 이전 분석 재사용(과호출·장마감 무한커밋 방지)
+  //    ① 입력 시그니처가 직전과 같으면 재호출 없이 이전 분석 재사용(과호출·장마감 무한커밋 방지).
+  //       그 종목 시장이 닫혀 있으면(마감 후·주말) 등락 구간이 그대로인 한 뉴스·수급이 바뀌어도 재사용 —
+  //       이미 끝난 움직임을 다시 분석하느라 장중인 시장의 한도를 쓰지 않게.
   //    ② 새로 호출하는 건수는 회차당 AI_CALLS_PER_RUN개로 제한하고 변동이 큰 종목부터 처리한다.
-  //       종목 수가 늘어도 무료 일일한도를 넘지 않게 하려는 것. 한도에 걸린 종목은 이전 분석을
-  //       그대로 유지하고 다음 회차에 갱신되므로 화면에서 사라지지 않는다.
-  //    ③ 시세를 하나도 못 받은 회차엔 손대지 않는다 — 급등락 대상이 '없음'으로 보여 기존 분석을 {}로 지우던 문제 방지.
+  //       한도에 걸린 종목은 이전 분석을 그대로 유지하고 다음 회차에 갱신되므로 화면에서 사라지지 않는다.
+  //    ③ 하루 예산을 장 시간에 맞춰 나눠 쓴다(aibudget.mjs) — 지금 쓸 차례가 아니면 ②와 같이 다음 회차로 미룬다.
+  //    ④ 시세를 하나도 못 받은 회차엔 손대지 않는다 — 급등락 대상이 '없음'으로 보여 기존 분석을 {}로 지우던 문제 방지.
   if (!Object.values(quotesByCode).some((q) => q && q.ok)) console.warn('  ! 시세 없음 — analysis.json 유지');
   else try {
     const prev = readJson('analysis.json') || {};
@@ -131,42 +143,57 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
       .map((it) => ({ it, q: quotesByCode[it.code] }))
       .filter(({ q }) => q && q.ok && Math.abs(q.changePct ?? 0) >= STOCK_ANALYSIS_THRESHOLD)
       .sort((a, b) => Math.abs(b.q.changePct ?? 0) - Math.abs(a.q.changePct ?? 0));
-    let calls = 0, deferred = 0;
+    let calls = 0, deferred = 0, waited = 0;
     for (const { it, q } of movers) {
       const sig = analysisSig(q, news[it.code], investors[it.code]);
-      if (prev[it.code]?.sig === sig) { analysis[it.code] = prev[it.code]; continue; } // 입력 동일 → 재사용
-      if (calls >= AI_CALLS_PER_RUN) { // 회차 한도 초과 → 기존 분석 유지, 다음 회차에 갱신
+      const p = prev[it.code];
+      const settled = p && !inSession(it.market, now) && sigMove(p.sig) === sigMove(sig);
+      if (p && (p.sig === sig || settled)) { analysis[it.code] = p; continue; } // 입력 동일·장 밖 → 재사용
+      const gate = aiGate();
+      if (calls >= AI_CALLS_PER_RUN || gate !== 'go') { // 회차 상한·시간 배분·AI 꺼짐 → 기존 분석 유지, 다음 회차에 갱신
         if (prev[it.code]) analysis[it.code] = prev[it.code];
-        deferred++; continue;
+        if (gate === 'wait') { noteAiSkipped(); waited++; } else if (gate === 'go') deferred++;
+        continue;
       }
       calls++;
       try {
         const a = await aiStockAnalysis({ quote: q, news: news[it.code], flow: investors[it.code], history: history[it.code] });
-        if (a) analysis[it.code] = { ...a, sig };
+        if (a) analysis[it.code] = { ...a, sig, at: now };
         else if (prev[it.code]) analysis[it.code] = prev[it.code]; // 일시적 실패 시 기존 분석 유지
       } catch (e) { console.error(`    종합분석 실패(${it.code}):`, e.message); if (prev[it.code]) analysis[it.code] = prev[it.code]; }
     }
-    console.log(`  · 종합분석 대상 ${movers.length}건 — 신규 호출 ${calls}건, 다음 회차로 미룸 ${deferred}건`);
+    console.log(`  · 종합분석 대상 ${movers.length}건 — 신규 호출 ${calls}건, 다음 회차로 미룸 ${deferred + waited}건${waited ? `(한도 배분 대기 ${waited})` : ''}`);
     write('analysis.json', analysis);
   } catch (e) { console.error('  ✗ 종합분석 실패 — analysis.json 유지:', e.message); }
 
-  // AI 상태 한 줄 요약 — 키 없음/모델 전환/할당량 소진을 Actions 로그에서 바로 알 수 있게
+  // AI 상태 한 줄 요약 — 키 없음/모델 전환/할당량 소진/배분 대기를 Actions 로그에서 바로 알 수 있게
   const st = aiStatus();
+  const models = aiModels();
+  const used = totalUsed(budget, models);
+  const cap = Math.max(capacity(budget, models), used); // 리셋 직전 1시간 몰아쓰기로 예산을 넘겨도 '25/20'처럼 보이지 않게
   if (!st.enabled) console.log('  · AI: 키 없음(GEMINI_API_KEY 미설정) — 헤드라인 폴백');
-  else console.log(`  · AI: 모델 ${st.model ?? '-'} · 요청 ${st.calls}회 · 성공 ${st.ok}${st.failures ? ` · 실패 ${st.failures}` : ''}${st.disabled ? ` · 중지(${st.disabled})` : ''}`);
+  else {
+    const outs = Object.entries(budget.out).map(([m, w]) => `${m}:${w}`).join(', ');
+    console.log(`  · AI: 요청 ${st.calls}회 · 성공 ${st.ok}${st.failures ? ` · 실패 ${st.failures}` : ''}${st.skipped ? ` · 배분 대기 ${st.skipped}` : ''}`
+      + `${st.disabled ? ` · 중지(${st.disabled})` : ''} · 오늘(${budget.day} PT) ${used}/${cap}회${outs ? ` · 제외 ${outs}` : ''}`);
+  }
 
-  // AI 상태 기록(status.json) — 화면 하단 'AI 상태' 표시용. 이번 회차에 AI 호출이 없었으면(전부 재사용)
-  // 상태를 알 수 없으니 기존 파일을 둔다. 호출 횟수처럼 매번 바뀌는 값은 넣지 않는다(불필요한 커밋 방지).
-  let state = null;
+  // AI 상태 기록(status.json) — 화면 하단 'AI 상태' 표시 + 다음 회차가 이어받을 하루 예산(budget).
+  // 이번 회차에 AI를 부를 일이 없었으면(전부 재사용) 직전 상태를 이어 쓴다. 내용이 같으면 쓰지 않는다(불필요한 커밋 방지).
+  const prevState = prevStatus?.ai?.state;
+  let state;
   if (!st.enabled) state = 'off';
-  else if (st.disabled) state = st.disabled;                 // auth · quota · no-model
+  else if (st.disabled) state = st.disabled;                    // auth · quota · no-model (이번 회차 중지)
   else if (st.calls > 0) state = st.ok > 0 ? 'ok' : 'error';
-  else if (!readJson('status.json')) state = 'idle';          // 키는 있으나 아직 새로 분석할 게 없음(첫 기록)
-  if (state) {
-    try {
-      const model = st.enabled ? st.model : null;
-      write('status.json', { ai: { state, model, fallback: !!(model && st.primary && model !== st.primary) } });
-    } catch (e) { console.error('  ✗ AI 상태 기록 실패:', e.message); }
+  else if (models.length && models.every((m) => budget.out[m])) { // 오늘 쓸 모델이 없음 — 이번 회차는 부르지도 않음
+    state = Object.values(budget.out).every((w) => w === 'unavailable') ? 'no-model' : 'quota';
+  } else if (st.skipped > 0) state = 'wait';                     // 분석할 게 있지만 시간 배분상 다음으로 미룸
+  else state = !prevState || ['quota', 'no-model', 'wait', 'off'].includes(prevState) ? 'idle' : prevState; // 날이 바뀌어 한도가 풀렸거나 대기 해소
+  const status = st.enabled
+    ? { ai: { state, model: st.model ?? prevStatus?.ai?.model ?? null, used, cap }, budget: toStored(budget) }
+    : { ai: { state } };
+  if (JSON.stringify(status) !== JSON.stringify(prevStatus)) {
+    try { write('status.json', status); } catch (e) { console.error('  ✗ AI 상태 기록 실패:', e.message); }
   }
   console.log('[fetch] 완료');
   return { written, items: items.length, ai: st };

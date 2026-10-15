@@ -49,6 +49,15 @@ function fmtShares(v) { // 종목 순매매(주) → 만주
   if (a >= 10000) return s + (a / 10000).toFixed(a >= 1e6 ? 0 : 1) + '만주';
   return s + a.toLocaleString() + '주';
 }
+// AI 분석 시각 — 오늘이면 '14:05', 아니면 '10. 14. 14:05'. 값이 없거나 이상하면 빈 문자열(표시 생략).
+function fmtAiTime(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return '';
+  const d = new Date(ms);
+  const opt = { hour: '2-digit', minute: '2-digit', hour12: false };
+  return d.toDateString() === new Date().toDateString()
+    ? d.toLocaleTimeString('ko-KR', opt)
+    : d.toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', ...opt });
+}
 function cssId(code) { return String(code).replace(/[^a-zA-Z0-9]/g, '_'); }
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 // 외부(뉴스 RSS·AI 응답) 링크는 http/https만 허용 — javascript: 같은 실행 스킴이 섞여 들어와도 클릭으로 실행되지 않게.
@@ -291,7 +300,8 @@ function renderBriefs(briefs) {
       const items = ai.items.map((it) => `<div class="ai-item">
         ${extLink(it.link, it.title)}
         ${it.why ? `<span class="ai-why">— ${esc(it.why)}</span>` : ''}</div>`).join('');
-      reasonBlock = `<div class="brief-reason"><span class="ai-badge">🤖 AI 핵심</span> ${esc(ai.summary)}</div>
+      const at = fmtAiTime(b.reason.aiAt); // 한도 배분으로 이전 판단을 이어 쓸 수 있어 분석 시각을 함께 보여준다
+      reasonBlock = `<div class="brief-reason"><span class="ai-badge">🤖 AI 핵심</span> ${esc(ai.summary)}${at ? ` <span class="ai-at">${esc(at)} 분석</span>` : ''}</div>
         <div class="ai-items">${items}</div>`;
     } else {
       const heads = (b.reason && b.reason.headlines) || [];
@@ -446,7 +456,7 @@ function renderAnalysis(q, data) {
   const detail = `${data.summary ? `<p class="an-summary">${esc(data.summary)}</p>` : ''}`
     + `${factors ? `<ul class="an-factors">${factors}</ul>` : ''}`
     + `${data.outlook ? `<p class="an-outlook">📌 ${esc(data.outlook)}</p>` : ''}`
-    + `<p class="an-disc">AI가 뉴스·수급·추세를 종합한 추정입니다. 투자조언이 아닙니다.</p>`;
+    + `<p class="an-disc">AI가 뉴스·수급·추세를 종합한 추정입니다${fmtAiTime(data.at) ? `(${esc(fmtAiTime(data.at))} 분석)` : ''}. 투자조언이 아닙니다.</p>`;
   const wasOpen = state.openAnalysis.has(q.code); // 새로고침 전에 펼쳐 뒀다면 그대로 유지
   el.innerHTML = `<button class="an-toggle ${dirCls}" type="button" aria-expanded="${wasOpen}">
       <span class="an-badge">🧠 AI 종합분석</span>
@@ -562,20 +572,34 @@ function renderNews(q, data) {
 const AI_STATE = {
   ok: ['🟢', 'AI 정상'],
   idle: ['⚪', 'AI 대기 — 아직 새로 분석할 변동 없음'],
+  wait: ['⏳', 'AI 순서 대기 — 국내 장 시간 우선 배분'],
   off: ['⚪', 'AI 꺼짐 — 키 미설정'],
   quota: ['🟡', 'AI 일시 중지 — 무료 한도 소진(자동 재개)'],
   error: ['🟡', 'AI 응답 오류(일시적)'],
   auth: ['🔴', 'AI 오류 — 키 확인 필요'],
   'no-model': ['🔴', 'AI 오류 — 사용 가능한 모델 없음'],
 };
+const AI_OUT = { quota: '한도 소진', unavailable: '사용 불가' };
 async function loadStatus() {
   const el = $('#aiStatus');
   if (!el) return;
   try {
-    const ai = (await loadJson('status.json'))?.ai;
+    const st = await loadJson('status.json');
+    const ai = st?.ai;
     if (!ai || !AI_STATE[ai.state]) { el.hidden = true; return; }
     const [icon, label] = AI_STATE[ai.state];
-    el.textContent = `${icon} ${label}${ai.model ? ` · ${ai.model}${ai.fallback ? ' (대체 모델)' : ''}` : ''}`;
+    const count = Number.isFinite(ai.used) && Number.isFinite(ai.cap) && ai.cap > 0 ? ` · 무료 한도 ${ai.used}/${ai.cap}회` : '';
+    el.textContent = `${icon} ${label}${count}`;
+    // 자세한 내용은 마우스를 올리면 — 모델별 사용 횟수·제외된 모델·초기화 시각
+    const obj = (o) => (o && typeof o === 'object' ? Object.entries(o) : []);
+    const per = obj(st.budget?.used).map(([m, n]) => `${m} ${n}회`);
+    const outs = obj(st.budget?.out).map(([m, w]) => `${m}(${AI_OUT[w] || w})`);
+    el.title = [
+      ai.model ? `최근 사용 모델: ${ai.model}` : '',
+      per.length ? `모델별 사용: ${per.join(', ')}` : '',
+      outs.length ? `오늘 제외: ${outs.join(', ')}` : '',
+      count ? '무료 한도는 매일 오후 4시(겨울철 5시)에 초기화되며, 국내 장 시간에 우선 배분됩니다.' : '',
+    ].filter(Boolean).join('\n');
     el.hidden = false;
   } catch { el.hidden = true; }
 }

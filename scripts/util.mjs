@@ -70,3 +70,5 @@ export function analysisSig(q, news, flow) {
   const f = flow ? `${flow.date}:${flow.foreign}:${flow.institution}:${flow.individual}` : 'x';
   return `${Math.round(q.changePct ?? 0)}|${f}|${heads}`;
 }
+// 시그니처의 등락 구간(맨 앞 1% 버킷) — 종목·지수 시그니처 모두 이 형식으로 시작한다
+export const sigMove = (sig) => String(sig ?? '').split('|')[0];

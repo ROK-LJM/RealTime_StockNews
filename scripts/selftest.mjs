@@ -4,35 +4,50 @@
 // · 네트워크는 가짜 fetch로 대체한다. 등록되지 않은 주소로 나가려 하면 차단하고 테스트를 실패시킨다.
 // · 데이터는 OS 임시 폴더에만 쓰고 지운다 — 실제 docs/data, 외부 API, 저장소를 건드리지 않는다.
 // · API 키 자리에는 가짜 값만 넣는다(가짜 fetch만 받으므로 어디에도 전송되지 않음).
+// · AI 예산은 시각에 따라 달라지므로 파이프라인은 고정 시각(now)으로 돌린다.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 // ---------- 가짜 네트워크 ----------
-const NET = { routes: [], calls: [], blocked: [] };
-globalThis.fetch = async (url) => {
+const NET = { routes: [], calls: [], bodies: [], blocked: [] };
+globalThis.fetch = async (url, opts) => {
   const u = String(url);
   NET.calls.push(u);
+  NET.bodies.push(String(opts?.body ?? ''));
   for (const r of NET.routes) { const m = u.match(r.re); if (m) return r.fn(m, u); }
   NET.blocked.push(u);
   throw new Error(`[selftest] 등록되지 않은 외부 호출 차단: ${u}`);
 };
 const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { 'content-type': 'application/json' } });
 const text = (s, status = 200) => new Response(s, { status });
-const geminiCalls = (model) => NET.calls.filter((u) => u.includes('generativelanguage') && (!model || u.includes(`/models/${model}:`))).length;
+const isGemini = (u) => u.includes('generativelanguage');
+const geminiCalls = (model) => NET.calls.filter((u) => isGemini(u) && (!model || u.includes(`/models/${model}:`))).length;
+// 지수 브리핑용 AI 요청(프롬프트에 '뉴스 목록'이 들어감) 수
+const briefCalls = () => NET.calls.filter((u, i) => isGemini(u) && NET.bodies[i].includes('뉴스 목록')).length;
+
+// ---------- 고정 시각 (한도일 = 미 태평양시 날짜, 2026-10-14 PT는 KST 10/14 16:00 ~ 10/15 16:00) ----------
+const T = (s) => Date.parse(s);
+const MIN = 60 * 1000;
+const NOW_KR = T('2026-10-15T03:00:00Z');   // 목 12:00 KST — 국내 장중, 하루 예산의 약 56%가 풀린 시점
+const NOW_EVE = T('2026-10-14T08:00:00Z');  // 수 17:00 KST — 한도 리셋 직후, 아직 장 시간 전(배분 0)
+const NEXT_DAY = NOW_KR + 1440 * MIN;       // 다음 한도일 같은 시각
+const QDAY = '2026-10-14';
 
 // ---------- 픽스처(실제 응답 형태를 본뜬 최소 데이터) ----------
 const DAY = 86400;
-function yahooChart(sym) {
+// pct를 주면 그만큼 등락한 것으로(전일 종가 조정), 없으면 +0.1% 안팎
+function yahooChart(sym, pct) {
   const isKR = /\.K[SQ]$/.test(sym);
   const base = sym === '^VIX' ? 18 : sym === 'KRW=X' ? 1390 : sym === 'JPYKRW=X' ? 9.3 : isKR ? 70000 : 200;
   const now = Math.floor(Date.now() / 1000);
   const ts = Array.from({ length: 130 }, (_, i) => now - (130 - i) * DAY);
   const closes = ts.map((_, i) => +(base * (1 + 0.001 * i)).toFixed(2));
+  const prevClose = pct == null ? closes.at(-2) : +(closes.at(-1) / (1 + pct / 100)).toFixed(4);
   return { chart: { result: [{
     meta: {
-      regularMarketPrice: closes.at(-1), chartPreviousClose: closes.at(-2), currency: isKR ? 'KRW' : 'USD', shortName: sym,
+      regularMarketPrice: closes.at(-1), chartPreviousClose: prevClose, currency: isKR ? 'KRW' : 'USD', shortName: sym,
       regularMarketDayHigh: base * 1.2, regularMarketDayLow: base * 0.9, regularMarketOpen: base, regularMarketVolume: 1000,
       regularMarketTime: now, currentTradingPeriod: { regular: { start: now - 3600, end: now + 3600 } }, instrumentType: 'EQUITY',
     },
@@ -45,34 +60,46 @@ const naverStock = (code, pct) => ({ datas: [{
   openPrice: '69,000', highPrice: '71,000', lowPrice: '68,000', accumulatedTradingVolume: '1,234,567',
   marketStatus: 'OPEN', localTradedAt: new Date().toISOString(),
 }] });
-const naverIndex = { datas: [{ closePriceRaw: '2,600.00', compareToPreviousClosePriceRaw: '-31.5', fluctuationsRatioRaw: '-1.20', marketStatus: 'OPEN' }] };
+const naverIndex = (pct) => ({ datas: [{ closePriceRaw: '2,600.00', compareToPreviousClosePriceRaw: (2600 * pct / 100).toFixed(1), fluctuationsRatioRaw: pct.toFixed(2), marketStatus: 'OPEN' }] });
 const trendStock = [{ bizdate: '20261015', foreignerPureBuyQuant: '-1,000', organPureBuyQuant: '500', individualPureBuyQuant: '500', foreignerHoldRatio: '50.00%' }];
 const trendIndex = { bizdate: '20261015', personalValue: '+1,000', foreignValue: '-800', institutionalValue: '-200' };
-function rss() {
+// tag를 바꾸면 헤드라인이 달라진다(= 분석 입력이 바뀐 상황)
+function rss(tag = '') {
   const pub = new Date(Date.now() - 3600e3).toUTCString(); // 최근 2일 필터 통과
-  const items = [1, 2, 3].map((i) => `<item><title>테스트 뉴스 ${i} 급등 - 테스트일보</title><link>https://news.example.com/a${i}</link><pubDate>${pub}</pubDate><source url="https://news.example.com">테스트일보</source></item>`).join('');
+  const items = [1, 2, 3].map((i) => `<item><title>${tag ? `${tag} ` : ''}테스트 뉴스 ${i} 급등 - 테스트일보</title><link>https://news.example.com/a${i}</link><pubDate>${pub}</pubDate><source url="https://news.example.com">테스트일보</source></item>`).join('');
   return `<?xml version="1.0"?><rss><channel>${items}</channel></rss>`;
 }
 // 지수 브리핑(summary·items)과 종목 분석(headline·factors) 양쪽 형식을 모두 만족하는 응답
 const geminiOk = { candidates: [{ content: { parts: [{ text: JSON.stringify({
   summary: '테스트 요약', items: [{ index: 1, why: '핵심 재료' }], headline: '테스트 진단', factors: ['요인1', '요인2'], outlook: '관전 포인트',
 }) }] } }] };
+// 실제 무료 한도 초과 응답 형태 — 일일 한도는 quotaId에 PerDay, 분당 한도는 PerMinute가 들어간다
+const quota429 = (per) => json({ error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'You exceeded your current quota.',
+  details: [{ '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaId: `GenerateRequestsPer${per}PerProjectPerModel-FreeTier` }] }] } }, 429);
 
-function routes({ krPct = { '005930': 4.2, '000660': 0.3 }, yahoo = (m) => json(yahooChart(decodeURIComponent(m[1]))), gemini = () => json(geminiOk) } = {}) {
+function routes({ krPct = { '005930': 4.2, '000660': 0.3 }, usPct = {}, idxPct = -1.2, newsTag = '', news = () => text(rss(newsTag)),
+  yahoo = (m) => { const sym = decodeURIComponent(m[1]); return json(yahooChart(sym, usPct[sym])); }, gemini = () => json(geminiOk) } = {}) {
   return [
     { re: /polling\.finance\.naver\.com\/api\/realtime\/domestic\/stock\/(\d{6})/, fn: (m) => json(naverStock(m[1], krPct[m[1]] ?? 0.5)) },
-    { re: /polling\.finance\.naver\.com\/api\/realtime\/domestic\/index\/(KOSPI|KOSDAQ)/, fn: () => json(naverIndex) },
+    { re: /polling\.finance\.naver\.com\/api\/realtime\/domestic\/index\/(KOSPI|KOSDAQ)/, fn: () => json(naverIndex(idxPct)) },
     { re: /m\.stock\.naver\.com\/api\/stock\/(\d{6})\/trend/, fn: () => json(trendStock) },
     { re: /m\.stock\.naver\.com\/api\/index\/(KOSPI|KOSDAQ)\/trend/, fn: () => json(trendIndex) },
     { re: /query1\.finance\.yahoo\.com\/v8\/finance\/chart\/([^?]+)/, fn: yahoo },
-    { re: /news\.google\.com\/rss\/search/, fn: () => text(rss()) },
+    { re: /news\.google\.com\/rss\/search/, fn: news },
     { re: /generativelanguage\.googleapis\.com\/v1beta\/models\/([^:]+):generateContent/, fn: (m) => gemini(decodeURIComponent(m[1])) },
   ];
 }
+// AI를 부를 일이 전혀 없는 회차 — 헤드라인 0건(지수 AI 없음) + 급등락 종목 없음
+const CALM = { krPct: { '005930': 0.4, '000660': 0.3 }, news: () => text('<?xml version="1.0"?><rss><channel></channel></rss>') };
 
 // ---------- 임시 작업공간 ----------
 const FILES = ['analysis.json', 'history.json', 'investors.json', 'market.json', 'news.json', 'quotes.json', 'status.json'];
 const ITEMS = [{ code: '005930', market: 'KR', name: '삼성전자' }, { code: '000660', market: 'KR', name: 'SK하이닉스' }, { code: 'AAPL', market: 'US', name: '애플' }];
+// 시드용 AI 상태 — NOW_KR과 같은 한도일, 파이프라인이 쓰는 것과 같은 형식(같은 내용이면 다시 쓰지 않는지 확인용)
+const statusSeed = (used = { 'model-primary': 1 }, state = 'ok') => ({
+  ai: { state, model: 'model-primary', used: Object.values(used).reduce((a, n) => a + n, 0), cap: 40 },
+  budget: { day: QDAY, used, out: {} },
+});
 const workspaces = [];
 function workspace(items = ITEMS, seed = false) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'stock-selftest-'));
@@ -80,12 +107,13 @@ function workspace(items = ITEMS, seed = false) {
   fs.mkdirSync(path.join(root, 'config'), { recursive: true });
   fs.mkdirSync(path.join(root, 'docs', 'data'), { recursive: true });
   fs.writeFileSync(path.join(root, 'config', 'watchlist.json'), typeof items === 'string' ? items : JSON.stringify({ items }));
-  if (seed) for (const f of FILES) fs.writeFileSync(file(root, f), JSON.stringify({ seed: f }));
+  if (seed) for (const f of FILES) fs.writeFileSync(file(root, f), JSON.stringify(f === 'status.json' ? statusSeed() : { seed: f }));
   return root;
 }
 const file = (root, f) => path.join(root, 'docs', 'data', f);
 const read = (root, f) => JSON.parse(fs.readFileSync(file(root, f), 'utf8'));
 const raw = (root, f) => fs.readFileSync(file(root, f), 'utf8');
+const writeData = (root, f, obj) => fs.writeFileSync(file(root, f), JSON.stringify(obj));
 
 // 파이프라인 로그는 모아 두고(실패 시 원인 확인용) 화면에는 결과만 보여준다
 async function quiet(fn) {
@@ -94,9 +122,9 @@ async function quiet(fn) {
   console.log = console.warn = console.error = (...a) => lines.push(a.map(String).join(' '));
   try { return { value: await fn(), lines }; } finally { Object.assign(console, orig); }
 }
-async function pipeline(root, routeOpts) {
-  NET.routes = routes(routeOpts); NET.calls = []; NET.blocked = [];
-  return quiet(() => run({ root }));
+async function pipeline(root, routeOpts, now = NOW_KR) {
+  NET.routes = routes(routeOpts); NET.calls = []; NET.bodies = []; NET.blocked = [];
+  return quiet(() => run({ root, now }));
 }
 
 // ---------- 테스트 러너 ----------
@@ -110,9 +138,12 @@ async function test(name, fn) {
 process.env.GEMINI_API_KEY = 'selftest-dummy-key';
 process.env.GEMINI_MODEL = 'model-primary';
 process.env.GEMINI_FALLBACK_MODELS = 'model-fallback';
+delete process.env.AI_DAILY_BUDGET; // 모델당 기본 예산(20회) 기준으로 검증
 const util = await import('./util.mjs');
+const bud = await import('./aibudget.mjs');
 const src = await import('./sources.mjs');
 const { run } = await import('./fetch.mjs');
+src.retryTiming.baseMs = 1; // 재시도 대기를 실제로 기다리지 않음
 
 console.log('[selftest] 오프라인 자체 테스트 — 외부 접속 없음\n');
 
@@ -170,8 +201,74 @@ await test('감성 태깅: 한글 부분일치 · 영문 단어경계(mission≠
   assert.equal(src.tagSentiment('NASA mission update').tone, 'neutral');
 });
 
+// ===== AI 예산(aibudget) 단위 =====
+await test('한도일: 미 태평양시 자정 리셋(서머타임 07:00Z · 겨울 08:00Z) · 전환일 25/23시간', () => {
+  assert.equal(bud.quotaDay(T('2026-10-15T06:59:00Z')), '2026-10-14');
+  assert.equal(bud.quotaDay(T('2026-10-15T07:00:00Z')), '2026-10-15');
+  assert.equal(bud.quotaDay(T('2026-12-15T07:59:00Z')), '2026-12-14');
+  assert.equal(bud.quotaDay(T('2026-12-15T08:00:00Z')), '2026-12-15');
+  for (const at of [NOW_KR, T('2026-10-15T03:17:30Z')]) { // 정각이 아닌 시각도 경계는 정확히 리셋 시각
+    const r = bud.quotaDayRange(at);
+    assert.deepEqual([r.start, r.end], [T('2026-10-14T07:00:00Z'), T('2026-10-15T07:00:00Z')]);
+  }
+  const fall = bud.quotaDayRange(T('2026-11-01T12:00:00Z'));
+  assert.equal((fall.end - fall.start) / 3600e3, 25);
+  const spring = bud.quotaDayRange(T('2026-03-08T12:00:00Z'));
+  assert.equal((spring.end - spring.start) / 3600e3, 23);
+});
+await test('장 시간대·시그니처 등락 구간: 시장별 개장 판정 · 구간만 비교', () => {
+  assert.equal(bud.inSession('KR', NOW_KR), true);
+  assert.equal(bud.inSession('US', NOW_KR), false);
+  assert.equal(bud.inSession('US', T('2026-10-14T15:00:00Z')), true);   // 수 11:00 EDT
+  assert.equal(bud.inSession('KR', T('2026-10-14T15:00:00Z')), false);  // 목 00:00 KST
+  assert.equal(util.sigMove('4|x|뉴스A'), '4');
+  assert.equal(util.sigMove(null), '');
+});
+await test('장 시간 가중치: 국내장 3 · 미국장 1 · 장외·주말 0 (경계 포함)', () => {
+  assert.equal(bud.marketWeight(T('2026-10-15T00:00:00Z')), 3);  // 목 09:00 KST 개장
+  assert.equal(bud.marketWeight(T('2026-10-14T23:59:00Z')), 0);  // 08:59 KST
+  assert.equal(bud.marketWeight(T('2026-10-15T06:59:00Z')), 3);  // 15:59 KST
+  assert.equal(bud.marketWeight(T('2026-10-15T07:00:00Z')), 0);  // 16:00 KST
+  assert.equal(bud.marketWeight(T('2026-10-14T13:30:00Z')), 1);  // 수 09:30 EDT 개장
+  assert.equal(bud.marketWeight(T('2026-10-14T13:29:00Z')), 0);
+  assert.equal(bud.marketWeight(T('2026-10-17T03:00:00Z')), 0);  // 토 12:00 KST
+});
+await test('예산 배분: 장 시간 비례로 풀림 · 덜 쓴 만큼 이월 · 리셋 1시간 전·주말', () => {
+  const models = ['a', 'b'];
+  const at = (ms, used = {}) => ({ ...bud.startBudget(null, ms), used });
+  assert.equal(bud.allowance(at(NOW_EVE), models), 0, '장 시간 전에는 0');
+  assert.equal(bud.allowance(at(NOW_KR), models), 22, '40 × 0.5636');
+  assert.equal(bud.allowance(at(NOW_KR, { a: 12, b: 10 }), models), 0);
+  assert.equal(bud.allowance(at(NOW_KR, { a: 6, b: 4 }), models), 12, '덜 쓴 만큼 이월');
+  assert.equal(bud.allowance(at(T('2026-10-15T06:30:00Z'), { a: 25, b: 20 }), models), Infinity, '리셋 1시간 전');
+  assert.equal(bud.allowance(at(T('2026-10-18T03:00:00Z')), models), 0, '일요일 낮(장 없음)');
+  assert.equal(bud.allowance(at(T('2026-10-18T06:30:00Z')), models), Infinity, '일요일도 리셋 직전엔 남은 한도 사용');
+});
+await test('모델 배분: 덜 쓴 모델부터 · 빠진 모델은 쓴 만큼만 예산 · 전부 빠지면 0', () => {
+  const models = ['a', 'b'];
+  assert.equal(bud.pickModel({ used: { a: 2, b: 1 }, out: {} }, models), 'b');
+  assert.equal(bud.pickModel({ used: { a: 1, b: 1 }, out: {} }, models), 'a', '같으면 주 모델');
+  assert.equal(bud.pickModel({ used: { a: 0, b: 5 }, out: { a: 'quota' } }, models), 'b');
+  assert.equal(bud.pickModel({ used: {}, out: { a: 'quota', b: 'unavailable' } }, models), null);
+  const b = { ...bud.startBudget(null, NOW_KR), used: { a: 15, old: 9 }, out: { a: 'quota' } };
+  assert.equal(bud.capacity(b, models), 35);
+  assert.equal(bud.totalUsed(b, models), 15, '설정에서 뺀 모델(old)은 세지 않음');
+  assert.equal(bud.allowance({ ...b, out: { a: 'quota', b: 'quota' } }, models), 0);
+});
+await test('예산 기록: 한도일이 바뀌면 새로 시작 · 손상된 항목은 버림', () => {
+  const b = bud.startBudget({ day: QDAY, used: { a: 3, b: 'x', c: -1, d: 1.5 }, out: { a: 'quota', b: '', c: 5 } }, NOW_KR);
+  assert.deepEqual([b.used, b.out, b.rolled], [{ a: 3 }, { a: 'quota' }, false]);
+  const next = bud.startBudget({ day: QDAY, used: { a: 3 }, out: { a: 'quota' } }, NEXT_DAY);
+  assert.deepEqual([next.day, next.used, next.out, next.rolled], ['2026-10-15', {}, {}, true]);
+  for (const bad of [null, 'x', [], { day: QDAY, used: [1], out: 'q' }]) {
+    const z = bud.startBudget(bad, NOW_KR);
+    assert.deepEqual([z.used, z.out], [{}, {}]);
+  }
+  assert.deepEqual(bud.toStored(b), { day: QDAY, used: { a: 3 }, out: { a: 'quota' } });
+});
+
 // ===== 파이프라인(가짜 네트워크) =====
-await test('정상: 7개 파일 생성 · 급등락만 AI 분석 · AI 상태 정상 · 외부 차단 0건', async () => {
+await test('정상: 7개 파일 생성 · 급등락만 AI 분석 · 두 모델 고루 사용 · 분석 시각 기록 · 외부 차단 0건', async () => {
   const root = workspace();
   const { value } = await pipeline(root);
   assert.deepEqual([...value.written].sort(), FILES);
@@ -181,33 +278,39 @@ await test('정상: 7개 파일 생성 · 급등락만 AI 분석 · AI 상태 �
   const a = read(root, 'analysis.json');
   assert.ok(a['005930']?.headline, '+4.2% 종목은 분석');
   assert.equal(a['000660'], undefined, '+0.3% 종목은 분석 안 함');
-  assert.equal(a['005930'].model, 'model-primary');
-  assert.deepEqual(read(root, 'status.json'), { ai: { state: 'ok', model: 'model-primary', fallback: false } });
+  assert.equal(a['005930'].at, NOW_KR);
   const m = read(root, 'market.json');
   assert.equal(m.briefs.length, 2);
-  assert.ok(m.briefs[0].reason.ai, '지수 브리핑 AI');
+  // 호출 순서: 코스피 브리핑 → 코스닥 브리핑 → 종목 분석. 덜 쓴 모델부터 → 주·대체·주
+  assert.deepEqual([m.briefs[0].reason.ai.model, m.briefs[1].reason.ai.model, a['005930'].model], ['model-primary', 'model-fallback', 'model-primary']);
+  assert.equal(m.briefs[0].reason.aiAt, NOW_KR);
+  assert.deepEqual(read(root, 'status.json'), {
+    ai: { state: 'ok', model: 'model-primary', used: 3, cap: 40 },
+    budget: { day: QDAY, used: { 'model-primary': 2, 'model-fallback': 1 }, out: {} },
+  });
   assert.ok(read(root, 'history.json').AAPL.closes.length > 100);
   assert.equal(read(root, 'investors.json').AAPL, undefined, '해외 종목 수급 없음');
   assert.equal(NET.blocked.length, 0, `차단된 호출: ${NET.blocked.join(', ')}`);
   assert.deepEqual(fs.readdirSync(path.join(root, 'docs', 'data')).filter((f) => f.endsWith('.tmp')), []);
 });
-await test('시그니처 재사용: 입력이 같으면 두 번째 회차 AI 호출 0회', async () => {
+await test('시그니처 재사용: 입력이 같으면 두 번째 회차 AI 호출 0회 · 상태 파일 그대로', async () => {
   const root = workspace();
   await pipeline(root);
   assert.ok(geminiCalls() > 0);
   const before = raw(root, 'analysis.json');
-  await pipeline(root);
   const statusBefore = raw(root, 'status.json');
+  const { value } = await pipeline(root, {}, NOW_KR + 5 * MIN);
   assert.equal(geminiCalls(), 0);
   assert.equal(raw(root, 'analysis.json'), before);
   assert.equal(raw(root, 'status.json'), statusBefore, 'AI 호출이 없던 회차는 상태 파일을 건드리지 않음');
+  assert.ok(!value.written.includes('status.json'));
 });
 await test('전부 실패: 기존 데이터 파일 모두 그대로 · 예외 없이 종료', async () => {
   const root = workspace(ITEMS, true);
   const seeds = Object.fromEntries(FILES.map((f) => [f, raw(root, f)]));
   NET.routes = [{ re: /./, fn: () => { throw new TypeError('fetch failed'); } }];
-  NET.calls = []; NET.blocked = [];
-  const { value } = await quiet(() => run({ root }));
+  NET.calls = []; NET.bodies = []; NET.blocked = [];
+  const { value } = await quiet(() => run({ root, now: NOW_KR }));
   assert.deepEqual(value.written, []);
   for (const f of FILES) assert.equal(raw(root, f), seeds[f], `${f} 보존`);
 });
@@ -221,7 +324,7 @@ await test('부분 실패: 야후 장애 → 국내 시세는 갱신, 과거시�
   assert.equal(raw(root, 'history.json'), histSeed, '과거시세는 기존 유지');
   assert.equal(read(root, 'market.json').indices.length, 2, '국내 지수만');
 });
-await test('AI 대체 모델: 주 모델 404 → 대체 모델로 분석, 주 모델은 1회만 시도', async () => {
+await test('AI 모델 사용 불가(404): 대체 모델로 분석 · 그날은 다시 시도 안 함 · 다음 한도일에 재확인', async () => {
   const root = workspace();
   const gemini = (model) => (model === 'model-primary'
     ? json({ error: { code: 404, message: 'models/model-primary is not found' } }, 404)
@@ -230,7 +333,15 @@ await test('AI 대체 모델: 주 모델 404 → 대체 모델로 분석, 주 �
   assert.equal(read(root, 'analysis.json')['005930'].model, 'model-fallback');
   assert.equal(geminiCalls('model-primary'), 1);
   assert.ok(lines.some((l) => l.includes('모델 사용 불가(model-primary)')));
-  assert.deepEqual(read(root, 'status.json').ai, { state: 'ok', model: 'model-fallback', fallback: true });
+  assert.deepEqual(read(root, 'status.json'), {
+    ai: { state: 'ok', model: 'model-fallback', used: 3, cap: 20 },
+    budget: { day: QDAY, used: { 'model-fallback': 3 }, out: { 'model-primary': 'unavailable' } },
+  });
+  await pipeline(root, { gemini, newsTag: 'b' }, NOW_KR + 10 * MIN); // 같은 날, 입력 바뀜 → 새 분석 필요
+  assert.ok(geminiCalls('model-fallback') > 0);
+  assert.equal(geminiCalls('model-primary'), 0, '같은 한도일엔 주 모델을 다시 부르지 않음');
+  await pipeline(root, { gemini, newsTag: 'c' }, NEXT_DAY);
+  assert.equal(geminiCalls('model-primary'), 1, '다음 한도일엔 한 번 다시 확인');
 });
 await test('AI 키 오류(403): 첫 호출 뒤 회차 내 AI 중지', async () => {
   const root = workspace();
@@ -240,30 +351,146 @@ await test('AI 키 오류(403): 첫 호출 뒤 회차 내 AI 중지', async () =
   assert.equal(read(root, 'status.json').ai.state, 'auth');
   assert.ok(read(root, 'quotes.json').quotes.every((x) => x.ok), 'AI 장애가 시세 갱신을 막지 않음');
 });
-await test('AI 할당량 소진(429): 재시도 2회 후 회차 내 중지', async () => {
+await test('AI 분당 한도(429): 모델마다 재시도 2회 후 회차 내 중지 · 하루 제외는 안 함', async () => {
   const root = workspace();
-  const { value } = await pipeline(root, { gemini: () => json({ error: { code: 429 } }, 429) });
-  assert.equal(geminiCalls(), 3);
+  const { value } = await pipeline(root, { gemini: () => quota429('Minute') });
+  assert.deepEqual([geminiCalls('model-primary'), geminiCalls('model-fallback')], [3, 3]);
   assert.equal(value.ai.disabled, 'quota');
+  const s = read(root, 'status.json');
+  assert.equal(s.ai.state, 'quota');
+  assert.deepEqual(s.budget.out, {}, '분당 한도는 기록하지 않음');
+  await pipeline(root, {}, NOW_KR + 5 * MIN);
+  assert.ok(geminiCalls('model-primary') > 0, '다음 회차엔 바로 다시 사용');
+  assert.equal(read(root, 'status.json').ai.state, 'ok');
+});
+await test('AI 일일 한도(429 PerDay): 재시도 없이 대체 모델로 · 그날은 다시 시도 안 함', async () => {
+  const root = workspace();
+  const gemini = (model) => (model === 'model-primary' ? quota429('Day') : json(geminiOk));
+  await pipeline(root, { gemini });
+  assert.equal(geminiCalls('model-primary'), 1, '일일 한도는 재시도하지 않음');
+  assert.equal(read(root, 'analysis.json')['005930'].model, 'model-fallback');
+  const s = read(root, 'status.json');
+  assert.deepEqual([s.ai.state, s.budget.out, s.ai.cap], ['ok', { 'model-primary': 'quota' }, 20], '빠진 모델은 쓴 만큼(0)만 예산에 남음');
+  await pipeline(root, { gemini, newsTag: 'b' }, NOW_KR + 10 * MIN);
+  assert.equal(geminiCalls('model-primary'), 0);
+});
+await test('모든 모델 일일 한도 소진: 호출 없이 한도 소진 상태 유지 → 다음 한도일에 자동 재개', async () => {
+  const root = workspace();
+  await pipeline(root, { gemini: () => quota429('Day') });
+  assert.deepEqual([geminiCalls('model-primary'), geminiCalls('model-fallback')], [1, 1]);
   assert.equal(read(root, 'status.json').ai.state, 'quota');
+  await pipeline(root, { newsTag: 'b' }, NOW_KR + 10 * MIN);
+  assert.equal(geminiCalls(), 0, '같은 한도일엔 부르지 않음');
+  assert.equal(read(root, 'status.json').ai.state, 'quota');
+  await pipeline(root, { newsTag: 'b' }, NEXT_DAY);
+  assert.ok(geminiCalls() > 0);
+  const s = read(root, 'status.json');
+  assert.deepEqual([s.ai.state, s.budget.day, s.budget.out], ['ok', '2026-10-15', {}]);
 });
 await test('지수 브리핑: 이전 AI 실패(null)는 재사용하지 않고 한도 회복 후 다시 생성', async () => {
   const root = workspace();
-  await pipeline(root, { gemini: () => json({ error: { code: 429 } }, 429) }); // 한도 소진 → 브리핑 AI 실패
+  await pipeline(root, { gemini: () => quota429('Day') });   // 한도 소진 → 브리핑 AI 실패
   assert.equal(read(root, 'market.json').briefs[0].reason.ai, null);
-  await pipeline(root);                                                         // 한도 회복, 입력은 그대로
+  await pipeline(root, {}, NEXT_DAY);                           // 한도 회복, 입력은 그대로
   assert.ok(read(root, 'market.json').briefs[0].reason.ai, '실패했던 브리핑 AI를 다시 생성해야 함');
 });
-await test('AI 상태: 호출할 일 없는 첫 회차는 대기(idle) 기록, 이후 호출 없으면 유지', async () => {
+await test('지수 브리핑: 90분 안엔 헤드라인이 바뀌어도 재사용 · 지나면 갱신 · 방향 바뀌면 즉시 · 실패 시 이전 판단 유지', async () => {
   const root = workspace();
-  const quietNews = () => text('<?xml version="1.0"?><rss><channel></channel></rss>'); // 헤드라인 0건 → 지수 AI 호출 없음
-  NET.routes = routes({ krPct: { '005930': 0.4, '000660': 0.3 } }).map((r) => (String(r.re).includes('news') ? { ...r, fn: quietNews } : r));
-  NET.calls = []; NET.blocked = [];
-  await quiet(() => run({ root }));
+  const brief = () => read(root, 'market.json').briefs[0].reason;
+  await pipeline(root, { newsTag: 'a' });
+  assert.equal(briefCalls(), 2);
+  await pipeline(root, { newsTag: 'b' }, NOW_KR + 30 * MIN);
+  assert.equal(briefCalls(), 0, '30분 뒤: 헤드라인만 바뀜 → 재사용');
+  assert.ok(brief().headlines[0].title.startsWith('b '), '헤드라인은 최신으로');
+  assert.equal(brief().aiAt, NOW_KR);
+  await pipeline(root, { newsTag: 'b' }, NOW_KR + 100 * MIN);
+  assert.equal(briefCalls(), 2, '90분이 지나면 갱신 — 직전 회차와 입력이 같아도 판단 당시(a)와 다르면');
+  assert.equal(brief().aiAt, NOW_KR + 100 * MIN);
+  await pipeline(root, { newsTag: 'b', idxPct: 1.5 }, NOW_KR + 110 * MIN);
+  assert.equal(briefCalls(), 2, '급락→급등으로 방향이 바뀌면 바로 갱신');
+  assert.equal(brief().dir, 'up');
+  const kept = brief().ai;
+  await pipeline(root, { newsTag: 'd', idxPct: 1.5, gemini: () => json({ error: { code: 500 } }, 500) }, NOW_KR + 210 * MIN);
+  assert.ok(briefCalls() > 0, '갱신 시도');
+  assert.deepEqual(brief().ai, kept, '실패하면 이전 판단 유지');
+  assert.equal(brief().aiAt, NOW_KR + 110 * MIN);
+  await pipeline(root, { newsTag: 'd', idxPct: 1.5 }, NOW_KR + 215 * MIN);
+  assert.equal(briefCalls(), 2, '실패했던 갱신은 입력이 그대로여도 다음 회차에 다시 시도');
+  assert.equal(brief().aiAt, NOW_KR + 215 * MIN);
+  await pipeline(root, { newsTag: 'd', idxPct: -0.5, gemini: () => json({ error: { code: 500 } }, 500) }, NOW_KR + 220 * MIN);
+  assert.equal(brief().ai, null, '방향이 바뀌었는데 실패하면 이전(다른 방향) 판단은 버림');
+});
+await test('장 밖 재사용: 마감한 시장의 지수·종목은 뉴스만 바뀌면 다시 분석 안 함 · 한도는 장중인 시장에', async () => {
+  const root = workspace();
+  const US_OPEN = T('2026-10-15T15:00:00Z');   // 금 00:00 KST · 목 11:00 EDT — 국내 마감 후, 미국 장중(새 한도일)
+  const KR_NEXT = T('2026-10-16T01:00:00Z');   // 금 10:00 KST — 국내 장중, 미국 마감 후
+  await pipeline(root, { newsTag: 'a' });                                        // 국내 장중: 브리핑 2 + 005930
+  const kr = read(root, 'analysis.json')['005930'];
+  const kospi = read(root, 'market.json').briefs[0].reason;
+  await pipeline(root, { newsTag: 'b', usPct: { AAPL: 3 } }, US_OPEN);
+  assert.equal(briefCalls(), 0, '국내 마감 후: 지수 브리핑 재사용');
+  assert.equal(geminiCalls(), 1, '한도는 미국 장중 종목(AAPL)에만');
+  let a = read(root, 'analysis.json');
+  assert.deepEqual(a['005930'], kr, '국내 종목 분석 그대로');
+  assert.equal(a.AAPL.at, US_OPEN);
+  assert.deepEqual(read(root, 'market.json').briefs[0].reason.ai, kospi.ai);
+  await pipeline(root, { newsTag: 'c', usPct: { AAPL: 3 } }, KR_NEXT);
+  a = read(root, 'analysis.json');
+  assert.equal(a.AAPL.at, US_OPEN, '미국 마감 후: AAPL 분석 그대로');
+  assert.equal(a['005930'].at, KR_NEXT, '국내 장중: 새 뉴스로 다시 분석');
+  assert.equal(briefCalls(), 2);
+  await pipeline(root, { newsTag: 'd', usPct: { AAPL: -3 } }, KR_NEXT + 5 * MIN);
+  assert.ok(read(root, 'analysis.json').AAPL.at > US_OPEN, '장 밖이어도 등락 구간이 바뀌면 다시 분석');
+});
+await test('장 밖 재사용: 지수도 판단 당시와 등락 구간이 달라졌으면(마감 직전 급변) 마감 후 갱신', async () => {
+  const root = workspace();
+  await pipeline(root, { idxPct: -1.2 });                                        // 장중 -1.2%에 판단
+  await pipeline(root, { idxPct: -2.6 }, T('2026-10-15T15:00:00Z'));             // 마감 후 확인해 보니 -2.6%
+  assert.equal(briefCalls(), 2);
+  assert.equal(read(root, 'market.json').briefs[0].reason.aiSig.split('|')[0], '-3');
+});
+await test('시간 배분: 리셋 직후(장 시간 전)엔 순서 대기 → 국내 장중에 분석', async () => {
+  const root = workspace();
+  const { lines } = await pipeline(root, {}, NOW_EVE);
   assert.equal(geminiCalls(), 0);
-  assert.deepEqual(read(root, 'status.json').ai, { state: 'idle', model: 'model-primary', fallback: false });
+  assert.equal(read(root, 'status.json').ai.state, 'wait');
+  assert.ok(lines.some((l) => l.includes('한도 배분 대기 1')), '종목 분석도 배분 대기로 미룸');
+  assert.equal(read(root, 'analysis.json')['005930'], undefined);
+  assert.equal(read(root, 'market.json').briefs[0].reason.ai, null);
+  await pipeline(root, {}, NOW_KR);
+  assert.ok(geminiCalls() > 0);
+  assert.equal(read(root, 'status.json').ai.state, 'ok');
+  assert.ok(read(root, 'analysis.json')['005930']?.headline);
+});
+await test('시간 배분: 몫을 다 쓰면 대기, 리셋 1시간 전엔 남은 한도 사용', async () => {
+  const root = workspace();
+  writeData(root, 'status.json', statusSeed({ 'model-primary': 20, 'model-fallback': 19 }));
+  await pipeline(root, {}, T('2026-10-15T05:00:00Z'));   // 14:00 KST — 몫 31회 < 사용 39회
+  assert.equal(geminiCalls(), 0);
+  assert.equal(read(root, 'status.json').ai.state, 'wait');
+  await pipeline(root, {}, T('2026-10-15T06:30:00Z'));   // 15:30 KST — 리셋 30분 전
+  assert.equal(geminiCalls(), 3);
+  const s = read(root, 'status.json');
+  assert.deepEqual([s.ai.state, s.ai.used, s.ai.cap], ['ok', 42, 42]);
+});
+await test('AI 상태: 호출할 일 없는 첫 회차는 대기(idle) 기록, 이후 호출 있으면 정상', async () => {
+  const root = workspace();
+  await pipeline(root, CALM);
+  assert.equal(geminiCalls(), 0);
+  assert.deepEqual(read(root, 'status.json').ai, { state: 'idle', model: null, used: 0, cap: 40 });
   await pipeline(root);                       // 이번엔 급등 종목·헤드라인 있음 → 실제 호출 → 정상
   assert.equal(read(root, 'status.json').ai.state, 'ok');
+});
+await test('AI 상태: 한도 소진 표시는 그 한도일 동안 유지 · 다음 한도일엔 분석할 게 없어도 풀림', async () => {
+  const root = workspace();
+  writeData(root, 'status.json', { ai: { state: 'quota', model: 'model-primary', used: 20, cap: 20 },
+    budget: { day: QDAY, used: { 'model-primary': 20 }, out: { 'model-primary': 'quota', 'model-fallback': 'quota' } } });
+  await pipeline(root, CALM, NOW_KR + 5 * MIN);
+  assert.equal(read(root, 'status.json').ai.state, 'quota');
+  await pipeline(root, CALM, NEXT_DAY);
+  assert.equal(geminiCalls(), 0);
+  const s = read(root, 'status.json');
+  assert.deepEqual([s.ai.state, s.budget.day, s.budget.out], ['idle', '2026-10-15', {}]);
 });
 await test('AI 키 없음: 호출 0회 · 나머지는 정상 갱신', async () => {
   const saved = process.env.GEMINI_API_KEY;
@@ -275,7 +502,7 @@ await test('AI 키 없음: 호출 0회 · 나머지는 정상 갱신', async () 
     assert.equal(value.ai.enabled, false);
     assert.ok(value.written.includes('quotes.json'));
     assert.ok(lines.some((l) => l.includes('키 없음')));
-    assert.deepEqual(read(root, 'status.json').ai, { state: 'off', model: null, fallback: false });
+    assert.deepEqual(read(root, 'status.json'), { ai: { state: 'off' } });
   } finally { process.env.GEMINI_API_KEY = saved; }
 });
 await test('잘못된 설정: 유효 종목 0개·깨진 JSON → 아무것도 쓰지 않음', async () => {

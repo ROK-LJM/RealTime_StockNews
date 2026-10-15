@@ -1,12 +1,13 @@
-// cloud/lib/sources.js
-// 클라우드(서버리스)용 데이터 계층 — 전 세계 어디서나 동작하도록 야후 파이낸스 + 구글뉴스만 사용.
-// 한국 종목은 야후의 .KS(코스피)/.KQ(코스닥) 심볼로 조회한다. 외부 의존성 없음.
+// pages/scripts/sources.mjs
+// 데이터 계층 — 국내 시세·수급은 네이버(실패 시 야후 .KS/.KQ), 해외 시세·과거 일봉·환율은 야후, 뉴스는 구글뉴스 RSS,
+// 핵심 판단·종합분석은 Gemini 무료 API. 모두 키 없이(Gemini만 Secret 키) 쓰는 무료 소스이며 외부 의존성 없음.
 
-import { mapLimit } from './util.mjs';
+import { mapLimit, sigMove } from './util.mjs';
+import { allowance, pickModel, isKrSession } from './aibudget.mjs';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
-// ---------- 캐시 (서버리스 인스턴스 재사용 시 유효) ----------
+// ---------- 캐시 (한 회차 안에서 같은 요청을 다시 보내지 않게) ----------
 const cache = new Map();
 const krSuffix = new Map(); // 6자리코드 -> '.KS' | '.KQ'
 function getCache(k, ttl) { const h = cache.get(k); return h && Date.now() - h.t < ttl ? h.v : null; }
@@ -312,13 +313,20 @@ export async function getIndexFlow(symbol) {
 
 // ---------- 무료 AI(Gemini) — 핵심 뉴스/종합 분석 판단 ----------
 // GEMINI_API_KEY(저장소 Secret)가 있으면 AI가 핵심을 분석. 없거나 실패하면 null → 헤드라인 폴백.
-// 기본 모델 flash-lite: 무료 일일한도가 커서 Action 반복 호출에 적합. 2.5는 기존 사용자에게만 열려 있어
-// (신규 프로젝트는 404) 쓸 수 없게 되면 공식 권장 후속 모델로 넘어간다 — GEMINI_FALLBACK_MODELS로 변경 가능.
+// 무료 한도는 모델마다 따로이고 하루 수십 회뿐이라(실측), 주 모델과 대체 모델(GEMINI_FALLBACK_MODELS)을 함께 쓰고
+// 하루 예산을 장 시간에 맞춰 나눠 쓴다(aibudget.mjs). 2.5는 기존 사용자에게만 열려 있어 막히면 대체 모델만 쓴다.
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// 일시 오류 재시도 간격(밀리초, 시도마다 배수로 늘어남). 자체 테스트가 실제로 기다리지 않도록 바꿀 수 있게 객체로 둔다.
+export const retryTiming = { baseMs: 1500 };
 let GEMINI_KEY = '';
 let GEMINI_MODELS = [];
-// 한 회차 동안의 AI 상태. 키 오류·할당량 소진이면 남은 호출을 바로 건너뛰어 시간·한도를 낭비하지 않는다.
-const ai = { modelIdx: 0, disabled: '', calls: 0, ok: 0, failures: 0 };
+// 한 회차 동안의 AI 상태. 키 오류면 모든 모델 공통이라 남은 호출을 바로 건너뛴다.
+// skipped: 시간 배분상 아껴 두느라 부르지 않은 횟수(화면에 'AI 대기'로 표시)
+const ai = { disabled: '', calls: 0, ok: 0, failures: 0, skipped: 0, lastModel: null };
+// 이번 회차 예산(fetch.mjs가 status.json 기록을 이어받아 설정). 없으면 제한 없이 돌고 모델 사용 가능 여부만 추적한다.
+let budget = null;
+// 이번 회차에만 빼 둘 모델 — 분당 한도(재시도로도 안 풀린 429), 그리고 예산 없이 돌 때의 사용 불가·한도 소진
+let runOut = {};
 
 // 회차 시작 시 상태 초기화(설정 재로딩·캐시 비움). Action은 매 회차 새 프로세스라 영향이 없고,
 // 한 프로세스에서 여러 번 실행하는 자체 테스트가 서로 섞이지 않게 해 준다.
@@ -329,12 +337,29 @@ export function resetState() {
   const primary = (process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite').trim();
   const fallbacks = String(process.env.GEMINI_FALLBACK_MODELS ?? 'gemini-3.5-flash-lite').split(',');
   GEMINI_MODELS = [...new Set([primary, ...fallbacks].map((s) => s.trim()).filter(Boolean))];
-  Object.assign(ai, { modelIdx: 0, disabled: '', calls: 0, ok: 0, failures: 0 });
+  Object.assign(ai, { disabled: '', calls: 0, ok: 0, failures: 0, skipped: 0, lastModel: null });
+  budget = null;
+  runOut = {};
 }
 resetState();
 
-const currentModel = () => GEMINI_MODELS[ai.modelIdx] || null;
-export function aiStatus() { return { enabled: !!GEMINI_KEY, model: currentModel(), primary: GEMINI_MODELS[0] || null, disabled: ai.disabled, calls: ai.calls, ok: ai.ok, failures: ai.failures }; }
+export function setAiBudget(b) { budget = b; }
+export const aiModels = () => [...GEMINI_MODELS];
+// 그날(예산) + 이번 회차에 빠진 모델을 합쳐, 덜 쓴 모델부터 고른다. 남은 모델이 없으면 null.
+const outNow = () => ({ ...(budget ? budget.out : {}), ...runOut });
+const nextModel = () => pickModel({ used: budget ? budget.used : {}, out: outNow() }, GEMINI_MODELS);
+// 사용 불가·일일 한도 소진은 그날 하루 뺀다(예산 기록에 남아 다음 회차도 건너뜀). 예산이 없으면 이번 회차만.
+const markOut = (model, why) => { if (budget) budget.out[model] = why; else runOut[model] = why; };
+// 지금 AI를 부를 수 있나 — 'go' | 'off'(키 없음·이번 회차 중지·쓸 모델 없음) | 'wait'(시간 배분상 보류). 예산이 없으면 제한 없음.
+export function aiGate() {
+  if (!GEMINI_KEY || ai.disabled || !nextModel()) return 'off';
+  return !budget || allowance(budget, GEMINI_MODELS) > 0 ? 'go' : 'wait';
+}
+// 시간 배분상 이번엔 부르지 않았음을 기록(호출부가 aiGate로 직접 판단해 건너뛸 때 — 화면에 '순서 대기'로 보인다)
+export function noteAiSkipped() { ai.skipped++; }
+export function aiStatus() {
+  return { enabled: !!GEMINI_KEY, model: ai.lastModel, disabled: ai.disabled, calls: ai.calls, ok: ai.ok, failures: ai.failures, skipped: ai.skipped };
+}
 
 // 모델 1개에 요청. 429·503·500·타임아웃은 백오프 재시도, 나머지는 원인을 분류해 돌려준다.
 async function geminiCall(model, prompt, retries) {
@@ -361,11 +386,13 @@ async function geminiCall(model, prompt, retries) {
       const body = await res.text().catch(() => '');
       if (res.status === 404 || (res.status === 400 && /not found|not supported|no longer available|not available/i.test(body))) return { kind: 'model' };
       if (res.status === 401 || res.status === 403 || (res.status === 400 && /api[ _]?key|permission/i.test(body))) return { kind: 'auth' };
-      if ((res.status === 429 || res.status === 503 || res.status === 500) && attempt < retries) { await sleep(1500 * (attempt + 1)); continue; }
-      return { kind: res.status === 429 ? 'quota' : 'http', status: res.status };
+      // 일일 한도 소진(…PerDay…)은 기다려도 안 풀린다 — 재시도 없이 바로 알린다. 분당 한도(429)만 재시도.
+      if (res.status === 429 && /per ?day|daily/i.test(body)) return { kind: 'quota' };
+      if ((res.status === 429 || res.status === 503 || res.status === 500) && attempt < retries) { await sleep(retryTiming.baseMs * (attempt + 1)); continue; }
+      return { kind: res.status === 429 ? 'rate' : 'http', status: res.status };
     } catch (e) {
       clearTimeout(timer);
-      if (attempt < retries && e.name === 'AbortError') { await sleep(1500); continue; }
+      if (attempt < retries && e.name === 'AbortError') { await sleep(retryTiming.baseMs); continue; }
       console.error('    Gemini 실패:', e.message);
       return { kind: 'network' };
     }
@@ -373,23 +400,36 @@ async function geminiCall(model, prompt, retries) {
   return { kind: 'http' };
 }
 
-// 모델 사용 불가 → 다음 모델, 키 오류·할당량 소진 → 이번 회차 AI 중지, 일시 오류 → 이 호출만 실패.
+// 모델 고르기(예산·가용성) → 호출. 성공하면 { json, model }, 아니면 null(호출부가 기존 분석을 유지).
+//  · 사용 불가·일일 한도 소진 → 그 모델은 그날 빼고, 같은 요청을 다른 모델로 다시 시도
+//  · 분당 한도(재시도로도 안 풀린 429) → 그 모델은 이번 회차만 빼고 다른 모델로 다시 시도
+//  · 시간 배분상 지금은 아껴 둘 차례 → 호출하지 않음 · 키 오류 → 이번 회차 AI 중지 · 일시 오류 → 이 요청만 실패
 async function geminiJSON(prompt, { retries = 2 } = {}) {
   if (!GEMINI_KEY || ai.disabled) return null;
-  while (ai.modelIdx < GEMINI_MODELS.length) {
-    const model = currentModel();
+  for (;;) {
+    const model = nextModel();
+    if (!model) { // 쓸 모델이 하나도 없음 — 전부 '사용 불가'면 설정 문제, 아니면 한도 소진
+      const outs = Object.values(outNow());
+      ai.disabled = outs.length && outs.every((w) => w === 'unavailable') ? 'no-model' : 'quota';
+      console.error(`    사용 가능한 Gemini 모델 없음(${ai.disabled}) — 이번 회차 AI 중지, 기존 분석 유지`);
+      return null;
+    }
+    if (aiGate() === 'wait') { ai.skipped++; return null; }
     const r = await geminiCall(model, prompt, retries);
-    if (r.kind === 'ok') { ai.ok++; return r.json; }
-    if (r.kind === 'model') { console.warn(`    Gemini 모델 사용 불가(${model}) — 다음 모델로 전환`); ai.modelIdx++; continue; }
+    if (r.kind === 'ok') {
+      ai.ok++;
+      ai.lastModel = model;
+      if (budget) budget.used[model] = (budget.used[model] || 0) + 1;
+      return { json: r.json, model };
+    }
+    if (r.kind === 'model') { console.warn(`    Gemini 모델 사용 불가(${model}) — 오늘은 다른 모델 사용`); markOut(model, 'unavailable'); continue; }
+    if (r.kind === 'quota') { console.warn(`    Gemini 일일 한도 소진(${model}) — 오늘은 다른 모델 사용`); markOut(model, 'quota'); continue; }
+    if (r.kind === 'rate') { console.warn(`    Gemini 분당 한도 초과(${model}) — 이번 회차는 다른 모델 사용`); runOut[model] = 'rate'; continue; }
     if (r.kind === 'auth') { ai.disabled = 'auth'; console.error('    Gemini 인증 오류 — 키 확인 필요, 이번 회차 AI 중지'); return null; }
-    if (r.kind === 'quota') { ai.disabled = 'quota'; console.error('    Gemini 할당량 소진 — 이번 회차 AI 중지(기존 분석 유지)'); return null; }
     ai.failures++;
     if (r.kind !== 'network') console.error(`    Gemini 응답 오류(${r.status || r.kind})`);
     return null;
   }
-  ai.disabled = 'no-model';
-  console.error('    사용 가능한 Gemini 모델 없음 — 이번 회차 AI 중지 (GEMINI_MODEL 확인)');
-  return null;
 }
 
 // 헤드라인 목록을 주고 "오늘 가장 가치 있는 핵심 뉴스 1~3개 + 한 줄 요약"을 JSON으로 받는다.
@@ -403,13 +443,14 @@ export async function aiCoreNews(name, changePct, headlines) {
     `광고·홍보·중복·단순 시황중계·무관한 것은 제외하고, 실제 원인/재료가 되는 것만 고른다.\n` +
     `반드시 이 JSON만 출력: {"summary":"오늘 ${name} ${dir} 핵심 이유 한 문장(한국어, 45자 내외)","items":[{"index":뉴스번호,"why":"왜 핵심인지 한 줄(한국어)"}]}\n\n` +
     `뉴스 목록:\n${list}`;
-  const parsed = await geminiJSON(prompt);
+  const r = await geminiJSON(prompt);
+  const parsed = r?.json;
   if (!parsed || !Array.isArray(parsed.items)) return null;
   const items = parsed.items
     .map((it) => { const h = headlines[(parseInt(it.index, 10) || 0) - 1]; return h ? { title: h.title, source: h.source, time: h.time, link: h.link, why: String(it.why || '') } : null; })
     .filter(Boolean).slice(0, 3);
   if (!items.length) return null;
-  return { summary: String(parsed.summary || ''), items, model: currentModel() };
+  return { summary: String(parsed.summary || ''), items, model: r.model };
 }
 
 // 보유 종목 ±이 임계치 이상 변동 시, 뉴스만이 아니라 수급·추세·시세를 종합해 "왜 오르내리는지" 분석.
@@ -454,27 +495,44 @@ export async function aiStockAnalysis({ quote, news, flow, history }) {
     `"summary":"종합 분석 2~3문장(한국어, 뉴스+수급+추세를 연결)",` +
     `"factors":["핵심 요인 2~4개, 각 25자 내외"],` +
     `"outlook":"단기 관전 포인트 한 줄(조심스럽게, 단정·투자권유 금지)"}`;
-  const parsed = await geminiJSON(prompt);
+  const r = await geminiJSON(prompt);
+  const parsed = r?.json;
   if (!parsed || !parsed.headline) return null;
   return {
     headline: String(parsed.headline).slice(0, 140),
     summary: String(parsed.summary || ''),
     factors: Array.isArray(parsed.factors) ? parsed.factors.map((x) => String(x)).filter(Boolean).slice(0, 4) : [],
     outlook: String(parsed.outlook || ''),
-    model: currentModel(),
+    model: r.model,
   };
 }
 
 // 지수 급등락 "핵심 이유" — 구글뉴스 헤드라인 + (키 있으면) AI 핵심 판단. (전 세계 접근 가능)
-// prev(직전 reason)를 넘기면, 등락 구간(1% 버킷)·헤드라인이 동일할 때 Gemini 재호출 없이 이전 AI를 재사용한다.
-export async function getIndexReason(name, changePct, prev = null) {
+// prev(직전 reason)의 AI 판단은 같은 방향(급락/급등/보합)일 때만 이어 쓴다 — 방향이 바뀌면 이유도 달라지므로.
+// aiSig = 그 판단을 만들 때의 입력(등락 1% 구간 + 헤드라인). 지금 입력과 비교해:
+//  · 같으면 재사용
+//  · 헤드라인만 바뀌어도 INDEX_AI_MIN_INTERVAL_MS 안에는 재사용(헤드라인은 수시로 바뀌어 한도를 금방 소모)
+//  · 국내 장 시간이 아니면(마감 후·주말) 등락 구간이 그대로인 한 재사용 — 한도는 장중인 시장에 양보
+//  · 새로 부르다 실패·보류되면 이전 판단을 유지하고, aiAt(분석 시각)을 남겨 화면에 '몇 시 분석'으로 보여준다.
+// 재사용은 이전에 AI가 '성공'했을 때만. 실패(null)까지 재사용하면 한도가 풀려도 다시 시도하지 않는다.
+export const INDEX_AI_MIN_INTERVAL_MS = 90 * 60 * 1000;
+export async function getIndexReason(name, changePct, prev = null, now = Date.now()) {
   const dir = changePct <= -1 ? 'down' : changePct >= 1 ? 'up' : 'flat';
   const q = dir === 'down' ? `${name} 급락 이유` : dir === 'up' ? `${name} 급등 이유` : `${name} 증시 마감`;
+  // (aiSig가 없던 이전 형식은 sig가 곧 판단 당시 입력)
+  const keep = prev && prev.dir === dir && prev.ai
+    ? { ai: prev.ai, aiAt: prev.aiAt ?? null, aiSig: prev.aiSig ?? prev.sig ?? null }
+    : { ai: null, aiAt: null, aiSig: null };
   try {
     const items = await googleNews(q, true, 2);
     const sig = `${Math.round(changePct ?? 0)}|${items.slice(0, 4).map((i) => i.title).join('|')}`;
-    // 재사용은 이전에 AI가 '성공'했을 때만. 실패(null)까지 재사용하면 한도가 풀려도 헤드라인이 바뀔 때까지 재시도하지 않는다.
-    const ai = prev && prev.sig === sig && prev.ai ? prev.ai : await aiCoreNews(name, changePct, items);
-    return { dir, query: q, headlines: items.slice(0, 4), ai, sig };
-  } catch { return { dir, query: q, headlines: [], ai: prev?.ai ?? null, sig: prev?.sig ?? null }; }
+    let { ai, aiAt, aiSig } = keep;
+    const recent = ai && aiAt != null && now - aiAt >= 0 && now - aiAt < INDEX_AI_MIN_INTERVAL_MS;
+    const settled = !isKrSession(now) && sigMove(aiSig) === sigMove(sig); // 장 밖 + 등락 그대로 → 뉴스만 바뀜
+    if (!ai || (aiSig !== sig && !recent && !settled)) {
+      const fresh = await aiCoreNews(name, changePct, items);
+      if (fresh) { ai = fresh; aiAt = now; aiSig = sig; }
+    }
+    return { dir, query: q, headlines: items.slice(0, 4), ai, aiAt, aiSig };
+  } catch { return { dir, query: q, headlines: [], ...keep }; }
 }

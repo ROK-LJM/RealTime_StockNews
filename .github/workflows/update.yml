@@ -25,6 +25,10 @@ jobs:
     steps:
       - name: 체크아웃
         uses: actions/checkout@v5
+        with:
+          # 앞 회차가 끝나길 기다렸다 시작해도 그 회차의 데이터 커밋(AI 하루 사용 기록 포함)부터 이어받도록
+          # 예약 시점의 커밋이 아니라 지금의 최신 main을 받는다.
+          ref: main
 
       - name: Node 설치
         uses: actions/setup-node@v5
