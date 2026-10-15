@@ -47,7 +47,13 @@ git push -u origin main
 ---
 
 ## 종목 추가/삭제
-저장소의 **`config/watchlist.json`** 파일을 깃허브 웹에서 편집(연필 아이콘) → 커밋하면 5분 안에 반영됩니다.
+대시보드의 **✏️ 종목 편집** 버튼 → 종목명·코드·티커로 검색해 추가·삭제 → **저장**하면 1~2분 뒤 반영됩니다.
+- 저장은 제목이 `watchlist:`인 깃허브 이슈로 변경 요청을 남기고, 봇(`.github/workflows/watchlist.yml`)이 저장소 주인의 요청만 반영합니다.
+- 토큰 없이: 저장 때 열리는 깃허브 창에서 **Create** 한 번 / 버튼 한 번으로: **이슈 쓰기(Issues: Read and write) 권한만 있는** Fine-grained 토큰을 편집 창에 넣어 두기(그 브라우저에만 저장).
+- 검색용 전체 종목 목록은 봇(`stocklist.yml`)이 매일 07:40 KST에 만듭니다.
+- 저장소 Settings에서 **Issues** 기능이 켜져 있어야 합니다(기본값 켜짐).
+
+직접 고치려면 저장소의 **`config/watchlist.json`** 파일을 깃허브 웹에서 편집(연필 아이콘) → 커밋하면 5분 안에 반영됩니다.
 ```json
 {
   "items": [
@@ -81,16 +87,21 @@ node scripts/serve.mjs      # http://localhost:5175 에서 확인
 ```
 pages/
   .github/workflows/update.yml   5분마다 데이터 갱신 + 커밋
+  .github/workflows/watchlist.yml  '종목 편집' 이슈 → watchlist.json 반영 → 시세 갱신 실행
+  .github/workflows/stocklist.yml  매일 검색용 전체 종목 목록 갱신
   config/watchlist.json          추적 종목 목록
   scripts/
     fetch.mjs                    시세·뉴스 → docs/data/*.json 생성
     sources.mjs                  시세·뉴스·수급 수집, 태깅, 분위기 산출, AI(Gemini)
     aibudget.mjs                 AI 무료 한도 하루 배분(장 시간 가중치·모델 배분)
+    stocklist.mjs                검색용 국내·미국 전체 종목 목록 생성
+    watchlist-apply.mjs          '종목 편집' 요청 검증·반영
     util.mjs                     설정 검증·원자적 쓰기 등 공통 유틸
     selftest.mjs                 오프라인 자체 테스트(가짜 네트워크)
-    serve.mjs                    로컬 미리보기용(배포 미사용)
+    serve.mjs                    로컬 미리보기용(배포 미사용, --mock-github로 편집 저장 시험)
   docs/                          ← GitHub Pages가 서빙하는 폴더
     index.html / style.css / app.js
+    editor.js                    ✏️ 종목 편집(검색·추가·삭제·저장)
     help.html                    사용설명서
-    data/*.json                  봇이 생성 (시세·뉴스·분위기)
+    data/*.json                  봇이 생성 (시세·뉴스·분위기·종목 목록)
 ```

@@ -143,6 +143,8 @@ const util = await import('./util.mjs');
 const bud = await import('./aibudget.mjs');
 const src = await import('./sources.mjs');
 const { run } = await import('./fetch.mjs');
+const stocklist = await import('./stocklist.mjs');
+const wl = await import('./watchlist-apply.mjs');
 src.retryTiming.baseMs = 1; // 재시도 대기를 실제로 기다리지 않음
 
 console.log('[selftest] 오프라인 자체 테스트 — 외부 접속 없음\n');
@@ -514,6 +516,185 @@ await test('잘못된 설정: 유효 종목 0개·깨진 JSON → 아무것도 �
     for (const f of FILES) assert.equal(raw(root, f), seeds[f]);
     assert.equal(NET.calls.length, 0, '설정이 틀리면 외부 호출도 안 함');
   }
+});
+
+// ===== 종목 검색 목록(stocklist) =====
+// 국내: 네이버 시가총액 목록(KOSPI 150개 = 2쪽, KOSDAQ 30개, 형식이 다른 코드 1개 섞음) / KIND(EUC-KR 표)
+const krPage = (market, page) => {
+  const total = market === 'KOSPI' ? 150 : 30;
+  const from = (page - 1) * 100, to = Math.min(total, page * 100);
+  const stocks = [];
+  for (let i = from; i < to; i++) stocks.push({ itemCode: String((market === 'KOSPI' ? 100000 : 200000) + i), stockName: `${market}종목${i}`, stockEndType: 'stock' });
+  if (market === 'KOSPI' && page === 1) stocks[0] = { itemCode: '005930', stockName: '삼성전자', stockEndType: 'stock' };
+  if (market === 'KOSDAQ' && page === 1) stocks.push({ itemCode: '0000J0', stockName: '새형식코드', stockEndType: 'stock' });
+  return { stocks, totalCount: total };
+};
+const EUCKR_SAMSUNG = [0xBB, 0xEF, 0xBC, 0xBA, 0xC0, 0xFC, 0xC0, 0xDA]; // '삼성전자'
+function kindBytes(market) {
+  const enc = (s) => [...Buffer.from(s, 'latin1')];
+  const rows = [enc('<tr><td>'), EUCKR_SAMSUNG, enc('</td><td>KOSPI</td><td>005930</td><td>x</td></tr>')].flat();
+  const more = Array.from({ length: 12 }, (_, i) => enc(`<tr><td>KIND ${market} Corp ${i}</td><td>${market}</td><td>${String((market === 'KOSPI' ? 300000 : 400000) + i)}</td></tr>`)).flat();
+  const head = enc('<html><head><meta http-equiv="Content-Type" content="text/html; charset=EUC-KR"></head><table><tr><th>name</th><th>code</th></tr>');
+  return Uint8Array.from([...head, ...(market === 'KOSPI' ? rows : []), ...more, ...enc('</table></html>')]);
+}
+const NASDAQ_TXT = [
+  'Symbol|Security Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares',
+  'NVDA|NVIDIA Corporation - Common Stock|Q|N|N|100|N|N',
+  'AAPL|Apple Inc. - Common Stock|Q|N|N|100|N|N',
+  'GOOGL|Alphabet Inc. - Class A Common Stock|Q|N|N|100|N|N',
+  'QQQ|Invesco QQQ Trust, Series 1|G|N|N|100|Y|N',
+  'ZXZZT|NASDAQ TEST STOCK|G|Y|N|100|N|N',
+  'ABCDW|ABC Acquisition Corp - Warrants|S|N|N|100|N|N',
+  'ABCDU|ABC Acquisition Corp - Units|S|N|N|100|N|N',
+  'File Creation Time: 1015202608:00|||||||',
+].join('\r\n');
+const OTHER_TXT = [
+  'ACT Symbol|Security Name|Exchange|CQS Symbol|ETF|Round Lot Size|Test Issue|NASDAQ Symbol',
+  'BRK.B|Berkshire Hathaway Inc. Class B Common Stock|N|BRK.B|N|100|N|BRK.B',
+  'KO|Coca-Cola Company (The) Common Stock|N|KO|N|100|N|KO',
+  'SPY|SPDR S&P 500 ETF Trust|P|SPY|Y|100|N|SPY',
+  'BAC$K|Bank of America Corporation 6.45% Preferred Stock|N|BACpK|N|100|N|BAC-K',
+  'XYZP|XYZ Corp 5% Series A Preferred Stock|N|XYZP|N|100|N|XYZP',
+  'File Creation Time: 1015202608:00|||||||',
+].join('\n');
+const US_KO = { NASDAQ: [{ symbolCode: 'NVDA', stockName: '엔비디아', stockNameEng: 'NVIDIA Corp' }, { symbolCode: 'AAPL', stockName: '애플' }],
+  NYSE: [{ symbolCode: 'BRK.B', stockName: '버크셔 해서웨이 B' }, { symbolCode: 'KO', stockName: 'Coca-Cola' }] };
+function listRoutes({ naverKr = true, kind = true, nasdaq = true, usKo = true } = {}) {
+  const fail = () => text('blocked', 403);
+  return [
+    { re: /m\.stock\.naver\.com\/api\/stocks\/marketValue\/(KOSPI|KOSDAQ)\?page=(\d+)/, fn: (m) => (naverKr ? json(krPage(m[1], +m[2])) : fail()) },
+    { re: /kind\.krx\.co\.kr\/corpgeneral\/corpList\.do\?.*marketType=(stockMkt|kosdaqMkt)/, fn: (m) => (kind ? new Response(kindBytes(m[1] === 'stockMkt' ? 'KOSPI' : 'KOSDAQ'), { headers: { 'content-type': 'text/html; charset=euc-kr' } }) : fail()) },
+    { re: /nasdaqtrader\.com\/dynamic\/SymDir\/(nasdaqlisted|otherlisted)\.txt/, fn: (m) => (nasdaq ? text(m[1] === 'nasdaqlisted' ? NASDAQ_TXT : OTHER_TXT) : fail()) },
+    { re: /api\.stock\.naver\.com\/stock\/exchange\/(NASDAQ|NYSE|AMEX)\/marketValue\?page=(\d+)/, fn: (m) => (usKo && US_KO[m[1]] && m[2] === '1' ? json({ stocks: US_KO[m[1]] }) : text('not found', 404)) },
+  ];
+}
+async function buildList(root, opts, buildOpts = {}) {
+  NET.routes = listRoutes(opts); NET.calls = []; NET.bodies = []; NET.blocked = [];
+  return quiet(() => stocklist.build({ root, now: NOW_KR, minKr: 10, minUs: 3, ...buildOpts }));
+}
+const listOf = (root) => read(root, 'stocklist.json');
+const usRow = (l, sym) => l.us.find((r) => r[0] === sym);
+
+await test('검색 목록: 네이버 국내(쪽 넘김·새 형식 코드 제외) + 미국 디렉터리(시험·워런트·유닛·우선주 제외) + 한글명', async () => {
+  const root = workspace();
+  const { value } = await buildList(root);
+  assert.equal(value.written, true);
+  const l = listOf(root);
+  assert.equal(l.kr.length, 180, 'KOSPI 150 + KOSDAQ 30');
+  assert.deepEqual(l.kr.find((r) => r[0] === '005930'), ['005930', '삼성전자', 'KOSPI']);
+  assert.ok(!l.kr.some((r) => r[0] === '0000J0'), '6자리 숫자가 아닌 코드는 제외(파이프라인이 처리 못함)');
+  assert.deepEqual(l.us.map((r) => r[0]).sort(), ['AAPL', 'BRK-B', 'GOOGL', 'KO', 'NVDA', 'QQQ', 'SPY']);
+  assert.deepEqual(usRow(l, 'NVDA'), ['NVDA', '엔비디아', 'NVIDIA Corporation', 'NASDAQ'], '한글명은 네이버 우선');
+  assert.deepEqual(usRow(l, 'GOOGL'), ['GOOGL', '알파벳 A(구글)', 'Alphabet Inc. Class A', 'NASDAQ'], '네이버에 없으면 기본 별칭');
+  assert.deepEqual(usRow(l, 'BRK-B'), ['BRK-B', '버크셔 해서웨이 B', 'Berkshire Hathaway Inc. Class B', 'NYSE'], 'BRK.B → 야후 표기 BRK-B');
+  assert.deepEqual(usRow(l, 'KO'), ['KO', '코카콜라', 'Coca-Cola Company (The)', 'NYSE'], '한글이 아닌 이름은 별칭으로');
+  assert.equal(usRow(l, 'SPY')[3], 'NYSE Arca ETF');
+  assert.equal(usRow(l, 'QQQ')[3], 'NASDAQ ETF');
+  assert.deepEqual([l.meta.src.KOSPI, l.meta.src.KOSDAQ, l.meta.src.US], ['naver-KOSPI:150', 'naver-KOSDAQ:30', 'nasdaqtrader:7']);
+  assert.equal(NET.blocked.length, 0, `차단된 호출: ${NET.blocked.join(', ')}`);
+});
+await test('검색 목록: 네이버 국내가 막히면 KRX KIND(EUC-KR) 목록으로 · 한글명 소스가 막혀도 별칭으로', async () => {
+  const root = workspace();
+  await buildList(root, { naverKr: false, usKo: false });
+  const l = listOf(root);
+  assert.deepEqual(l.kr.find((r) => r[0] === '005930'), ['005930', '삼성전자', 'KOSPI'], 'EUC-KR 한글 해독');
+  assert.equal(l.kr.length, 25, 'KOSPI 13 + KOSDAQ 12');
+  assert.equal(l.meta.src.KOSPI, 'kind-KOSPI:13');
+  assert.equal(usRow(l, 'NVDA')[1], '엔비디아', '별칭');
+  assert.equal(usRow(l, 'SPY')[1], 'SPDR S&P500 ETF');
+});
+await test('검색 목록: 너무 적거나 실패한 시장은 기존 목록 유지 · 전부 실패면 파일 그대로 · 내용이 같으면 다시 안 씀', async () => {
+  const root = workspace();
+  await buildList(root);
+  const first = raw(root, 'stocklist.json');
+  const again = await buildList(root, {}, { now: NOW_KR + 86400e3 });
+  assert.equal(again.value.written, false, '날짜만 바뀐 재생성은 쓰지 않음');
+  assert.equal(raw(root, 'stocklist.json'), first);
+  const allFail = await buildList(root, { naverKr: false, kind: false, nasdaq: false, usKo: false });
+  assert.equal(allFail.value.written, true, '소스 상태(실패)는 기록');
+  const l = listOf(root);
+  assert.equal(l.kr.length, 180, '국내 기존 목록 유지');
+  assert.equal(l.us.length, 7, '미국 기존 목록 유지');
+  assert.equal(l.meta.src.krKept, true);
+  const empty = workspace();
+  const none = await buildList(empty, { naverKr: false, kind: false, nasdaq: false });
+  assert.equal(none.value.written, false);
+  assert.equal(fs.existsSync(file(empty, 'stocklist.json')), false, '만들 게 없으면 파일을 만들지 않음');
+  const few = await buildList(workspace(), {}, { minKr: 500 });
+  assert.equal(few.value.kr, 0, '기준(500)보다 적으면 국내는 기존(없음) 유지');
+});
+
+// ===== 종목 편집 요청 반영(watchlist-apply) =====
+const issueBody = (req) => `대시보드에서 보낸 변경 요청입니다.\n\n\`\`\`json\n${typeof req === 'string' ? req : JSON.stringify(req)}\n\`\`\`\n`;
+function applyIn(root, body) {
+  const out = path.join(root, 'gh-output.txt'), res = path.join(root, 'result.md');
+  const log = console.log;
+  console.log = () => {}; // 결과 요약 출력은 감춘다(파일로 확인)
+  let r;
+  try { r = wl.run({ root, body, outputFile: out, resultFile: res }); } finally { console.log = log; }
+  let cfg = null;
+  try { cfg = JSON.parse(fs.readFileSync(path.join(root, 'config', 'watchlist.json'), 'utf8')); } catch {}
+  return { ...r, output: fs.readFileSync(out, 'utf8'), result: fs.readFileSync(res, 'utf8'), cfg };
+}
+const cfgRaw = (root) => fs.readFileSync(path.join(root, 'config', 'watchlist.json'), 'utf8');
+
+await test('종목 편집 반영: 추가·삭제 · 형식 오류·중복 건너뜀 · 없는 종목 삭제 알림 · 한 줄에 한 종목 형식', async () => {
+  const root = workspace();
+  const r = applyIn(root, issueBody({
+    add: [{ code: 'NVDA', market: 'US', name: '엔비디아' }, { code: 'ABC123', market: 'KR', name: '오타' }, { code: '005930', market: 'KR', name: '삼성전자' }],
+    remove: ['000660', 'ZZZZ'],
+  }));
+  assert.equal(r.changed, true);
+  assert.equal(r.output, 'changed=true\n');
+  assert.deepEqual(r.cfg.items.map((x) => x.code), ['005930', 'AAPL', 'NVDA']);
+  assert.ok(r.result.includes('추가: 엔비디아(NVDA)'), r.result);
+  assert.ok(r.result.includes('삭제: SK하이닉스(000660)'));
+  assert.ok(r.result.includes('ABC123(코드 형식 오류)') && r.result.includes('005930(이미 있음)'));
+  assert.ok(r.result.includes('목록에 없어 삭제하지 않음: ZZZZ'));
+  assert.equal(cfgRaw(root).split('\n').filter((l) => l.includes('"code"')).length, 3, '한 줄에 한 종목');
+  assert.ok(cfgRaw(root).includes('{ "code": "NVDA", "market": "US", "name": "엔비디아" }'));
+  // 깃허브 웹 양식으로 만든 이슈는 줄바꿈이 CRLF — 같은 요청으로 읽혀야 한다
+  const crlf = applyIn(workspace(), issueBody({ add: [{ code: 'NVDA', market: 'US', name: '엔비디아' }] }).replace(/\n/g, '\r\n'));
+  assert.equal(crlf.changed, true);
+  assert.ok(crlf.cfg.items.some((x) => x.code === 'NVDA'));
+});
+await test('종목 편집 반영: 최대 40개 · 소문자 티커·숫자 코드 보정 · 이름 속 @멘션·서식 순화', async () => {
+  const items = Array.from({ length: 39 }, (_, i) => ({ code: String(100000 + i), market: 'KR', name: `종목${i}` }));
+  const root = workspace(items);
+  const r = applyIn(root, issueBody({ add: [{ code: 'msft', name: '@everyone `x`' }, { code: 'AAPL' }, { code: 'TSLA' }] }));
+  assert.equal(r.cfg.items.length, 40);
+  assert.equal(r.cfg.items[39].code, 'MSFT', '소문자 티커 대문자로');
+  assert.ok(r.result.includes('AAPL(최대 40개)') && r.result.includes('TSLA(최대 40개)'));
+  assert.ok(!r.result.includes('@everyone') && r.result.includes('＠everyone'), '멘션 알림 방지');
+  const pad = applyIn(workspace(), issueBody({ add: [{ code: 5930 + 1, market: 'KR', name: '숫자코드' }] }));
+  assert.ok(pad.cfg.items.some((x) => x.code === '005931'), '숫자로 온 국내 코드는 6자리로');
+});
+await test('종목 편집 반영: 잘못된 요청·읽을 수 없는 설정 파일이면 아무것도 바꾸지 않음', async () => {
+  const bad = [
+    '그냥 글만 있는 본문',
+    issueBody('{ 깨진 json'),
+    issueBody({ add: [], remove: [] }),
+    issueBody([1, 2]),
+    issueBody({ add: Array.from({ length: 61 }, (_, i) => ({ code: String(100000 + i) })) }),
+    issueBody({ add: [{ code: 'NVDA' }] }) + 'x'.repeat(20001), // 요청은 멀쩡해도 본문이 너무 길면 거절
+  ];
+  for (const body of bad) {
+    const root = workspace();
+    const before = cfgRaw(root);
+    const r = applyIn(root, body);
+    assert.equal(r.changed, false);
+    assert.equal(r.output, 'changed=false\n');
+    assert.ok(r.result.startsWith('⚠️ 반영하지 못했습니다'), r.result);
+    assert.equal(cfgRaw(root), before);
+  }
+  const root = workspace('{ 깨진 설정');
+  const r = applyIn(root, issueBody({ add: [{ code: 'NVDA' }] }));
+  assert.equal(r.changed, false);
+  assert.ok(r.result.includes('읽지 못해 반영하지 않았습니다'));
+  assert.equal(cfgRaw(root), '{ 깨진 설정', '깨진 파일을 덮어쓰지 않음');
+  const same = applyIn(workspace(), issueBody({ add: [{ code: '005930' }] }));
+  assert.equal(same.changed, false, '이미 있는 종목만 → 바뀐 것 없음');
+  assert.ok(same.result.startsWith('ℹ️ 바뀐 내용이 없습니다'));
 });
 
 // ---------- 정리 · 결과 ----------
