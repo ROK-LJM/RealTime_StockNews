@@ -4,10 +4,12 @@
 
 - **GitHub Actions 봇**이 약 5분마다 시세·뉴스를 받아 `docs/data/*.json`으로 저장 (공개 저장소는 Actions 무제한 무료)
 - **GitHub Pages**가 그 JSON을 정적으로 서빙 (무료)
-- 데이터: 야후 파이낸스 + 구글뉴스 (API 키 불필요, 한국 종목은 `005930.KS`/`.KQ`로 조회)
+- 데이터: 네이버 금융(국내 실시간 시세·수급) · Yahoo Finance(해외 시세·과거 일봉·환율) · Google 뉴스 RSS · Google Gemini(선택, AI 요약 — `GEMINI_API_KEY` Secret)
 - 추적 종목: `config/watchlist.json` 파일로 관리
 
 > ⚠️ 무료 Pages는 **공개(public) 저장소**여야 합니다. 종목 코드 목록이 공개되니(수량·금액은 아님) 감안하세요.
+>
+> ℹ️ 위 시세·뉴스는 비공식 공개 데이터로, **개인 모니터링 용도**로만 사용합니다.
 
 ---
 
@@ -61,7 +63,8 @@ git push -u origin main
 ## 로컬에서 미리보기 (선택)
 ```bash
 cd pages
-node scripts/fetch.mjs      # 데이터 JSON 생성
+node scripts/selftest.mjs   # 오프라인 자체 테스트 (외부 접속 없음)
+node scripts/fetch.mjs      # 데이터 JSON 생성 (외부 데이터 소스에 접속함)
 node scripts/serve.mjs      # http://localhost:5175 에서 확인
 ```
 
@@ -80,9 +83,12 @@ pages/
   config/watchlist.json          추적 종목 목록
   scripts/
     fetch.mjs                    시세·뉴스 → docs/data/*.json 생성
-    sources.mjs                  야후·구글뉴스 수집·태깅·분위기 산출
+    sources.mjs                  시세·뉴스·수급 수집, 태깅, 분위기 산출, AI(Gemini)
+    util.mjs                     설정 검증·원자적 쓰기 등 공통 유틸
+    selftest.mjs                 오프라인 자체 테스트(가짜 네트워크)
     serve.mjs                    로컬 미리보기용(배포 미사용)
   docs/                          ← GitHub Pages가 서빙하는 폴더
     index.html / style.css / app.js
+    help.html                    사용설명서
     data/*.json                  봇이 생성 (시세·뉴스·분위기)
 ```

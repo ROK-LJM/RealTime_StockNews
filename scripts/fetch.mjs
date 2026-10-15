@@ -7,41 +7,28 @@
 //  - 한 종류(지수/시세/뉴스)가 실패해도 나머지는 계속 갱신한다.
 //  - 어떤 오류가 나도 프로세스는 정상 종료(exit 0)하여 Action을 실패로 만들지 않는다.
 //  - 우리 쪽 벽시계 타임스탬프를 저장하지 않는다 → 실제 데이터가 바뀔 때만 커밋되도록(장 마감/주말 무한커밋 방지).
+//  - 파일은 원자적으로 쓴다(임시 파일 → 이름 변경) → 중간에 끊겨도 반쯤 쓴 JSON이 남지 않는다.
+//
+// `node scripts/fetch.mjs`로 실행하면 바로 1회 갱신한다. 다른 모듈(자체 테스트)은 run()을 가져다 쓴다.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getMarket, getQuotes, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis, STOCK_ANALYSIS_THRESHOLD } from './sources.mjs';
+import { getMarket, getQuotes, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis, aiStatus, resetState, STOCK_ANALYSIS_THRESHOLD } from './sources.mjs';
+import { validateWatchlist, writeJsonAtomic, analysisSig } from './util.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const dataDir = path.join(root, 'docs', 'data');
-fs.mkdirSync(dataDir, { recursive: true });
-
-function write(name, obj) {
-  fs.writeFileSync(path.join(dataDir, name), JSON.stringify(obj));
-  console.log(`  ✓ data/${name} 갱신`);
-}
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // 한 회차에 새로 호출할 AI 종합분석 최대 건수. 무료 일일한도(flash-lite 1,000회/일) 대비 여유를
 // 두려는 상한 — 초과분은 이전 분석을 유지한 채 다음 회차로 미룬다. 종목이 늘어도 한도를 넘지 않는다.
 const AI_CALLS_PER_RUN = 4;
 
-function readJson(name) {
-  try { return JSON.parse(fs.readFileSync(path.join(dataDir, name), 'utf8')); } catch { return null; }
-}
-
-// 분석 입력의 시그니처 — 직전과 같으면 Gemini 재호출 없이 이전 분석을 재사용(과호출·잦은커밋 방지).
-// 등락은 1% 버킷으로 거칠게 본다(매 틱 재계산 방지). 뉴스·수급이 바뀌거나 등락 구간이 바뀔 때만 재분석.
-function analysisSig(q, news, flow) {
-  const heads = (news?.items || []).slice(0, 5).map((it) => it.title).join('|');
-  const f = flow ? `${flow.date}:${flow.foreign}:${flow.institution}:${flow.individual}` : 'x';
-  return `${Math.round(q.changePct ?? 0)}|${f}|${heads}`;
-}
-
-function readConfig() {
+// 설정 검증: 고칠 수 있는 항목(앞자리 0 누락·소문자 티커)은 고치고, 틀린 항목은 빼며 이유를 로그로 남긴다.
+function readConfig(root) {
   try {
     const cfg = JSON.parse(fs.readFileSync(path.join(root, 'config', 'watchlist.json'), 'utf8'));
-    const items = (cfg.items || []).filter((x) => x && x.code).slice(0, 40);
-    if (!items.length) throw new Error('watchlist.json에 종목이 없습니다');
+    const { items, warnings } = validateWatchlist(cfg);
+    warnings.forEach((w) => console.warn('  ! watchlist:', w));
+    if (!items.length) throw new Error('watchlist.json에 유효한 종목이 없습니다');
     return items;
   } catch (e) {
     console.error('  ✗ config 읽기 실패 — 기존 데이터 유지:', e.message);
@@ -49,9 +36,22 @@ function readConfig() {
   }
 }
 
-async function run() {
-  const items = readConfig();
-  if (!items) return;
+// 1회 갱신. root/dataDir를 바꿔 임시 폴더에서도 돌릴 수 있다(자체 테스트용). 쓴 파일 목록을 돌려준다.
+export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data') } = {}) {
+  resetState(); // 회차마다 캐시·AI 상태를 새로 시작
+  fs.mkdirSync(dataDir, { recursive: true });
+  const written = [];
+  const write = (name, obj) => {
+    writeJsonAtomic(path.join(dataDir, name), obj);
+    written.push(name);
+    console.log(`  ✓ data/${name} 갱신`);
+  };
+  const readJson = (name) => {
+    try { return JSON.parse(fs.readFileSync(path.join(dataDir, name), 'utf8')); } catch { return null; }
+  };
+
+  const items = readConfig(root);
+  if (!items) return { written, items: 0 };
   console.log(`[fetch] ${items.length}개 종목 갱신 시작…`);
   const quotesByCode = {}; // 종목별 등락률을 종합분석 대상 선별에 사용
   const history = {};      // 종합분석에서 추세 입력으로 재사용
@@ -122,7 +122,9 @@ async function run() {
   //    ② 새로 호출하는 건수는 회차당 AI_CALLS_PER_RUN개로 제한하고 변동이 큰 종목부터 처리한다.
   //       종목 수가 늘어도 무료 일일한도를 넘지 않게 하려는 것. 한도에 걸린 종목은 이전 분석을
   //       그대로 유지하고 다음 회차에 갱신되므로 화면에서 사라지지 않는다.
-  try {
+  //    ③ 시세를 하나도 못 받은 회차엔 손대지 않는다 — 급등락 대상이 '없음'으로 보여 기존 분석을 {}로 지우던 문제 방지.
+  if (!Object.values(quotesByCode).some((q) => q && q.ok)) console.warn('  ! 시세 없음 — analysis.json 유지');
+  else try {
     const prev = readJson('analysis.json') || {};
     const analysis = {};
     const movers = items
@@ -148,10 +150,33 @@ async function run() {
     write('analysis.json', analysis);
   } catch (e) { console.error('  ✗ 종합분석 실패 — analysis.json 유지:', e.message); }
 
+  // AI 상태 한 줄 요약 — 키 없음/모델 전환/할당량 소진을 Actions 로그에서 바로 알 수 있게
+  const st = aiStatus();
+  if (!st.enabled) console.log('  · AI: 키 없음(GEMINI_API_KEY 미설정) — 헤드라인 폴백');
+  else console.log(`  · AI: 모델 ${st.model ?? '-'} · 요청 ${st.calls}회 · 성공 ${st.ok}${st.failures ? ` · 실패 ${st.failures}` : ''}${st.disabled ? ` · 중지(${st.disabled})` : ''}`);
+
+  // AI 상태 기록(status.json) — 화면 하단 'AI 상태' 표시용. 이번 회차에 AI 호출이 없었으면(전부 재사용)
+  // 상태를 알 수 없으니 기존 파일을 둔다. 호출 횟수처럼 매번 바뀌는 값은 넣지 않는다(불필요한 커밋 방지).
+  let state = null;
+  if (!st.enabled) state = 'off';
+  else if (st.disabled) state = st.disabled;                 // auth · quota · no-model
+  else if (st.calls > 0) state = st.ok > 0 ? 'ok' : 'error';
+  else if (!readJson('status.json')) state = 'idle';          // 키는 있으나 아직 새로 분석할 게 없음(첫 기록)
+  if (state) {
+    try {
+      const model = st.enabled ? st.model : null;
+      write('status.json', { ai: { state, model, fallback: !!(model && st.primary && model !== st.primary) } });
+    } catch (e) { console.error('  ✗ AI 상태 기록 실패:', e.message); }
+  }
   console.log('[fetch] 완료');
+  return { written, items: items.length, ai: st };
 }
 
-run().catch((e) => {
-  console.error('[fetch] 치명적 오류(기존 데이터 유지):', e);
-  process.exitCode = 0;
-});
+// 직접 실행(`node scripts/fetch.mjs`)일 때만 바로 돈다. 어떤 오류도 exit 0 — Action을 실패로 만들지 않는다.
+const isMain = !!process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
+  run().catch((e) => {
+    console.error('[fetch] 치명적 오류(기존 데이터 유지):', e);
+    process.exitCode = 0;
+  });
+}

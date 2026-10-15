@@ -51,6 +51,15 @@ function fmtShares(v) { // 종목 순매매(주) → 만주
 }
 function cssId(code) { return String(code).replace(/[^a-zA-Z0-9]/g, '_'); }
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+// 외부(뉴스 RSS·AI 응답) 링크는 http/https만 허용 — javascript: 같은 실행 스킴이 섞여 들어와도 클릭으로 실행되지 않게.
+function safeUrl(u) {
+  const s = String(u ?? '').trim();
+  if (!s) return '#'; // 빈 링크가 현재 페이지 주소로 풀리지 않게
+  try { const x = new URL(s, location.href); return x.protocol === 'http:' || x.protocol === 'https:' ? x.href : '#'; }
+  catch { return '#'; }
+}
+// 외부 링크 앵커 — 주소 검증 + 속성 이스케이프 + 새 탭(원래 페이지 주소를 넘기지 않음)
+function extLink(url, label) { return `<a href="${esc(safeUrl(url))}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`; }
 
 async function loadJson(name) {
   const r = await fetch(`./data/${name}?t=${Date.now()}`, { cache: 'no-store' });
@@ -245,7 +254,7 @@ async function loadMarket() {
       const arrow = i.changePct > 0 ? '▲' : i.changePct < 0 ? '▼' : '–';
       const price = (i.price ?? 0).toLocaleString(i.currency === 'KRW' ? 'ko-KR' : 'en-US', { maximumFractionDigits: 2 });
       const cur = i.currency === 'KRW' ? 'KRW2' : 'USD';
-      return `<div class="idx"><div class="nm">${i.name}</div>
+      return `<div class="idx"><div class="nm">${esc(i.name)}</div>
         <div class="pv ${c}-c">${price}</div>
         <div class="ch ${c}-c">${arrow} ${fmtChange({ change: i.change, currency: cur })} (${fmtPct(i.changePct)})</div></div>`;
     }).join('');
@@ -253,7 +262,7 @@ async function loadMarket() {
       const c = dirClass(f.changePct);
       const arrow = f.changePct > 0 ? '▲' : f.changePct < 0 ? '▼' : '–';
       const price = (f.price ?? 0).toLocaleString('ko-KR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      return `<div class="idx fx"><div class="nm">💱 ${f.name}</div>
+      return `<div class="idx fx"><div class="nm">💱 ${esc(f.name)}</div>
         <div class="pv ${c}-c">${price}<span class="fx-u">원</span></div>
         <div class="ch ${c}-c">${arrow} ${fmtChange({ change: f.change, currency: 'KRW2' })} (${fmtPct(f.changePct)})</div></div>`;
     }).join('');
@@ -280,7 +289,7 @@ function renderBriefs(briefs) {
     let reasonBlock;
     if (ai && ai.items && ai.items.length) {
       const items = ai.items.map((it) => `<div class="ai-item">
-        <a href="${it.link}" target="_blank" rel="noopener">${esc(it.title)}</a>
+        ${extLink(it.link, it.title)}
         ${it.why ? `<span class="ai-why">— ${esc(it.why)}</span>` : ''}</div>`).join('');
       reasonBlock = `<div class="brief-reason"><span class="ai-badge">🤖 AI 핵심</span> ${esc(ai.summary)}</div>
         <div class="ai-items">${items}</div>`;
@@ -288,9 +297,9 @@ function renderBriefs(briefs) {
       const heads = (b.reason && b.reason.headlines) || [];
       const top = heads[0];
       const reasonHtml = top
-        ? `<a href="${top.link}" target="_blank" rel="noopener">${esc(top.title)}</a> <span class="brief-src">${esc(top.source || '')}</span>`
+        ? `${extLink(top.link, top.title)} <span class="brief-src">${esc(top.source || '')}</span>`
         : '<span class="muted">관련 뉴스를 찾지 못했습니다.</span>';
-      const more = heads.slice(1, 3).map((h) => `<a href="${h.link}" target="_blank" rel="noopener">${esc(h.title)}</a>`).join('<span class="dot">·</span>');
+      const more = heads.slice(1, 3).map((h) => extLink(h.link, h.title)).join('<span class="dot">·</span>');
       reasonBlock = `<div class="brief-reason">${reasonHtml}</div>${more ? `<div class="brief-more">${more}</div>` : ''}`;
     }
     const f = b.flow;
@@ -302,7 +311,7 @@ function renderBriefs(briefs) {
       : '<div class="brief-flow muted">수급 데이터 없음</div>';
     return `<div class="brief ${cardCls}">
       <div class="brief-head">
-        <span class="brief-name">${b.name}</span>
+        <span class="brief-name">${esc(b.name)}</span>
         <span class="brief-chg ${dirCls}-c">${arrow} ${fmtPct(pct)}</span>
         <span class="brief-tag ${dirCls}">${icon} ${label}</span>
       </div>
@@ -466,7 +475,7 @@ function renderCard(q, hist, inv) {
   const id = cssId(q.code);
   if (!q.ok) {
     return `<div class="stock">
-      <div class="stock-head"><div class="nm">${esc(q.name)}<span class="code">${q.code}</span></div></div>
+      <div class="stock-head"><div class="nm">${esc(q.name)}<span class="code">${esc(q.code)}</span></div></div>
       <div class="err">데이터 오류: ${esc(q.error || '')}</div></div>`;
   }
   const c = dirClass(q.changePct);
@@ -496,11 +505,11 @@ function renderCard(q, hist, inv) {
       <span><i>외국인</i> <b class="${dirClass(inv.foreign)}-c">${fmtShares(inv.foreign)}</b></span>
       <span><i>기관</i> <b class="${dirClass(inv.institution)}-c">${fmtShares(inv.institution)}</b></span>
       <span><i>개인</i> <b class="${dirClass(inv.individual)}-c">${fmtShares(inv.individual)}</b></span>
-      ${inv.foreignRatio ? `<span class="muted">외인 ${inv.foreignRatio}</span>` : ''}</div>` : '';
+      ${inv.foreignRatio ? `<span class="muted">외인 ${esc(inv.foreignRatio)}</span>` : ''}</div>` : '';
 
   return `<div class="stock ${moverCls}">
     <div class="stock-head">
-      <div class="nm">${esc(q.name)}<span class="code">${q.code}</span></div>
+      <div class="nm">${esc(q.name)}<span class="code">${esc(q.code)}</span></div>
       ${badge}
     </div>
     <div class="price-row">
@@ -529,17 +538,17 @@ function renderNews(q, data) {
   const sum = data && data.summary;
   const isMover = Math.abs(q.changePct ?? 0) >= MOVER_THRESHOLD;
   const head = isMover ? `<span>${q.changePct > 0 ? '📈 급등' : '📉 급락'} 관련 뉴스</span>` : `<span>📰 최근 뉴스</span>`;
-  const sumHtml = sum ? `<span class="news-sum ${sum.tone}">${sum.label} (호재 ${sum.pos}·악재 ${sum.neg})</span>` : '';
+  const sumHtml = sum ? `<span class="news-sum ${esc(sum.tone)}">${esc(sum.label)} (호재 ${esc(sum.pos)}·악재 ${esc(sum.neg)})</span>` : '';
   if (!items.length) {
     el.innerHTML = `<div class="news-head">${head}${sumHtml}</div><div class="muted" style="font-size:12px">관련 뉴스를 찾지 못했습니다.</div>`;
     return;
   }
   const rows = items.slice(0, isMover ? 5 : 3).map((it) => {
     const s = it.sentiment || { tone: 'neutral', label: '중립', keywords: [] };
-    const kw = s.keywords && s.keywords.length ? `<span class="kw"> · ${s.keywords.join(', ')}</span>` : '';
+    const kw = s.keywords && s.keywords.length ? `<span class="kw"> · ${esc(s.keywords.join(', '))}</span>` : '';
     return `<div class="news-item">
-      <span class="tag ${s.tone}">${s.label}</span>
-      <span><a href="${it.link}" target="_blank" rel="noopener">${esc(it.title)}</a>
+      <span class="tag ${esc(s.tone)}">${esc(s.label)}</span>
+      <span>${extLink(it.link, it.title)}
         <span class="news-time">${esc(it.source || '')} ${esc(it.time || '')}</span>${kw}</span></div>`;
   }).join('');
   el.innerHTML = `<div class="news-head">${head}${sumHtml}</div>${rows}`;
@@ -547,7 +556,32 @@ function renderNews(q, data) {
 
 // ---------- 루프 ----------
 // 한 번의 갱신 실패가 자동갱신 루프(setInterval)를 멈추지 않도록 각 호출의 거부를 삼킨다.
+// ---------- AI 상태 (화면 하단) ----------
+// 파이프라인이 회차마다 기록한 status.json을 사람이 읽을 수 있는 한 줄로 보여준다.
+// 파일이 아직 없거나(첫 실행 전) 읽기 실패면 표시하지 않는다.
+const AI_STATE = {
+  ok: ['🟢', 'AI 정상'],
+  idle: ['⚪', 'AI 대기 — 아직 새로 분석할 변동 없음'],
+  off: ['⚪', 'AI 꺼짐 — 키 미설정'],
+  quota: ['🟡', 'AI 일시 중지 — 무료 한도 소진(자동 재개)'],
+  error: ['🟡', 'AI 응답 오류(일시적)'],
+  auth: ['🔴', 'AI 오류 — 키 확인 필요'],
+  'no-model': ['🔴', 'AI 오류 — 사용 가능한 모델 없음'],
+};
+async function loadStatus() {
+  const el = $('#aiStatus');
+  if (!el) return;
+  try {
+    const ai = (await loadJson('status.json'))?.ai;
+    if (!ai || !AI_STATE[ai.state]) { el.hidden = true; return; }
+    const [icon, label] = AI_STATE[ai.state];
+    el.textContent = `${icon} ${label}${ai.model ? ` · ${ai.model}${ai.fallback ? ' (대체 모델)' : ''}` : ''}`;
+    el.hidden = false;
+  } catch { el.hidden = true; }
+}
+
 function tick() {
+  loadStatus().catch(() => {});
   loadMarket().catch((e) => console.warn('시장 갱신 실패:', e));
   loadQuotes().catch((e) => console.warn('종목 갱신 실패:', e));
 }
@@ -615,7 +649,9 @@ if (_jump && _jumpMkt && _jumpTop) {
   window.syncJump = function syncJump() {
     syncTopbar(); // 스티키 헤더 위치가 어긋나지 않도록 상단바 높이를 여기서도 확인
     const list = sections();
-    if (window.scrollY < window.innerHeight * 0.8) { _jump.hidden = true; return; } // 첫 화면에서는 방해하지 않는다
+    // 첫 화면에서는 방해하지 않는다. 창 높이가 0으로 잡히는 환경(숨은 창·일부 내장 브라우저)에서도
+    // 맨 위에서 버튼이 뜨지 않도록 최소 기준 300px을 둔다.
+    if (window.scrollY < Math.max(window.innerHeight * 0.8, 300)) { _jump.hidden = true; return; }
     _jump.hidden = false;
     if (list.length < 2) { _jumpMkt.hidden = true; return; } // 시장이 하나뿐이면 이동 버튼은 무의미
     _jumpMkt.hidden = false;

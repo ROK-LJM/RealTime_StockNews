@@ -214,6 +214,8 @@ button:hover { border-color: var(--accent); }
 
 .err { color: var(--neg); font-size: 13px; }
 .foot { text-align: center; color: var(--muted); font-size: 12px; padding: 18px; border-top: 1px solid var(--border); }
+.ai-status { display: inline-block; margin-bottom: 8px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px; color: var(--text); font-size: 12px; }
+.ai-status[hidden] { display: none; }
 
 .help { margin: 0 20px 10px; color: var(--muted); font-size: 13px; }
 .help summary { cursor: pointer; padding: 8px 0; }

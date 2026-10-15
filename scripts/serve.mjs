@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'docs');
 const PORT = process.env.PORT || 5175;
+// 기본은 이 PC에서만 접속(127.0.0.1). 같은 네트워크의 다른 기기에서 열어야 하면 HOST=0.0.0.0 으로 실행.
+const HOST = process.env.HOST || '127.0.0.1';
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml' };
 
 http.createServer((req, res) => {
@@ -20,4 +22,4 @@ http.createServer((req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.end(data);
   });
-}).listen(PORT, () => console.log(`\n  📈 [Pages 로컬 테스트]  →  http://localhost:${PORT}\n`));
+}).listen(PORT, HOST, () => console.log(`\n  📈 [Pages 로컬 테스트]  →  http://localhost:${PORT}  (바인딩 ${HOST})\n`));

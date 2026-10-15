@@ -2,6 +2,8 @@
 // 클라우드(서버리스)용 데이터 계층 — 전 세계 어디서나 동작하도록 야후 파이낸스 + 구글뉴스만 사용.
 // 한국 종목은 야후의 .KS(코스피)/.KQ(코스닥) 심볼로 조회한다. 외부 의존성 없음.
 
+import { mapLimit } from './util.mjs';
+
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
 // ---------- 캐시 (서버리스 인스턴스 재사용 시 유효) ----------
@@ -129,7 +131,9 @@ export async function getQuote(item) {
   }
 }
 
-export async function getQuotes(items) { return Promise.all(items.map(getQuote)); }
+// 종목이 많아도 한꺼번에 쏘지 않는다(차단·속도 제한 방지). 5개씩 동시 조회.
+const QUOTE_CONCURRENCY = 5;
+export async function getQuotes(items) { return mapLimit(items, QUOTE_CONCURRENCY, getQuote); }
 
 // ---------- 과거 시세(일봉) ----------
 // 야후 차트(무료, 키 불필요)로 약 6개월 일봉 종가를 받아온다 → 과거 등락 차트 + 예측의 입력.
@@ -308,19 +312,38 @@ export async function getIndexFlow(symbol) {
 
 // ---------- 무료 AI(Gemini) — 핵심 뉴스/종합 분석 판단 ----------
 // GEMINI_API_KEY(저장소 Secret)가 있으면 AI가 핵심을 분석. 없거나 실패하면 null → 헤드라인 폴백.
-// 모델 기본값은 flash-lite: 무료 일일한도(RPD)가 flash(250)보다 4배 큰 1,000이라 Action 반복 호출에 적합.
-const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite';
+// 기본 모델 flash-lite: 무료 일일한도가 커서 Action 반복 호출에 적합. 2.5는 기존 사용자에게만 열려 있어
+// (신규 프로젝트는 404) 쓸 수 없게 되면 공식 권장 후속 모델로 넘어간다 — GEMINI_FALLBACK_MODELS로 변경 가능.
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let GEMINI_KEY = '';
+let GEMINI_MODELS = [];
+// 한 회차 동안의 AI 상태. 키 오류·할당량 소진이면 남은 호출을 바로 건너뛰어 시간·한도를 낭비하지 않는다.
+const ai = { modelIdx: 0, disabled: '', calls: 0, ok: 0, failures: 0 };
 
-// 429(RPM 초과)/503은 잠깐 쉬고 재시도 — 한 번의 일시적 한도 초과로 분석이 통째로 비지 않도록.
-async function geminiJSON(prompt, { retries = 2 } = {}) {
-  if (!GEMINI_KEY) return null;
+// 회차 시작 시 상태 초기화(설정 재로딩·캐시 비움). Action은 매 회차 새 프로세스라 영향이 없고,
+// 한 프로세스에서 여러 번 실행하는 자체 테스트가 서로 섞이지 않게 해 준다.
+export function resetState() {
+  cache.clear();
+  krSuffix.clear();
+  GEMINI_KEY = process.env.GEMINI_API_KEY || '';
+  const primary = (process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite').trim();
+  const fallbacks = String(process.env.GEMINI_FALLBACK_MODELS ?? 'gemini-3.5-flash-lite').split(',');
+  GEMINI_MODELS = [...new Set([primary, ...fallbacks].map((s) => s.trim()).filter(Boolean))];
+  Object.assign(ai, { modelIdx: 0, disabled: '', calls: 0, ok: 0, failures: 0 });
+}
+resetState();
+
+const currentModel = () => GEMINI_MODELS[ai.modelIdx] || null;
+export function aiStatus() { return { enabled: !!GEMINI_KEY, model: currentModel(), primary: GEMINI_MODELS[0] || null, disabled: ai.disabled, calls: ai.calls, ok: ai.ok, failures: ai.failures }; }
+
+// 모델 1개에 요청. 429·503·500·타임아웃은 백오프 재시도, 나머지는 원인을 분류해 돌려준다.
+async function geminiCall(model, prompt, retries) {
   for (let attempt = 0; attempt <= retries; attempt++) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 20000);
     try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
+      ai.calls++;
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
         method: 'POST', signal: ctrl.signal,
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_KEY },
         body: JSON.stringify({
@@ -329,17 +352,43 @@ async function geminiJSON(prompt, { retries = 2 } = {}) {
         }),
       });
       clearTimeout(timer);
-      if ((res.status === 429 || res.status === 503) && attempt < retries) { await sleep(1500 * (attempt + 1)); continue; }
-      if (!res.ok) throw new Error('Gemini HTTP ' + res.status);
-      const j = await res.json();
-      const txt = j?.candidates?.[0]?.content?.parts?.[0]?.text;
-      return txt ? JSON.parse(txt) : null;
+      if (res.ok) {
+        const j = await res.json();
+        const txt = j?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!txt) return { kind: 'empty' };
+        try { return { kind: 'ok', json: JSON.parse(txt) }; } catch { return { kind: 'parse' }; }
+      }
+      const body = await res.text().catch(() => '');
+      if (res.status === 404 || (res.status === 400 && /not found|not supported|no longer available|not available/i.test(body))) return { kind: 'model' };
+      if (res.status === 401 || res.status === 403 || (res.status === 400 && /api[ _]?key|permission/i.test(body))) return { kind: 'auth' };
+      if ((res.status === 429 || res.status === 503 || res.status === 500) && attempt < retries) { await sleep(1500 * (attempt + 1)); continue; }
+      return { kind: res.status === 429 ? 'quota' : 'http', status: res.status };
     } catch (e) {
       clearTimeout(timer);
       if (attempt < retries && e.name === 'AbortError') { await sleep(1500); continue; }
-      console.error('    Gemini 실패:', e.message); return null;
+      console.error('    Gemini 실패:', e.message);
+      return { kind: 'network' };
     }
   }
+  return { kind: 'http' };
+}
+
+// 모델 사용 불가 → 다음 모델, 키 오류·할당량 소진 → 이번 회차 AI 중지, 일시 오류 → 이 호출만 실패.
+async function geminiJSON(prompt, { retries = 2 } = {}) {
+  if (!GEMINI_KEY || ai.disabled) return null;
+  while (ai.modelIdx < GEMINI_MODELS.length) {
+    const model = currentModel();
+    const r = await geminiCall(model, prompt, retries);
+    if (r.kind === 'ok') { ai.ok++; return r.json; }
+    if (r.kind === 'model') { console.warn(`    Gemini 모델 사용 불가(${model}) — 다음 모델로 전환`); ai.modelIdx++; continue; }
+    if (r.kind === 'auth') { ai.disabled = 'auth'; console.error('    Gemini 인증 오류 — 키 확인 필요, 이번 회차 AI 중지'); return null; }
+    if (r.kind === 'quota') { ai.disabled = 'quota'; console.error('    Gemini 할당량 소진 — 이번 회차 AI 중지(기존 분석 유지)'); return null; }
+    ai.failures++;
+    if (r.kind !== 'network') console.error(`    Gemini 응답 오류(${r.status || r.kind})`);
+    return null;
+  }
+  ai.disabled = 'no-model';
+  console.error('    사용 가능한 Gemini 모델 없음 — 이번 회차 AI 중지 (GEMINI_MODEL 확인)');
   return null;
 }
 
@@ -360,7 +409,7 @@ export async function aiCoreNews(name, changePct, headlines) {
     .map((it) => { const h = headlines[(parseInt(it.index, 10) || 0) - 1]; return h ? { title: h.title, source: h.source, time: h.time, link: h.link, why: String(it.why || '') } : null; })
     .filter(Boolean).slice(0, 3);
   if (!items.length) return null;
-  return { summary: String(parsed.summary || ''), items, model: GEMINI_MODEL };
+  return { summary: String(parsed.summary || ''), items, model: currentModel() };
 }
 
 // 보유 종목 ±이 임계치 이상 변동 시, 뉴스만이 아니라 수급·추세·시세를 종합해 "왜 오르내리는지" 분석.
@@ -412,7 +461,7 @@ export async function aiStockAnalysis({ quote, news, flow, history }) {
     summary: String(parsed.summary || ''),
     factors: Array.isArray(parsed.factors) ? parsed.factors.map((x) => String(x)).filter(Boolean).slice(0, 4) : [],
     outlook: String(parsed.outlook || ''),
-    model: GEMINI_MODEL,
+    model: currentModel(),
   };
 }
 

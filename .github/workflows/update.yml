@@ -20,14 +20,17 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
+    # 비정상적으로 오래 걸리면 끊는다 — 기본값(6시간) 동안 다음 회차가 줄줄이 막히는 것 방지
+    timeout-minutes: 15
     steps:
       - name: 체크아웃
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Node 설치
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          # 로컬 검증 환경(Node 24 LTS)과 맞춤. Node 20은 2026-04 지원 종료
+          node-version: "24"
 
       - name: 시세·뉴스 받아 JSON 생성
         run: node scripts/fetch.mjs

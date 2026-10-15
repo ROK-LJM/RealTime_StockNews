@@ -1,0 +1,14 @@
+# 공개 저장소 — 비밀정보·로컬 산출물이 실수로 커밋되지 않게 한다
+.env
+.env.*
+*.pem
+*.key
+*.p12
+
+# 원자적 쓰기 도중 끊기면 남을 수 있는 임시 파일(docs/data/*.json.<pid>.tmp)
+*.tmp
+
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
