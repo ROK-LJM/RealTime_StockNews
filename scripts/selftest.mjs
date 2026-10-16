@@ -376,6 +376,33 @@ await test('AI 일일 한도(429 PerDay): 재시도 없이 대체 모델로 · �
   await pipeline(root, { gemini, newsTag: 'b' }, NOW_KR + 10 * MIN);
   assert.equal(geminiCalls('model-primary'), 0);
 });
+await test('AI 무료 한도 0인 모델(429 limit: 0): 재시도 없이 그날 사용 불가로 제외 · 다른 모델로 분석', async () => {
+  const root = workspace();
+  const zero = json({ error: { code: 429, status: 'RESOURCE_EXHAUSTED',
+    message: 'Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: model-fallback',
+    details: [{ '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaId: 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier' }] }] } }, 429);
+  await pipeline(root, { gemini: (model) => (model === 'model-fallback' ? zero : json(geminiOk)) });
+  assert.equal(geminiCalls('model-fallback'), 1, '분당 한도로 오인해 재시도하지 않음');
+  const s = read(root, 'status.json');
+  assert.deepEqual([s.ai.state, s.budget.out], ['ok', { 'model-fallback': 'unavailable' }]);
+  assert.equal(read(root, 'analysis.json')['005930'].model, 'model-primary');
+  await pipeline(root, { newsTag: 'b', gemini: (model) => (model === 'model-fallback' ? zero : json(geminiOk)) }, NOW_KR + 10 * MIN);
+  assert.equal(geminiCalls('model-fallback'), 0, '같은 한도일엔 다시 부르지 않음');
+});
+await test('기본 AI 모델: 무료 Flash-Lite 3종(주 2.5 · 대체 3.5 · 3.1) — 환경변수로 바꿀 수 있음', () => {
+  const saved = { m: process.env.GEMINI_MODEL, f: process.env.GEMINI_FALLBACK_MODELS };
+  try {
+    delete process.env.GEMINI_MODEL; delete process.env.GEMINI_FALLBACK_MODELS;
+    src.resetState();
+    assert.deepEqual(src.aiModels(), ['gemini-2.5-flash-lite', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite']);
+    process.env.GEMINI_FALLBACK_MODELS = ' gemini-3.5-flash-lite , ,gemini-2.5-flash-lite ';
+    src.resetState();
+    assert.deepEqual(src.aiModels(), ['gemini-2.5-flash-lite', 'gemini-3.5-flash-lite'], '공백·빈 항목·중복 정리');
+  } finally {
+    process.env.GEMINI_MODEL = saved.m; process.env.GEMINI_FALLBACK_MODELS = saved.f;
+    src.resetState();
+  }
+});
 await test('모든 모델 일일 한도 소진: 호출 없이 한도 소진 상태 유지 → 다음 한도일에 자동 재개', async () => {
   const root = workspace();
   await pipeline(root, { gemini: () => quota429('Day') });

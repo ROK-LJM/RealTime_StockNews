@@ -315,6 +315,8 @@ export async function getIndexFlow(symbol) {
 // GEMINI_API_KEY(저장소 Secret)가 있으면 AI가 핵심을 분석. 없거나 실패하면 null → 헤드라인 폴백.
 // 무료 한도는 모델마다 따로이고 하루 수십 회뿐이라(실측), 주 모델과 대체 모델(GEMINI_FALLBACK_MODELS)을 함께 쓰고
 // 하루 예산을 장 시간에 맞춰 나눠 쓴다(aibudget.mjs). 2.5는 기존 사용자에게만 열려 있어 막히면 대체 모델만 쓴다.
+// 기본 모델은 모두 공식 가격표의 무료 등급("Free of charge", 2026-10-15 확인) Flash-Lite 계열:
+//   gemini-2.5-flash-lite · gemini-3.5-flash-lite · gemini-3.1-flash-lite(가장 이른 종료 2027-05-07 — 종료되면 자동 제외)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // 일시 오류 재시도 간격(밀리초, 시도마다 배수로 늘어남). 자체 테스트가 실제로 기다리지 않도록 바꿀 수 있게 객체로 둔다.
 export const retryTiming = { baseMs: 1500 };
@@ -335,7 +337,7 @@ export function resetState() {
   krSuffix.clear();
   GEMINI_KEY = process.env.GEMINI_API_KEY || '';
   const primary = (process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite').trim();
-  const fallbacks = String(process.env.GEMINI_FALLBACK_MODELS ?? 'gemini-3.5-flash-lite').split(',');
+  const fallbacks = String(process.env.GEMINI_FALLBACK_MODELS ?? 'gemini-3.5-flash-lite,gemini-3.1-flash-lite').split(',');
   GEMINI_MODELS = [...new Set([primary, ...fallbacks].map((s) => s.trim()).filter(Boolean))];
   Object.assign(ai, { disabled: '', calls: 0, ok: 0, failures: 0, skipped: 0, lastModel: null });
   budget = null;
@@ -386,6 +388,9 @@ async function geminiCall(model, prompt, retries) {
       const body = await res.text().catch(() => '');
       if (res.status === 404 || (res.status === 400 && /not found|not supported|no longer available|not available/i.test(body))) return { kind: 'model' };
       if (res.status === 401 || res.status === 403 || (res.status === 400 && /api[ _]?key|permission/i.test(body))) return { kind: 'auth' };
+      // 한도가 아예 0("limit: 0") = 이 프로젝트의 무료 등급에서 쓸 수 없는 모델 — 사용 불가로 보고 그날 뺀다
+      // (분당 한도로 오인해 회차마다 재시도를 되풀이하지 않게)
+      if (res.status === 429 && /\blimit:\s*0\b/i.test(body)) return { kind: 'model' };
       // 일일 한도 소진(…PerDay…)은 기다려도 안 풀린다 — 재시도 없이 바로 알린다. 분당 한도(429)만 재시도.
       if (res.status === 429 && /per ?day|daily/i.test(body)) return { kind: 'quota' };
       if ((res.status === 429 || res.status === 503 || res.status === 500) && attempt < retries) { await sleep(retryTiming.baseMs * (attempt + 1)); continue; }
