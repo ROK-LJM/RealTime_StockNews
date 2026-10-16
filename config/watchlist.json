@@ -19,6 +19,7 @@
     { "code": "TSLA", "market": "US", "name": "테슬라" },
     { "code": "AAPL", "market": "US", "name": "애플" },
     { "code": "MSFT", "market": "US", "name": "마이크로소프트" },
-    { "code": "AMZN", "market": "US", "name": "아마존닷컴" }
+    { "code": "AMZN", "market": "US", "name": "아마존닷컴" },
+    { "code": "000720", "market": "KR", "name": "현대건설" }
   ]
 }
