@@ -9,7 +9,9 @@ const CHART_H = 120;      // 차트 높이(px). style.css의 .chart/.chart canva
 const $ = (s) => document.querySelector(s);
 // openAnalysis: 펼쳐 둔 AI 종합분석의 종목코드. 자동 새로고침으로 카드를 다시 그려도 접히지 않게 유지한다.
 // loadedOnce: 한 번이라도 시세를 그렸는지. 이후의 일시적 로드 실패로 화면을 비우지 않기 위한 표시.
-const state = { timer: null, intervalSec: 60, hist: {}, news: {}, inv: {}, analysis: {}, disc: {}, openAnalysis: new Set(), loadedOnce: false };
+// sort: 카드 순서('mine' 내 순서 | 'move' 등락 큰 순, 이 기기에 기억). whyAll: '왜 움직였나' 전체 펼침. data: 마지막으로 받은 quotes.json
+const state = { timer: null, intervalSec: 60, hist: {}, news: {}, inv: {}, analysis: {}, disc: {}, openAnalysis: new Set(), loadedOnce: false,
+  sort: 'mine', whyAll: false, data: null, gauge: null, briefOpen: new Map() };
 
 // ---------- 포맷 ----------
 function fmtPrice(q) {
@@ -112,9 +114,15 @@ function forecast(closes, horizon) {
 }
 
 // ---------- 게이지 ----------
+// 기준 좌표 220×130으로 그리고, 화면에 보이는 크기·화소 밀도에 맞춰 배율만 바꾼다(휴대폰에서 작게 보여도 선명하게).
 function drawGauge(canvas, score, tone) {
+  if (!canvas) return;
+  state.gauge = { score, tone }; // 창 크기가 바뀌면 다시 그리기용
+  const W = 220, H = 130;
+  const k = ((canvas.clientWidth || W) / W) * (window.devicePixelRatio || 1);
+  canvas.width = Math.round(W * k); canvas.height = Math.round(H * k);
   const ctx = canvas.getContext('2d');
-  const W = canvas.width, H = canvas.height;
+  ctx.setTransform(k, 0, 0, k, 0, 0);
   ctx.clearRect(0, 0, W, H);
   const cx = W / 2, cy = H - 14, r = 92;
   ctx.lineWidth = 14; ctx.lineCap = 'round';
@@ -258,24 +266,26 @@ async function loadMarket() {
     $('#moodScore').textContent = mood.score ?? '--';
     $('#moodLabel').textContent = mood.label || '—';
     $('#moodSummary').textContent = mood.summary || '';
-    const idxHtml = (m.indices || []).map((i) => {
-      const c = dirClass(i.changePct);
-      const arrow = i.changePct > 0 ? '▲' : i.changePct < 0 ? '▼' : '–';
-      const price = (i.price ?? 0).toLocaleString(i.currency === 'KRW' ? 'ko-KR' : 'en-US', { maximumFractionDigits: 2 });
-      const cur = i.currency === 'KRW' ? 'KRW2' : 'USD';
-      return `<div class="idx"><div class="nm">${esc(i.name)}</div>
-        <div class="pv ${c}-c">${price}</div>
-        <div class="ch ${c}-c">${arrow} ${fmtChange({ change: i.change, currency: cur })} (${fmtPct(i.changePct)})</div></div>`;
-    }).join('');
-    const fxHtml = (m.forex || []).map((f) => {
-      const c = dirClass(f.changePct);
-      const arrow = f.changePct > 0 ? '▲' : f.changePct < 0 ? '▼' : '–';
-      const price = (f.price ?? 0).toLocaleString('ko-KR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      return `<div class="idx fx"><div class="nm">💱 ${esc(f.name)}</div>
-        <div class="pv ${c}-c">${price}<span class="fx-u">원</span></div>
-        <div class="ch ${c}-c">${arrow} ${fmtChange({ change: f.change, currency: 'KRW2' })} (${fmtPct(f.changePct)})</div></div>`;
-    }).join('');
-    $('#indices').innerHTML = (idxHtml + fxHtml) || '<div class="muted">지수 데이터를 불러오지 못했습니다.</div>';
+    // 국내 / 미국 / 환율 세 묶음의 줄 목록 — 작은 카드 7개가 줄바꿈되며 하나만 남던 배치를 없애고, 휴대폰에서 높이를 절반으로.
+    // 지수 변동폭은 '포인트'라 통화 기호를 붙이지 않는다(예전엔 미국 지수에 $가 붙었다).
+    const num2 = (v) => Math.abs(v ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const row = (name, price, change, pct, unit = '') => {
+      const c = dirClass(pct);
+      const arrow = pct > 0 ? '▲' : pct < 0 ? '▼' : '–';
+      return `<div class="idx-row"><span class="nm">${esc(name)}</span>
+        <span class="pv ${c}-c">${price}${unit ? `<span class="fx-u">${unit}</span>` : ''}</span>
+        <span class="ch ${c}-c">${arrow} ${num2(change)}</span><span class="pc ${c}-c">${fmtPct(pct)}</span></div>`;
+    };
+    const idxRow = (i) => row(i.name, (i.price ?? 0).toLocaleString('en-US', { maximumFractionDigits: 2 }), i.change, i.changePct);
+    const fxRow = (f) => row(f.name, (f.price ?? 0).toLocaleString('ko-KR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), f.change, f.changePct, '원');
+    const idx = m.indices || [];
+    const groups = [
+      ['🇰🇷 국내', idx.filter((i) => i.currency === 'KRW').map(idxRow)],
+      ['🇺🇸 미국', idx.filter((i) => i.currency !== 'KRW').map(idxRow)],
+      ['💱 환율', (m.forex || []).map(fxRow)],
+    ].filter(([, rows]) => rows.length);
+    $('#indices').innerHTML = groups.map(([title, rows]) => `<div class="idx-group card"><div class="idx-gt">${title}</div>${rows.join('')}</div>`).join('')
+      || '<div class="muted">지수 데이터를 불러오지 못했습니다.</div>';
     try { renderBriefs(m.briefs); } catch (e) { console.warn('브리핑 렌더 실패:', e); } // 브리핑이 깨져도 게이지·지수는 유지
   } catch (e) {
     $('#moodLabel').textContent = '시장 데이터 대기 중'; $('#moodSummary').textContent = '아직 데이터가 생성되지 않았을 수 있어요(첫 갱신 대기).';
@@ -301,8 +311,12 @@ function renderBriefs(briefs) {
         ${extLink(it.link, it.title)}
         ${it.why ? `<span class="ai-why">— ${esc(it.why)}</span>` : ''}</div>`).join('');
       const at = fmtAiTime(b.reason.aiAt); // 한도 배분으로 이전 판단을 이어 쓸 수 있어 분석 시각을 함께 보여준다
+      // 근거 뉴스는 접을 수 있게 — 휴대폰에선 처음에 접어 둔다(펼친 상태는 새로고침해도 유지)
+      const key = String(b.key || b.name);
+      const open = state.briefOpen.has(key) ? state.briefOpen.get(key) : !isNarrow();
       reasonBlock = `<div class="brief-reason"><span class="ai-badge">🤖 AI 핵심</span> ${esc(ai.summary)}${at ? ` <span class="ai-at">${esc(at)} 분석</span>` : ''}</div>
-        <div class="ai-items">${items}</div>`;
+        <details class="ai-items-d" data-key="${esc(key)}"${open ? ' open' : ''}><summary>근거 뉴스 ${ai.items.length}건</summary>
+        <div class="ai-items">${items}</div></details>`;
     } else {
       const heads = (b.reason && b.reason.headlines) || [];
       const top = heads[0];
@@ -329,7 +343,9 @@ function renderBriefs(briefs) {
       ${flowHtml}
     </div>`;
   }).join('');
+  el.querySelectorAll('details.ai-items-d').forEach((d) => d.addEventListener('toggle', () => state.briefOpen.set(d.dataset.key, d.open)));
 }
+const isNarrow = () => window.matchMedia('(max-width: 720px)').matches;
 
 // ---------- 보유 종목 ----------
 async function loadQuotes() {
@@ -347,7 +363,7 @@ async function loadQuotes() {
     // 자동 새로고침 중 일시적 실패(5xx·오프라인 등)로 이미 그려진 화면을 지우지 않는다.
     // 첫 로딩 전이라면 안내를 띄우고, 이미 표시 중이라면 기존 시세를 유지한 채 실패만 알린다.
     console.warn('시세 로드 실패:', e);
-    if (state.loadedOnce) $('#clock').textContent = '⚠ 갱신 실패 · 마지막 시세';
+    if (state.loadedOnce) { $('#clock').textContent = '⚠ 갱신 실패'; $('#clock').title = '잠시 후 다시 시도합니다 — 화면은 마지막 시세'; }
     else $('#grid').innerHTML = `<div class="muted">아직 데이터가 없습니다. GitHub Actions 첫 실행을 기다려주세요.</div>`;
     return;
   }
@@ -356,12 +372,24 @@ async function loadQuotes() {
   state.inv = inv || {};
   state.analysis = analysis || {};
   state.disc = disc || {};
+  state.data = data;
+  const clock = $('#clock');
+  if (clock) { // 좁은 화면에선 '확인' 글자를 숨겨 상단바를 한 줄로
+    clock.innerHTML = `<span class="clock-l">확인 </span>${new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
+    clock.title = '화면이 마지막으로 데이터를 확인한 시각';
+  }
+  renderQuotes();
+}
+
+// 받은 데이터로 '한눈에'와 카드를 그린다 — 카드 순서만 바꿀 때는 다시 받지 않고 이것만 호출
+function renderQuotes() {
+  const data = state.data;
+  if (!data) return;
   const quotes = data.quotes || [];
-  if (!quotes.length) { $('#grid').innerHTML = '<div class="muted">추적 종목이 없습니다. config/watchlist.json을 편집하세요.</div>'; return; }
+  if (!quotes.length) { $('#grid').innerHTML = '<div class="muted">추적 종목이 없습니다. ✏️ 종목 편집으로 추가하세요.</div>'; return; }
 
   // 갱신 시각·장 상태는 시장마다 다르므로(국내 마감인데 미국은 장중 등) 그룹 헤더에서 각각 보여준다.
   $('#updated').textContent = `총 ${quotes.length}종목`;
-  $('#clock').textContent = '확인 ' + new Date().toLocaleTimeString('ko-KR');
 
   // 국장·미장을 나눠 렌더 — 종목이 많아져도 한눈에 구분되도록.
   const groups = {};
@@ -369,10 +397,14 @@ async function loadQuotes() {
   const known = MARKET_GROUPS.map((g) => g.key);
   // 예상하지 못한 시장 값이 들어와도 종목이 사라지지 않도록 별도 그룹으로 함께 표시한다.
   const extra = Object.keys(groups).filter((k) => !known.includes(k)).map((k) => ({ key: k, label: k, hint: '' }));
-  const html = [...MARKET_GROUPS, ...extra].map((g) => {
-    const list = groups[g.key];
-    if (!list || !list.length) return ''; // 빈 그룹은 헤더도 만들지 않음
-    try { return renderGroup(g, list, data.closed); }
+  const ordered = [...MARKET_GROUPS, ...extra].filter((g) => groups[g.key] && groups[g.key].length) // 빈 그룹은 헤더도 만들지 않음
+    .map((g) => ({ g, list: groups[g.key] }));
+  try { renderBoard(ordered, data.closed); } catch (e) { console.warn('한눈에 렌더 실패:', e); }
+  // '등락 큰 순'이면 그룹 안에서 움직임이 큰 종목부터(같으면 원래 순서 유지, 수집 실패는 맨 뒤)
+  const move = (q) => (q && q.ok ? Math.abs(q.changePct ?? 0) : -1);
+  const html = ordered.map(({ g, list }) => {
+    const shown = state.sort === 'move' ? [...list].sort((a, b) => move(b) - move(a)) : list;
+    try { return renderGroup(g, shown, data.closed); }
     catch (e) { console.warn('그룹 렌더 실패:', g.key, e); return ''; }
   }).join('');
   hideTip(); // 카드를 통째로 교체하므로, 가리키던 종목의 툴팁이 화면에 남지 않게 먼저 지운다
@@ -404,10 +436,13 @@ const MARKET_GROUPS = [
 // market 값이 없어도 통화로 시장을 추정한다(카드 표시 로직과 동일 규칙).
 function marketOf(q) { return q.market || (q.currency === 'KRW' ? 'KR' : 'US'); }
 
+// 그 시장의 마지막 시세 시각 — 오늘이면 '18:17', 아니면 '10/17 05:00'(짧게: 이름표가 한 줄에 들어가게)
 function lastTimeOf(list) {
   const times = list.map((q) => q.asOf).filter(Boolean).map((s) => +new Date(s)).filter(Number.isFinite);
   if (!times.length) return '';
-  return new Date(Math.max(...times)).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const d = new Date(Math.max(...times));
+  const hm = d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return d.toDateString() === new Date().toDateString() ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
 }
 
 // ---------- 데이터 지연 경고 ----------
@@ -441,21 +476,7 @@ function staleOf(market, valid, closed, ms = Date.now()) {
 
 // 시장별 묶음: 헤더(종목수·상승/하락 개수·해당 시장 장상태·갱신시각) + 그 시장의 카드 그리드
 function renderGroup(g, list, closed) {
-  // 수집 실패(ok:false) 종목은 집계에서 뺀다 — 넣으면 '전 종목 보합·마감'처럼 잘못 단정된다.
-  const valid = list.filter((q) => q && q.ok);
-  const failed = list.length - valid.length;
-  const up = valid.filter((q) => (q.changePct ?? 0) > 0).length;
-  const down = valid.filter((q) => (q.changePct ?? 0) < 0).length;
-  const t = lastTimeOf(valid);
-  // 오래된 '장중' 표시는 지금도 장중이라는 보장이 없으므로 지연 경고로 바꿔 보여준다
-  const stale = valid.length ? staleOf(g.key, valid, closed) : '';
-  // '장중 아님'과 '상태를 알 수 없음'을 구분한다(전부 실패했는데 마감이라고 하지 않도록).
-  let status;
-  if (!valid.length) status = '⚠️ 수집 실패';
-  else if (stale) status = `⚠️ ${stale}`;
-  else if (valid.some((q) => q.marketStatus === 'OPEN')) status = '🟢 장중';
-  else if (valid.some((q) => q.marketStatus)) status = '⚪ 마감';
-  else status = '';
+  const { valid, failed, up, down, t, stale, status } = groupInfo(g, list, closed);
   const titleId = 'mg-' + cssId(g.key);
   const cards = list.map((q) => {
     try { return renderCard(q, state.hist[q.code], state.inv[q.code]); }
@@ -468,20 +489,137 @@ function renderGroup(g, list, closed) {
       <span class="mgroup-count">${list.length}종목</span>
       ${failed && valid.length ? `<span class="mgroup-fail">${failed}개 수집 실패</span>` : ''}
       ${valid.length ? `<span class="mgroup-updown"><b class="up-c">▲ ${up}</b> <b class="down-c">▼ ${down}</b></span>` : ''}
-      <span class="mgroup-status${stale ? ' stale' : ''}"${stale ? ' title="보통 5분마다 갱신됩니다. 수집 봇(GitHub Actions)이 멈췄거나 시세 출처에 문제가 있을 수 있어요 — 도움말 FAQ 참고"' : ''}>${status}${t ? ` · ${t}` : ''}</span>
+      <span class="mgroup-status${stale ? ' stale' : ''}"${stale ? ` title="${STALE_TIP}"` : ''}>${status}${t ? ` · ${t}` : ''}</span>
     </div>
     <div class="grid">${cards}</div>
   </section>`;
 }
 
+// 시장 묶음 요약 — 그룹 이름표와 '한눈에'가 같은 기준을 쓴다.
+// 수집 실패(ok:false) 종목은 집계에서 뺀다 — 넣으면 '전 종목 보합·마감'처럼 잘못 단정된다.
+const STALE_TIP = '보통 5분마다 갱신됩니다. 수집 봇(GitHub Actions)이 멈췄거나 시세 출처에 문제가 있을 수 있어요 — 도움말 FAQ 참고';
+function groupInfo(g, list, closed) {
+  const valid = list.filter((q) => q && q.ok);
+  const up = valid.filter((q) => (q.changePct ?? 0) > 0).length;
+  const down = valid.filter((q) => (q.changePct ?? 0) < 0).length;
+  // 오래된 '장중' 표시는 지금도 장중이라는 보장이 없으므로 지연 경고로 바꿔 보여준다
+  const stale = valid.length ? staleOf(g.key, valid, closed) : '';
+  // '장중 아님'과 '상태를 알 수 없음'을 구분한다(전부 실패했는데 마감이라고 하지 않도록).
+  let status;
+  if (!valid.length) status = '⚠️ 수집 실패';
+  else if (stale) status = `⚠️ ${stale}`;
+  else if (valid.some((q) => q.marketStatus === 'OPEN')) status = '🟢 장중';
+  else if (valid.some((q) => q.marketStatus)) status = '⚪ 마감';
+  else status = '';
+  return { valid, failed: list.length - valid.length, up, down, t: lastTimeOf(valid), stale, status };
+}
+
+// ---------- 내 종목 한눈에 ----------
+// 시장별 등락률 색 타일(진할수록 크게 움직임, 오른 종목부터) + ±2% 넘게 움직인 종목의 '왜' 한 줄.
+// 이유는 🧠 AI 진단 → 📋 오늘 주요 공시 → 📰 첫 뉴스 순으로 고른다. 이미 받은 데이터만 쓴다(추가 요청 없음).
+// 타일·줄을 누르면 그 종목 카드로 이동한다.
+const WHY_MIN = 2;  // % — AI 종합분석 대상 기준과 같게
+const WHY_SHOW = 6; // 처음에 보여줄 줄 수(나머지는 '더 보기')
+function keyDiscToday(code) {
+  const today = kstYmd(Date.now());
+  return (state.disc[code]?.items || []).find((x) => x && x.key && x.date === today && x.title) || null;
+}
+function whyOf(q) {
+  const a = state.analysis[q.code];
+  if (a && a.headline) return { icon: '🧠', label: 'AI 진단', text: a.headline };
+  const d = keyDiscToday(q.code);
+  if (d) return { icon: '📋', label: '오늘 공시', text: `[${d.tag || '공시'}] ${d.title}` };
+  const n = state.news[q.code]?.items?.[0];
+  if (n && n.title) return { icon: '📰', label: '최근 뉴스', text: n.title };
+  return null;
+}
+function tileHtml(q) {
+  if (!q || !q.ok) {
+    return `<button type="button" class="tile err" data-code="${esc(q?.code)}" title="데이터 오류"><span class="t-nm">${esc(q?.name || q?.code)}</span><span class="t-pct">오류</span></button>`;
+  }
+  const p = q.changePct ?? 0;
+  const a = (0.12 + 0.68 * Math.min(Math.abs(p), 5) / 5).toFixed(2); // 색 진하기: 0% 0.12 ~ 5% 이상 0.8
+  const disc = keyDiscToday(q.code);
+  const tip = `${q.name} ${fmtPct(p)}${disc ? ` · 오늘 주요 공시: ${disc.title}` : ''}`;
+  return `<button type="button" class="tile ${dirClass(p)}" style="--a:${a}" data-code="${esc(q.code)}" title="${esc(tip)}">
+    <span class="t-nm">${esc(q.name)}</span><span class="t-pct">${fmtPct(p)}</span>${disc ? '<span class="t-dot" aria-label="오늘 주요 공시">📋</span>' : ''}</button>`;
+}
+function renderBoard(groups, closed) {
+  const el = $('#board');
+  if (!el) return;
+  const byPct = (a, b) => (b && b.ok ? b.changePct ?? 0 : -Infinity) - (a && a.ok ? a.changePct ?? 0 : -Infinity) || 0;
+  const mkts = groups.map(({ g, list }) => {
+    const { valid, up, down, t, stale, status } = groupInfo(g, list, closed);
+    return `<div class="bm" style="--n:${list.length}">
+      <div class="bm-head"><span class="bm-title">${esc(g.label)}</span>
+        ${valid.length ? `<span class="mgroup-updown"><b class="up-c">▲ ${up}</b> <b class="down-c">▼ ${down}</b></span>` : ''}
+        <span class="bm-status${stale ? ' stale' : ''}"${stale ? ` title="${STALE_TIP}"` : ''}>${status}${t ? ` · ${t}` : ''}</span></div>
+      <div class="tiles">${[...list].sort(byPct).map(tileHtml).join('')}</div>
+    </div>`;
+  }).join('');
+  // 왜 움직였나 — 시장 순서(국내 → 해외)대로, 그 안에서 많이 움직인 종목부터
+  const movers = groups.flatMap(({ list }) => list.filter((q) => q && q.ok && Math.abs(q.changePct ?? 0) >= WHY_MIN)
+    .sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct)));
+  const show = isNarrow() ? 4 : WHY_SHOW; // 휴대폰은 처음에 4줄
+  const rows = movers.map((q, i) => {
+    const w = whyOf(q), p = q.changePct;
+    return `<button type="button" class="why-row${i >= show && !state.whyAll ? ' more' : ''}" data-code="${esc(q.code)}">
+      <span class="w-pct ${dirClass(p)}-c">${p > 0 ? '▲' : '▼'} ${Math.abs(p).toFixed(2)}%</span>
+      <span class="w-nm">${esc(q.name)}</span>
+      <span class="w-txt">${w ? `<i title="${esc(w.label)}">${w.icon}</i> ${esc(w.text)}` : '<span class="muted">아직 이유 정보가 없어요(뉴스·공시·AI 대기)</span>'}</span>
+    </button>`;
+  }).join('');
+  const more = movers.length > show && !state.whyAll ? `<button type="button" class="why-more" data-why="all">${movers.length - show}종목 더 보기 ▾</button>` : '';
+  el.innerHTML = `<div class="board-head"><h2 id="boardTitle">📊 오늘 내 종목 한눈에</h2>
+      <span class="board-hint">진한 색일수록 크게 움직임 · 누르면 그 종목 카드로</span></div>
+    <div class="board-mkts">${mkts}</div>
+    <div class="why">
+      <div class="why-head">🔎 왜 움직였나 <span class="muted">±${WHY_MIN}% 이상</span></div>
+      ${rows || `<div class="why-none muted">오늘은 ±${WHY_MIN}% 넘게 움직인 종목이 없어요.</div>`}${more}
+    </div>`;
+  el.hidden = false;
+}
+
+// 카드로 이동 + 잠깐 강조(어느 카드인지 바로 보이게)
+const scrollMode = () => (window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
+function goToCard(code) {
+  const card = document.getElementById('card-' + cssId(code));
+  if (!card) return;
+  card.scrollIntoView({ behavior: scrollMode(), block: 'start' });
+  card.classList.remove('flash');
+  void card.offsetWidth; // 연달아 눌러도 강조 애니메이션이 다시 시작되게
+  card.classList.add('flash');
+  clearTimeout(card._flashT);
+  card._flashT = setTimeout(() => card.classList.remove('flash'), 1800);
+}
+$('#board')?.addEventListener('click', (e) => {
+  if (e.target.closest('[data-why="all"]')) { state.whyAll = true; renderQuotes(); return; }
+  const b = e.target.closest('[data-code]');
+  if (b) goToCard(b.dataset.code);
+});
+
+// ---------- 카드 순서 (내 순서 / 등락 큰 순) — 이 기기에 기억 ----------
+const SORT_KEY = 'stockdash.sort';
+try { const s = localStorage.getItem(SORT_KEY); if (s === 'mine' || s === 'move') state.sort = s; } catch {}
+function syncSortButtons() {
+  document.querySelectorAll('.seg [data-sort]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.sort === state.sort)));
+}
+document.querySelectorAll('.seg [data-sort]').forEach((b) => b.addEventListener('click', () => {
+  if (state.sort === b.dataset.sort) return;
+  state.sort = b.dataset.sort;
+  syncSortButtons();
+  try { localStorage.setItem(SORT_KEY, state.sort); } catch {}
+  renderQuotes();
+}));
+syncSortButtons();
+
 // 카드 렌더가 예기치 못한 데이터로 실패했을 때 보여줄 최소 안전 카드.
 function errCard(q) {
   const name = esc((q && (q.name || q.code)) || '종목');
-  return `<div class="stock"><div class="stock-head"><div class="nm">${name}</div></div>
+  return `<div class="stock"${q && q.code ? ` id="card-${cssId(q.code)}"` : ''}><div class="stock-head"><div class="nm">${name}</div></div>
     <div class="err">표시 중 오류가 발생했습니다.</div></div>`;
 }
 
-// 급등락 종목 AI 종합분석 — 한 줄 진단은 항상 보이고, 클릭하면 종합분석·핵심요인·관전포인트가 펼쳐진다.
 // 분석에 쓴 입력 — 미국 종목은 수급이 없고, 공시는 분석 당시 입력(sig)에 공시 접수번호가 있을 때만
 function basisOf(q, data) {
   if (marketOf(q) === 'US') return '뉴스·추세';
@@ -509,6 +647,7 @@ function renderDisc(q, data) {
   el.hidden = false;
 }
 
+// 급등락 종목 AI 종합분석 — 한 줄 진단은 항상 보이고, 클릭하면 종합분석·핵심요인·관전포인트가 펼쳐진다.
 function renderAnalysis(q, data) {
   const el = document.getElementById('analysis-' + cssId(q.code));
   if (!el) return;
@@ -546,7 +685,7 @@ function retSpan(label, v) {
 function renderCard(q, hist, inv) {
   const id = cssId(q.code);
   if (!q.ok) {
-    return `<div class="stock">
+    return `<div class="stock" id="card-${id}">
       <div class="stock-head"><div class="nm">${esc(q.name)}<span class="code">${esc(q.code)}</span></div></div>
       <div class="err">데이터 오류: ${esc(q.error || '')}</div></div>`;
   }
@@ -579,7 +718,8 @@ function renderCard(q, hist, inv) {
       <span><i>개인</i> <b class="${dirClass(inv.individual)}-c">${fmtShares(inv.individual)}</b></span>
       ${inv.foreignRatio ? `<span class="muted">외인 ${esc(inv.foreignRatio)}</span>` : ''}</div>` : '';
 
-  return `<div class="stock ${moverCls}">
+  // 순서: 시세 → 🧠 왜 움직였나(급등락 종목) → 기간 수익률·차트·예측 → 수급·고저 → 공시 → 뉴스
+  return `<div class="stock ${moverCls}" id="card-${id}">
     <div class="stock-head">
       <div class="nm">${esc(q.name)}<span class="code">${esc(q.code)}</span></div>
       ${badge}
@@ -588,6 +728,7 @@ function renderCard(q, hist, inv) {
       <span class="price">${fmtPrice(q)}</span>
       <span class="chg ${c}-c">${arrow} ${fmtChange({ change: q.change, currency: q.currency })} (${fmtPct(q.changePct)})</span>
     </div>
+    <div class="analysis" id="analysis-${id}"></div>
     ${retRow}
     <div class="chart"><canvas id="chart-${id}"></canvas></div>
     ${fcRow}
@@ -598,7 +739,6 @@ function renderCard(q, hist, inv) {
       <span>거래량 <b>${fmtVol(q.volume)}</b></span>
       <span>${status}</span>
     </div>
-    <div class="analysis" id="analysis-${id}"></div>
     ${marketOf(q) === 'KR' ? `<div class="news disc" id="disc-${id}" hidden></div>` : ''}
     <div class="news" id="news-${id}"></div>
   </div>`;
@@ -712,6 +852,7 @@ let _resizeTimer;
 window.addEventListener('resize', () => {
   clearTimeout(_resizeTimer);
   _resizeTimer = setTimeout(() => {
+    if (state.gauge) drawGauge($('#moodCanvas'), state.gauge.score, state.gauge.tone); // 휴대폰 회전 등으로 크기가 바뀌면 선명하게 다시
     document.querySelectorAll('.chart canvas').forEach((cv) => {
       try { const c = cv.__c; if (c) drawChart(cv, c.hist, c.fc, { dates: c.dates, currency: c.currency }); }
       catch (e) { console.warn('리사이즈 차트 재렌더 실패:', e); }

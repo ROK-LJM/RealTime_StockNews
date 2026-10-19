@@ -11,19 +11,19 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><span class="logo">📈</span> 실시간 주식시장 파악</div>
+    <div class="brand"><span class="logo">📈</span> <span class="brand-long">실시간 </span>주식시장 파악</div>
     <div class="controls">
-      <label class="refresh">새로고침
-        <select id="interval">
+      <label class="refresh"><span class="refresh-l">새로고침</span>
+        <select id="interval" aria-label="자동 새로고침 주기">
           <option value="30">30초</option>
           <option value="60" selected>1분</option>
           <option value="300">5분</option>
           <option value="0">수동</option>
         </select>
       </label>
-      <button id="refreshBtn" title="새로고침">🔄</button>
-      <span id="clock" class="clock">—</span>
-      <a class="help-link" href="./help.html" title="사용설명서 (새 탭)" target="_blank" rel="noopener">📖 설명서</a>
+      <button id="refreshBtn" title="지금 새로고침" aria-label="지금 새로고침">🔄</button>
+      <span id="clock" class="clock" title="화면이 마지막으로 데이터를 확인한 시각">—</span>
+      <a class="help-link" href="./help.html" title="사용설명서 (새 탭)" aria-label="사용설명서" target="_blank" rel="noopener">📖<span class="help-l"> 설명서</span></a>
     </div>
   </header>
 
@@ -41,6 +41,9 @@
     <div class="indices" id="indices"><div class="muted">지수 로딩…</div></div>
   </section>
 
+  <!-- 내 종목 한눈에 — 등락률 색 타일(누르면 해당 카드로) + 급등락 종목의 '왜' 한 줄. 내용은 app.js renderBoard -->
+  <section class="board" id="board" aria-labelledby="boardTitle" hidden></section>
+
   <section class="briefs" id="briefs"></section>
 
   <section class="holdings-head">
@@ -49,7 +52,13 @@
       <button id="editBtn" class="edit-btn" type="button" aria-haspopup="dialog">✏️ 종목 편집</button>
       <span id="editStatus" class="edit-status" role="status"></span>
     </div>
-    <div class="muted" style="font-size:12px"><span id="updated">—</span> · 갱신 시각은 시장별로 아래 그룹에 표시</div>
+    <div class="hh-right">
+      <div class="seg" role="group" aria-label="카드 순서">
+        <button type="button" data-sort="mine" aria-pressed="true">내 순서</button>
+        <button type="button" data-sort="move" aria-pressed="false">등락 큰 순</button>
+      </div>
+      <span id="updated" class="muted hh-count">—</span>
+    </div>
   </section>
 
   <section id="grid"><div class="muted">종목 로딩…</div></section>
