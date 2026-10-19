@@ -17,14 +17,20 @@ import {
   getMarket, getQuotes, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis,
   aiStatus, aiGate, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD,
 } from './sources.mjs';
-import { startBudget, toStored, totalUsed, capacity, inSession } from './aibudget.mjs';
+import { startBudget, toStored, totalUsed, capacity, inSession, isKrSession, nextAllowanceAt, closedCheckDay } from './aibudget.mjs';
 import { validateWatchlist, writeJsonAtomic, analysisSig, sigMove } from './util.mjs';
+import { dartEnabled, resetDart, dartHalted, ensureCorpTable, getDisclosures } from './dart.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // 한 회차에 새로 호출할 AI 종합분석 최대 건수 — 한 번에 몰아 쓰지 않게 하는 상한. 초과분은 이전 분석을
 // 유지한 채 다음 회차로 미룬다. 하루 총량은 aibudget.mjs가 장 시간에 맞춰 나눠 준다(무료 한도가 하루 수십 회뿐).
 const AI_CALLS_PER_RUN = 4;
+
+// 자주 안 바뀌는 데이터는 매 회차(5분) 받지 않는다 — 비공식 API 과호출(차단 위험)·뉴스 변동에 따른 AI 재분석·커밋을 줄인다.
+// 시각 기준(정시부터 N분마다 첫 5분 안에 도는 회차)이라 '언제 받았는지'를 파일에 따로 적지 않아도 된다(불필요한 커밋 방지).
+// 그 사이 회차와 실패한 종목은 직전 값을 그대로 쓴다. 새로 추가된 종목은 바로 받는다.
+const REFRESH_MIN = { history: 30, investors: 30, news: 15, disclosures: 15 };
 
 // 설정 검증: 고칠 수 있는 항목(앞자리 0 누락·소문자 티커)은 고치고, 틀린 항목은 빼며 이유를 로그로 남긴다.
 function readConfig(root) {
@@ -42,7 +48,8 @@ function readConfig(root) {
 
 // 1회 갱신. root/dataDir를 바꿔 임시 폴더에서도 돌릴 수 있다(자체 테스트용). 쓴 파일 목록을 돌려준다.
 // now: 이번 회차 기준 시각 — AI 예산 배분·분석 시각 기록에 쓴다(테스트는 고정 시각을 넘긴다).
-export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data'), now = Date.now() } = {}) {
+// refreshAll: 과거 시세·수급·뉴스를 간격과 상관없이 모두 새로 받는다(자체 테스트용, 아래 REFRESH_MIN 참고).
+export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data'), now = Date.now(), refreshAll = false } = {}) {
   resetState(); // 회차마다 캐시·AI 상태를 새로 시작
   fs.mkdirSync(dataDir, { recursive: true });
   const written = [];
@@ -79,7 +86,9 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
           const idx = market.indices.find((i) => i.symbol === ySym);
           const changePct = idx?.changePct ?? 0;
           const prevReason = prevBriefs.find((b) => b.key === naverSym)?.reason || null;
-          const [flow, reason] = await Promise.all([getIndexFlow(naverSym), getIndexReason(nm, changePct, prevReason, now)]);
+          // 장 시간이어도 시세가 '마감'이면(휴장일) 장 밖으로 본다 — 등락이 그대로인데 뉴스만 바뀐 재판단 방지
+          const open = isKrSession(now) && idx?.marketStatus !== 'CLOSE';
+          const [flow, reason] = await Promise.all([getIndexFlow(naverSym), getIndexReason(nm, changePct, prevReason, now, open)]);
           briefs.push({ key: naverSym, name: nm, changePct, price: idx?.price ?? null, flow, reason });
         }
         market.briefs = briefs;
@@ -92,40 +101,83 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
   try {
     const quotes = await getQuotes(items);
     quotes.forEach((q) => { quotesByCode[q.code] = q; });
-    if (quotes.some((q) => q.ok)) write('quotes.json', { quotes });
-    else console.warn('  ! 시세 전부 실패 — quotes.json 유지');
+    if (quotes.some((q) => q.ok)) {
+      // 휴장 확인 기록 { KR: 'YYYY-MM-DD', US: … } — 장 시간인데 그 시장 시세가 하나도 '장중'이 아니면 오늘 날짜를 남긴다.
+      // 화면은 오늘 기록이 없을 때만 '개장 후 갱신 없음'을 띄운다(수집 중단 경고가 휴장일에 뜨지 않게). 휴장일마다 한 번만 바뀐다.
+      const closed = {};
+      for (const [m, d] of Object.entries(readJson('quotes.json')?.closed || {})) {
+        if ((m === 'KR' || m === 'US') && /^\d{4}-\d{2}-\d{2}$/.test(d)) closed[m] = d;
+      }
+      for (const m of ['KR', 'US']) {
+        const day = closedCheckDay(m, now);
+        const list = quotes.filter((q) => q.ok && q.market === m);
+        if (day && list.length && !list.some((q) => q.marketStatus === 'OPEN')) closed[m] = day;
+      }
+      write('quotes.json', Object.keys(closed).length ? { quotes, closed } : { quotes });
+    } else console.warn('  ! 시세 전부 실패 — quotes.json 유지');
   } catch (e) { console.error('  ✗ 시세 실패 — quotes.json 유지:', e.message); }
+
+  // 3~5) 과거 시세·수급·뉴스 — 정해진 간격(REFRESH_MIN)에만 새로 받고, 그 사이엔 직전 값 재사용.
+  //      받기에 실패한 종목도 직전 값을 지킨다(예전엔 그 종목이 파일에서 빠져 차트·수급이 사라졌다).
+  const minute = new Date(now).getUTCMinutes(); // 한국시간과 분은 같다(정시 단위 시차)
+  const due = (kind) => refreshAll || minute % REFRESH_MIN[kind] < 5;
+  async function collect(kind, label, prevFile, isValid, fetchOne, out) {
+    const prev = readJson(prevFile) || {};
+    let fresh = 0, kept = 0;
+    for (const it of items) {
+      const old = isValid(prev[it.code]) ? prev[it.code] : null;
+      if (old && !due(kind)) { out[it.code] = old; kept++; continue; }
+      try {
+        const v = await fetchOne(it);
+        if (v && (v.ok !== false || !old)) { out[it.code] = v; fresh++; }
+        else if (old) { out[it.code] = old; kept++; }
+      } catch (e) {
+        console.error(`    ${label} 실패(${it.code}):`, e.message);
+        if (old) { out[it.code] = old; kept++; }
+      }
+    }
+    console.log(`  · ${label}: 새로 ${fresh}건 · 직전 값 ${kept}건${due(kind) ? '' : ` (다음 갱신: 매 ${REFRESH_MIN[kind]}분)`}`);
+  }
+  const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 
   // 3) 종목별 과거 시세(일봉 6개월) — 등락 차트 + 예측 입력
   try {
-    for (const it of items) {
-      try { const h = await getHistory(it); if (h) history[it.code] = h; }
-      catch (e) { console.error(`    과거시세 실패(${it.code}):`, e.message); }
-    }
+    await collect('history', '과거시세', 'history.json', (v) => isObj(v) && Array.isArray(v.closes) && v.closes.length >= 2, getHistory, history);
     if (Object.keys(history).length) write('history.json', history);
     else console.warn('  ! 과거시세 전부 비어 있음 — history.json 유지');
   } catch (e) { console.error('  ✗ 과거시세 실패 — history.json 유지:', e.message); }
 
   // 4) 종목별 투자자 순매매(수급) — 한국 종목만, 해외 IP에서 막히면 자동 생략
   try {
-    for (const it of items) {
-      try { const v = await getStockInvestors(it); if (v) investors[it.code] = v; }
-      catch (e) { console.error(`    수급 실패(${it.code}):`, e.message); }
-    }
+    await collect('investors', '수급', 'investors.json', (v) => isObj(v) && 'foreign' in v, getStockInvestors, investors);
     if (Object.keys(investors).length) write('investors.json', investors);
     else console.warn('  ! 수급 데이터 없음(해외 IP 차단 가능) — investors.json 유지');
   } catch (e) { console.error('  ✗ 수급 실패 — investors.json 유지:', e.message); }
 
-  // 5) 종목별 뉴스 (순차 수집으로 과호출 방지)
+  // 5) 종목별 뉴스 (순차 수집으로 과호출 방지) — 받기 실패(ok:false)면 직전 뉴스 유지
   try {
-    for (const it of items) {
-      try { news[it.code] = await getNews(it); }
-      catch (e) { console.error(`    뉴스 실패(${it.code}):`, e.message); }
-    }
+    await collect('news', '뉴스', 'news.json', (v) => isObj(v) && v.ok === true && Array.isArray(v.items), getNews, news);
     const anyNews = Object.values(news).some((n) => n && n.items && n.items.length);
     if (anyNews) write('news.json', news);
     else console.warn('  ! 뉴스 전부 비어 있음 — news.json 유지');
   } catch (e) { console.error('  ✗ 뉴스 실패 — news.json 유지:', e.message); }
+
+  // 5-1) 국내 종목 최근 공시(OpenDART) — 무료 인증키(DART_API_KEY)가 있을 때만, 뉴스와 같은 간격으로(dart.mjs 참고).
+  //      키가 없으면 건너뛴다(저장소에 둔 빈 파일 {} 그대로 — 화면이 없는 파일을 매분 요청하지 않게). 멈춘 이유는 status.json의 dart에.
+  const disclosures = {}; // 종합분석에서 공시 입력으로 재사용
+  let dartState = null;
+  if (dartEnabled()) try {
+    resetDart();
+    const kr = items.filter((it) => it.market === 'KR').map((it) => it.code);
+    const corp = await ensureCorpTable(readJson('dartcorp.json'), kr, now);
+    if (corp.changed) write('dartcorp.json', corp.table);
+    if (corp.error) console.error('    공시 고유번호 목록 받기 실패:', corp.error);
+    await collect('disclosures', '공시', 'disclosures.json', (v) => isObj(v) && v.ok === true && Array.isArray(v.items),
+      (it) => getDisclosures(it, corp.table.map, now), disclosures);
+    dartState = dartHalted() || (corp.table.at ? 'ok' : `고유번호 목록 받기 실패 — ${corp.error || '다음 회차에 다시 시도'}`);
+    if (dartState !== 'ok') console.warn(`  ! 공시: ${dartState} — 직전 값 유지`);
+    write('disclosures.json', disclosures);
+  } catch (e) { console.error('  ✗ 공시 실패 — disclosures.json 유지:', e.message); }
 
   // 6) 급등락 종목 AI 종합분석 (뉴스+수급+추세+시세 종합) — Gemini 키 있을 때만, ±임계치 이상만.
   //    ① 입력 시그니처가 직전과 같으면 재호출 없이 이전 분석 재사용(과호출·장마감 무한커밋 방지).
@@ -145,9 +197,10 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
       .sort((a, b) => Math.abs(b.q.changePct ?? 0) - Math.abs(a.q.changePct ?? 0));
     let calls = 0, deferred = 0, waited = 0;
     for (const { it, q } of movers) {
-      const sig = analysisSig(q, news[it.code], investors[it.code]);
+      const sig = analysisSig(q, news[it.code], investors[it.code], disclosures[it.code]);
       const p = prev[it.code];
-      const settled = p && !inSession(it.market, now) && sigMove(p.sig) === sigMove(sig);
+      const open = inSession(it.market, now) && q.marketStatus !== 'CLOSE'; // 장 시간이어도 시세가 '마감'이면 휴장일
+      const settled = p && !open && sigMove(p.sig) === sigMove(sig);
       if (p && (p.sig === sig || settled)) { analysis[it.code] = p; continue; } // 입력 동일·장 밖 → 재사용
       const gate = aiGate();
       if (calls >= AI_CALLS_PER_RUN || gate !== 'go') { // 회차 상한·시간 배분·AI 꺼짐 → 기존 분석 유지, 다음 회차에 갱신
@@ -157,7 +210,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
       }
       calls++;
       try {
-        const a = await aiStockAnalysis({ quote: q, news: news[it.code], flow: investors[it.code], history: history[it.code] });
+        const a = await aiStockAnalysis({ quote: q, news: news[it.code], flow: investors[it.code], history: history[it.code], disclosures: disclosures[it.code], now });
         if (a) analysis[it.code] = { ...a, sig, at: now };
         else if (prev[it.code]) analysis[it.code] = prev[it.code]; // 일시적 실패 시 기존 분석 유지
       } catch (e) { console.error(`    종합분석 실패(${it.code}):`, e.message); if (prev[it.code]) analysis[it.code] = prev[it.code]; }
@@ -189,9 +242,13 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
     state = Object.values(budget.out).every((w) => w === 'unavailable') ? 'no-model' : 'quota';
   } else if (st.skipped > 0) state = 'wait';                     // 분석할 게 있지만 시간 배분상 다음으로 미룸
   else state = !prevState || ['quota', 'no-model', 'wait', 'off'].includes(prevState) ? 'idle' : prevState; // 날이 바뀌어 한도가 풀렸거나 대기 해소
-  const status = st.enabled
-    ? { ai: { state, model: st.model ?? prevStatus?.ai?.model ?? null, used, cap }, budget: toStored(budget) }
-    : { ai: { state } };
+  const ai = { state, model: st.model ?? prevStatus?.ai?.model ?? null, used, cap };
+  if (state === 'wait') { // 순서 대기면 다음에 AI를 쓸 수 있는 시각도 남긴다(화면: '다음 분석 22:40부터')
+    const next = nextAllowanceAt(budget, models, now);
+    if (next != null) ai.next = next;
+  }
+  const status = st.enabled ? { ai, budget: toStored(budget) } : { ai: { state } };
+  if (dartState) status.dart = dartState; // 공시 수집 상태(키 있을 때만) — 'ok' 또는 멈춘 이유(화면 하단 표시)
   if (JSON.stringify(status) !== JSON.stringify(prevStatus)) {
     try { write('status.json', status); } catch (e) { console.error('  ✗ AI 상태 기록 실패:', e.message); }
   }

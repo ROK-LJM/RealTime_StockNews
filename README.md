@@ -4,7 +4,7 @@
 
 - **GitHub Actions 봇**이 약 5분마다 시세·뉴스를 받아 `docs/data/*.json`으로 저장 (공개 저장소는 Actions 무제한 무료)
 - **GitHub Pages**가 그 JSON을 정적으로 서빙 (무료)
-- 데이터: 네이버 금융(국내 실시간 시세·수급) · Yahoo Finance(해외 시세·과거 일봉·환율) · Google 뉴스 RSS · Google Gemini(선택, AI 요약 — `GEMINI_API_KEY` Secret, 무료 한도를 국내 장 시간 우선으로 배분)
+- 데이터: 네이버 금융(국내 실시간 시세·수급) · Yahoo Finance(해외 시세·과거 일봉·환율) · Google 뉴스 RSS · Google Gemini(선택, AI 요약 — `GEMINI_API_KEY` Secret, 무료 한도를 국내 장 시간 우선으로 배분) · 금융감독원 OpenDART(선택, 국내 종목 최근 공시 — `DART_API_KEY` Secret)
 - 추적 종목: `config/watchlist.json` 파일로 관리
 
 > ⚠️ 무료 Pages는 **공개(public) 저장소**여야 합니다. 종목 코드 목록이 공개되니(수량·금액은 아님) 감안하세요.
@@ -43,6 +43,13 @@ git push -u origin main
 
 ### 6) 접속
 1~2분 뒤 **`https://USERNAME.github.io/REPO/`** 로 접속. (휴대폰·다른 PC 어디서나)
+
+### (선택) AI 요약·공시 켜기
+저장소 → **Settings → Secrets and variables → Actions → New repository secret**
+- `GEMINI_API_KEY` — Google AI Studio 무료 키 → 🤖 AI 핵심·🧠 AI 종합분석
+- `DART_API_KEY` — opendart.fss.or.kr 무료 인증키 → 국내 종목 카드의 📋 최근 공시(AI 분석에도 반영)
+
+키가 없으면 그 기능만 꺼지고 나머지는 그대로 동작합니다.
 
 ---
 

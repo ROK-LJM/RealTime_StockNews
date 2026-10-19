@@ -65,10 +65,12 @@ export async function mapLimit(list, limit, fn) {
 
 // 종합분석 입력의 시그니처 — 직전과 같으면 Gemini 재호출 없이 이전 분석을 재사용(과호출·잦은 커밋 방지).
 // 등락은 1% 버킷으로 거칠게 본다(매 틱 재계산 방지). 뉴스·수급이 바뀌거나 등락 구간이 바뀔 때만 재분석.
-export function analysisSig(q, news, flow) {
+export function analysisSig(q, news, flow, disc) {
   const heads = (news?.items || []).slice(0, 5).map((it) => it.title).join('|');
   const f = flow ? `${flow.date}:${flow.foreign}:${flow.institution}:${flow.individual}` : 'x';
-  return `${Math.round(q.changePct ?? 0)}|${f}|${heads}`;
+  // 공시(OpenDART 키가 있을 때만)는 새 공시가 올라오면 다시 분석하도록 최근 3건 접수번호를 붙인다 — 없으면 예전 형식 그대로
+  const d = (disc?.items || []).slice(0, 3).map((it) => it.no).join(',');
+  return `${Math.round(q.changePct ?? 0)}|${f}|${heads}${d ? `|d:${d}` : ''}`;
 }
 // 시그니처의 등락 구간(맨 앞 1% 버킷) — 종목·지수 시그니처 모두 이 형식으로 시작한다
 export const sigMove = (sig) => String(sig ?? '').split('|')[0];

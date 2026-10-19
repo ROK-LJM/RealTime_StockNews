@@ -55,7 +55,11 @@
   function loadDir() {
     if (dir) return Promise.resolve(dir);
     if (!dirLoading) {
-      dirLoading = loadJson('stocklist.json').then((j) => {
+      // 하루 한 번 바뀌는 큰 파일(약 0.9MB)이라 매번 새로 받지 않고 '바뀌었는지'만 묻는다(안 바뀌었으면 304, 다시 안 받음)
+      dirLoading = fetch('./data/stocklist.json', { cache: 'no-cache' }).then((r) => {
+        if (!r.ok) throw new Error(`stocklist.json ${r.status}`);
+        return r.json();
+      }).then((j) => {
         const rows = [];
         // 행 끝의 숫자는 시가총액 순위(1이 가장 큼). 없으면(옛 형식·상위 목록 밖) 맨 뒤로.
         const rankOf = (v) => (Number.isInteger(v) && v > 0 ? v : Infinity);

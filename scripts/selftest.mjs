@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import zlib from 'node:zlib';
 
 // ---------- 가짜 네트워크 ----------
 const NET = { routes: [], calls: [], bodies: [], blocked: [] };
@@ -54,13 +55,13 @@ function yahooChart(sym, pct) {
     timestamp: ts, indicators: { quote: [{ close: closes }] },
   }] } };
 }
-const naverStock = (code, pct) => ({ datas: [{
+const naverStock = (code, pct, status = 'OPEN') => ({ datas: [{
   stockName: `종목${code}`, closePrice: '70,000', compareToPreviousClosePrice: String(Math.round(Math.abs(70000 * pct / 100))),
   fluctuationsRatio: String(Math.abs(pct)), compareToPreviousPrice: { name: pct > 0 ? 'RISING' : pct < 0 ? 'FALLING' : 'EVEN' },
   openPrice: '69,000', highPrice: '71,000', lowPrice: '68,000', accumulatedTradingVolume: '1,234,567',
-  marketStatus: 'OPEN', localTradedAt: new Date().toISOString(),
+  marketStatus: status, localTradedAt: new Date().toISOString(),
 }] });
-const naverIndex = (pct) => ({ datas: [{ closePriceRaw: '2,600.00', compareToPreviousClosePriceRaw: (2600 * pct / 100).toFixed(1), fluctuationsRatioRaw: pct.toFixed(2), marketStatus: 'OPEN' }] });
+const naverIndex = (pct, status = 'OPEN') => ({ datas: [{ closePriceRaw: '2,600.00', compareToPreviousClosePriceRaw: (2600 * pct / 100).toFixed(1), fluctuationsRatioRaw: pct.toFixed(2), marketStatus: status }] });
 const trendStock = [{ bizdate: '20261015', foreignerPureBuyQuant: '-1,000', organPureBuyQuant: '500', individualPureBuyQuant: '500', foreignerHoldRatio: '50.00%' }];
 const trendIndex = { bizdate: '20261015', personalValue: '+1,000', foreignValue: '-800', institutionalValue: '-200' };
 // tag를 바꾸면 헤드라인이 달라진다(= 분석 입력이 바뀐 상황)
@@ -77,11 +78,73 @@ const geminiOk = { candidates: [{ content: { parts: [{ text: JSON.stringify({
 const quota429 = (per) => json({ error: { code: 429, status: 'RESOURCE_EXHAUSTED', message: 'You exceeded your current quota.',
   details: [{ '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaId: `GenerateRequestsPer${per}PerProjectPerModel-FreeTier` }] }] } }, 429);
 
-function routes({ krPct = { '005930': 4.2, '000660': 0.3 }, usPct = {}, idxPct = -1.2, newsTag = '', news = () => text(rss(newsTag)),
-  yahoo = (m) => { const sym = decodeURIComponent(m[1]); return json(yahooChart(sym, usPct[sym])); }, gemini = () => json(geminiOk) } = {}) {
+// ---------- 공시(OpenDART) 픽스처 ----------
+// ZIP(실제 고유번호 파일 형식) — files: [[이름, 내용]]. descriptor: 로컬 헤더에 크기를 비우고 뒤에 데이터 설명자를 붙이는 형식
+function makeZip(files, { method = 8, descriptor = false } = {}) {
+  const parts = [], central = [];
+  let offset = 0;
+  for (const [name, content] of files) {
+    const raw = Buffer.from(content, 'utf8');
+    const data = method === 8 ? zlib.deflateRawSync(raw) : raw;
+    const nm = Buffer.from(name);
+    const flag = descriptor ? 8 : 0;
+    const lh = Buffer.alloc(30);
+    lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(flag, 6); lh.writeUInt16LE(method, 8);
+    if (!descriptor) { lh.writeUInt32LE(data.length, 18); lh.writeUInt32LE(raw.length, 22); }
+    lh.writeUInt16LE(nm.length, 26);
+    const dd = Buffer.alloc(descriptor ? 16 : 0);
+    if (descriptor) { dd.writeUInt32LE(0x08074b50, 0); dd.writeUInt32LE(data.length, 8); dd.writeUInt32LE(raw.length, 12); }
+    const ch = Buffer.alloc(46);
+    ch.writeUInt32LE(0x02014b50, 0); ch.writeUInt16LE(20, 4); ch.writeUInt16LE(20, 6); ch.writeUInt16LE(flag, 8); ch.writeUInt16LE(method, 10);
+    ch.writeUInt32LE(data.length, 20); ch.writeUInt32LE(raw.length, 24); ch.writeUInt16LE(nm.length, 28); ch.writeUInt32LE(offset, 42);
+    parts.push(lh, nm, data, dd); central.push(ch, nm);
+    offset += lh.length + nm.length + data.length + dd.length;
+  }
+  const cd = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(files.length, 8); end.writeUInt16LE(files.length, 10);
+  end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...parts, cd, end]);
+}
+// 고유번호 XML — 테스트 종목 + 가짜 상장사 1,100개 + 비상장사(종목코드 빈칸)
+function corpXml(extra = {}) {
+  const rows = { '005930': '00126380', '000660': '00164779', ...extra };
+  for (let i = 0; i < 1100; i++) rows[String(100000 + i)] ??= String(90000000 + i);
+  const list = Object.entries(rows).map(([s, c]) =>
+    `  <list>\n    <corp_code>${c}</corp_code>\n    <corp_name>회사${s}</corp_name>\n    <corp_eng_name>Co ${s}</corp_eng_name>\n    <stock_code>${s}</stock_code>\n    <modify_date>20260101</modify_date>\n  </list>`);
+  list.push('  <list>\n    <corp_code>00999999</corp_code>\n    <corp_name>비상장</corp_name>\n    <corp_eng_name>X</corp_eng_name>\n    <stock_code> </stock_code>\n    <modify_date>20260101</modify_date>\n  </list>');
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<result>\n${list.join('\n')}\n</result>\n`;
+}
+// 공시 목록 — 고유번호별 [접수번호, 제목, 비고(rm)]. 응답 순서는 일부러 섞어 둔다(정렬 확인)
+const DART_ROWS = {
+  '00126380': [
+    ['20261014000500', '임원ㆍ주요주주특정증권등소유상황보고서'],
+    ['20261015000321', '단일판매ㆍ공급계약체결'],
+    ['20261015000100', '[기재정정]연결재무제표기준영업(잠정)실적(공정공시)', '연'],
+    ['20261014000400', '자기주식취득결정', '철'],
+    ['20261013000200', '현금ㆍ현물배당결정'],
+    ['20261010000050', '기업설명회(IR)개최(안내공시)'],
+    ['20261002000010', '분기보고서 (2026.09)'],
+  ],
+  '00164779': [['20261012000777', '주식등의대량보유상황보고서(일반)']],
+};
+const dartList = (corp, rows) => ({ status: '000', message: '정상', page_no: 1, page_count: 10, total_count: rows.length, total_page: 1,
+  list: rows.map(([no, nm, rm = '']) => ({ corp_cls: 'Y', corp_name: '회사', corp_code: corp, stock_code: '', report_nm: nm, rcept_no: no, flr_nm: '회사', rcept_dt: no.slice(0, 8), rm })) });
+const DART_KEY = 'selftest-dart-dummy-key-000000000000000000';
+async function withDartKey(fn) {
+  process.env.DART_API_KEY = DART_KEY;
+  try { return await fn(); } finally { delete process.env.DART_API_KEY; }
+}
+
+function routes({ krPct = { '005930': 4.2, '000660': 0.3 }, usPct = {}, idxPct = -1.2, krStatus = 'OPEN', idxStatus = 'OPEN', newsTag = '', news = () => text(rss(newsTag)),
+  yahoo = (m) => { const sym = decodeURIComponent(m[1]); return json(yahooChart(sym, usPct[sym])); }, gemini = () => json(geminiOk),
+  corpZip = () => new Response(makeZip([['CORPCODE.xml', corpXml()]])), dartRows = DART_ROWS,
+  dartList: listFn = (corp) => json(dartList(corp, dartRows[corp] || [])) } = {}) {
   return [
-    { re: /polling\.finance\.naver\.com\/api\/realtime\/domestic\/stock\/(\d{6})/, fn: (m) => json(naverStock(m[1], krPct[m[1]] ?? 0.5)) },
-    { re: /polling\.finance\.naver\.com\/api\/realtime\/domestic\/index\/(KOSPI|KOSDAQ)/, fn: () => json(naverIndex(idxPct)) },
+    { re: /opendart\.fss\.or\.kr\/api\/corpCode\.xml\?/, fn: (m, u) => corpZip(u) },
+    { re: /opendart\.fss\.or\.kr\/api\/list\.json\?/, fn: (m, u) => listFn(new URL(u).searchParams.get('corp_code'), u) },
+    { re: /polling\.finance\.naver\.com\/api\/realtime\/domestic\/stock\/(\d{6})/, fn: (m) => json(naverStock(m[1], krPct[m[1]] ?? 0.5, krStatus)) },
+    { re: /polling\.finance\.naver\.com\/api\/realtime\/domestic\/index\/(KOSPI|KOSDAQ)/, fn: () => json(naverIndex(idxPct, idxStatus)) },
     { re: /m\.stock\.naver\.com\/api\/stock\/(\d{6})\/trend/, fn: () => json(trendStock) },
     { re: /m\.stock\.naver\.com\/api\/index\/(KOSPI|KOSDAQ)\/trend/, fn: () => json(trendIndex) },
     { re: /query1\.finance\.yahoo\.com\/v8\/finance\/chart\/([^?]+)/, fn: yahoo },
@@ -122,9 +185,10 @@ async function quiet(fn) {
   console.log = console.warn = console.error = (...a) => lines.push(a.map(String).join(' '));
   try { return { value: await fn(), lines }; } finally { Object.assign(console, orig); }
 }
-async function pipeline(root, routeOpts, now = NOW_KR) {
+// 기본은 과거 시세·수급·뉴스를 매번 새로 받는다(refreshAll) — 간격 재사용 자체는 전용 테스트에서 검증
+async function pipeline(root, routeOpts, now = NOW_KR, { refreshAll = true } = {}) {
   NET.routes = routes(routeOpts); NET.calls = []; NET.bodies = []; NET.blocked = [];
-  return quiet(() => run({ root, now }));
+  return quiet(() => run({ root, now, refreshAll }));
 }
 
 // ---------- 테스트 러너 ----------
@@ -139,12 +203,14 @@ process.env.GEMINI_API_KEY = 'selftest-dummy-key';
 process.env.GEMINI_MODEL = 'model-primary';
 process.env.GEMINI_FALLBACK_MODELS = 'model-fallback';
 delete process.env.AI_DAILY_BUDGET; // 모델당 기본 예산(20회) 기준으로 검증
+delete process.env.DART_API_KEY;    // 공시는 기본 꺼짐 — 키가 필요한 테스트만 가짜 키로 켠다(withDartKey)
 const util = await import('./util.mjs');
 const bud = await import('./aibudget.mjs');
 const src = await import('./sources.mjs');
 const { run } = await import('./fetch.mjs');
 const stocklist = await import('./stocklist.mjs');
 const wl = await import('./watchlist-apply.mjs');
+const dartm = await import('./dart.mjs');
 src.retryTiming.baseMs = 1; // 재시도 대기를 실제로 기다리지 않음
 
 console.log('[selftest] 오프라인 자체 테스트 — 외부 접속 없음\n');
@@ -483,6 +549,7 @@ await test('시간 배분: 리셋 직후(장 시간 전)엔 순서 대기 → �
   const { lines } = await pipeline(root, {}, NOW_EVE);
   assert.equal(geminiCalls(), 0);
   assert.equal(read(root, 'status.json').ai.state, 'wait');
+  assert.equal(read(root, 'status.json').ai.next, T('2026-10-14T14:12:00Z'), '다음 분석 가능 시각 기록(23:12 KST)');
   assert.ok(lines.some((l) => l.includes('한도 배분 대기 1')), '종목 분석도 배분 대기로 미룸');
   assert.equal(read(root, 'analysis.json')['005930'], undefined);
   assert.equal(read(root, 'market.json').briefs[0].reason.ai, null);
@@ -543,6 +610,257 @@ await test('잘못된 설정: 유효 종목 0개·깨진 JSON → 아무것도 �
     for (const f of FILES) assert.equal(raw(root, f), seeds[f]);
     assert.equal(NET.calls.length, 0, '설정이 틀리면 외부 호출도 안 함');
   }
+});
+
+// ===== 외부 호출 줄이기 · 휴장일 · 해외 종목 문구 · 다음 분석 시각 =====
+const callsTo = (re) => NET.calls.filter((u) => re.test(decodeURIComponent(u))).length;
+const HIST_RE = /query1\.finance\.yahoo\.com\/v8\/finance\/chart\/.*range=6mo/;
+const STOCK_NEWS_RE = /news\.google\.com\/rss\/search\?q=.*(주가|stock)/;
+const STOCK_TREND_RE = /m\.stock\.naver\.com\/api\/stock\/\d{6}\/trend/;
+await test('외부 호출 줄이기: 과거시세·수급 30분, 뉴스 15분마다만 새로 받고 그 사이엔 직전 값 · 새 종목은 바로', async () => {
+  const root = workspace();
+  const opt = { refreshAll: false };
+  await pipeline(root, { newsTag: 'a' }, NOW_KR, opt);                       // 12:00 — 모두 갱신 시각
+  assert.deepEqual([callsTo(HIST_RE), callsTo(STOCK_NEWS_RE), callsTo(STOCK_TREND_RE)], [3, 3, 2]);
+  const hist0 = raw(root, 'history.json');
+  await pipeline(root, { newsTag: 'b' }, NOW_KR + 6 * MIN, opt);             // 12:06 — 어느 것도 갱신 시각 아님
+  assert.deepEqual([callsTo(HIST_RE), callsTo(STOCK_NEWS_RE), callsTo(STOCK_TREND_RE)], [0, 0, 0], '직전 값 재사용');
+  assert.ok(read(root, 'news.json')['005930'].items[0].title.startsWith('a '), '뉴스는 직전 것 그대로');
+  assert.equal(raw(root, 'history.json'), hist0);
+  assert.equal(geminiCalls(), 0, '뉴스가 그대로라 AI 재분석도 없음');
+  await pipeline(root, { newsTag: 'b' }, NOW_KR + 15 * MIN, opt);            // 12:15 — 뉴스만 갱신 시각
+  assert.deepEqual([callsTo(HIST_RE), callsTo(STOCK_NEWS_RE), callsTo(STOCK_TREND_RE)], [0, 3, 0]);
+  assert.ok(read(root, 'news.json')['005930'].items[0].title.startsWith('b '));
+  fs.writeFileSync(path.join(root, 'config', 'watchlist.json'), JSON.stringify({ items: [...ITEMS, { code: '035420', market: 'KR', name: 'NAVER' }] }));
+  await pipeline(root, { newsTag: 'b' }, NOW_KR + 21 * MIN, opt);            // 12:21 — 새 종목만 바로
+  assert.deepEqual([callsTo(HIST_RE), callsTo(STOCK_NEWS_RE), callsTo(STOCK_TREND_RE)], [1, 1, 1], '추가된 종목만 받음');
+  assert.ok(read(root, 'history.json')['035420'] && read(root, 'news.json')['035420'] && read(root, 'investors.json')['035420']);
+});
+await test('받기에 실패한 종목은 직전 과거시세·뉴스를 유지(파일에서 빠지지 않음)', async () => {
+  const root = workspace();
+  await pipeline(root);
+  const before = read(root, 'history.json').AAPL;
+  const yahoo = (m, u) => (/range=6mo/.test(u) && /AAPL/.test(u) ? text('error', 500) : json(yahooChart(decodeURIComponent(m[1]))));
+  // 삼성전자 뉴스만 실패(나머지는 성공 → 파일은 새로 써짐) — 실패한 종목은 직전 뉴스를 지켜야 한다
+  const news = (m, u) => (decodeURIComponent(u).includes('삼성전자') ? text('error', 500) : text(rss('new')));
+  await pipeline(root, { yahoo, news }, NOW_KR + 30 * MIN);
+  assert.deepEqual(read(root, 'history.json').AAPL, before, 'AAPL 과거시세 유지');
+  const all = read(root, 'news.json');
+  assert.ok(all['005930'].ok && all['005930'].items.length && !all['005930'].items[0].title.startsWith('new '), '실패한 종목 → 직전 뉴스 유지');
+  assert.ok(all['000660'].items[0].title.startsWith('new '), '성공한 종목은 새 뉴스');
+});
+await test('휴장일: 장 시간이어도 시세가 마감이면 뉴스만 바뀐 종목·지수는 다시 분석하지 않음', async () => {
+  const root = workspace();
+  await pipeline(root, { newsTag: 'a' });                                                       // 평일 장중 분석
+  await pipeline(root, { newsTag: 'b', krStatus: 'CLOSE', idxStatus: 'CLOSE' }, NOW_KR + 100 * MIN);
+  assert.equal(geminiCalls(), 0, '휴장 — 등락 그대로, 뉴스만 바뀜 → 재분석·재판단 없음');
+  await pipeline(root, { newsTag: 'c' }, NOW_KR + 200 * MIN);                                    // 장이 열려 있으면 다시
+  assert.ok(briefCalls() > 0 && geminiCalls() > briefCalls(), '지수 브리핑·종목 분석 모두 갱신');
+});
+await test('해외 종목 AI 분석: 미국 증시 관점 · 달러 소수 둘째 자리 · 수급 줄 없음(국내는 그대로)', async () => {
+  const root = workspace();
+  await pipeline(root, { usPct: { AAPL: 3 } });
+  const bodyOf = (name) => NET.bodies.find((b, i) => isGemini(NET.calls[i]) && b.includes(`'${name}'`));
+  const us = bodyOf('애플'), kr = bodyOf('삼성전자');
+  assert.ok(us && kr, '두 종목 모두 분석 요청');
+  assert.ok(us.includes('미국 증시 애널리스트') && !us.includes('수급(순매수)') && /현재가 \$\d+\.\d{2}/.test(us), us.slice(0, 200));
+  assert.ok(kr.includes('한국 증시 애널리스트') && kr.includes('수급(순매수)') && /현재가 [\d,]+원/.test(kr));
+});
+await test('휴장 확인 시간대: 개장 10분 뒤~마감 10분 전 · 시장 날짜 · 주말 제외 · 서머타임', () => {
+  const d = (m, s) => bud.closedCheckDay(m, T(s));
+  assert.equal(d('KR', '2026-10-15T00:09:00Z'), null, '09:09 KST');
+  assert.equal(d('KR', '2026-10-15T00:10:00Z'), '2026-10-15', '09:10 KST');
+  assert.equal(d('KR', '2026-10-15T06:19:00Z'), '2026-10-15', '15:19 KST');
+  assert.equal(d('KR', '2026-10-15T06:20:00Z'), null, '15:20 KST');
+  assert.equal(d('KR', '2026-10-17T03:00:00Z'), null, '토요일');
+  assert.equal(d('US', '2026-10-15T13:39:00Z'), null, '09:39 EDT');
+  assert.equal(d('US', '2026-10-15T13:40:00Z'), '2026-10-15', '09:40 EDT');
+  assert.equal(d('US', '2026-10-15T19:49:00Z'), '2026-10-15', '15:49 EDT');
+  assert.equal(d('US', '2026-10-15T19:50:00Z'), null, '15:50 EDT');
+  assert.equal(d('US', '2026-12-15T14:39:00Z'), null, '09:39 EST(겨울)');
+  assert.equal(d('US', '2026-12-15T14:40:00Z'), '2026-12-15', '09:40 EST(겨울)');
+  assert.equal(d('KR', '2026-10-15T15:00:00Z'), null, '미국 장중 = 국내 자정');
+});
+await test('휴장 기록: 장 시간에 시세가 마감이면 그 시장 날짜를 남김 · 평소엔 없음 · 이어받기 · 이상한 값 버림', async () => {
+  const root = workspace();
+  await pipeline(root, { krStatus: 'CLOSE' });                                          // 목 12:00 KST, 국내 휴장
+  assert.deepEqual(read(root, 'quotes.json').closed, { KR: '2026-10-15' }, '국내만 기록(미국은 확인 시간 아님)');
+  await pipeline(root, {}, NOW_KR + 5 * MIN);                                           // 같은 날 장중이 돼도 그날 기록은 유지
+  assert.deepEqual(read(root, 'quotes.json').closed, { KR: '2026-10-15' });
+  const yahoo = (m) => {                                                                // 미국 휴장 — 정규장 시간이 이미 지난 응답
+    const j = yahooChart(decodeURIComponent(m[1])); const s = Math.floor(Date.now() / 1000);
+    j.chart.result[0].meta.currentTradingPeriod.regular = { start: s - 7200, end: s - 3600 };
+    return json(j);
+  };
+  await pipeline(root, { yahoo }, T('2026-10-15T15:00:00Z'));                           // 목 11:00 ET
+  assert.deepEqual(read(root, 'quotes.json').closed, { KR: '2026-10-15', US: '2026-10-15' });
+  writeData(root, 'quotes.json', { quotes: [], closed: { KR: '15일', XX: '2026-10-01', US: '2026-10-01' } });
+  await pipeline(root, {}, NOW_KR + 1440 * MIN);
+  assert.deepEqual(read(root, 'quotes.json').closed, { US: '2026-10-01' }, '형식이 맞는 시장 기록만 이어받음');
+  const plain = workspace();
+  await pipeline(plain);
+  assert.ok(!('closed' in read(plain, 'quotes.json')), '평소(장중)엔 필드 자체가 없음 — 파일 모양 그대로');
+});
+await test('화면 지연 경고(app.js): 장중 45분 · 개장 30분 뒤 · 휴장 기록 · 주말 · 장 밖 · 경과 표기', async () => {
+  // 브라우저 코드에서 '데이터 지연 경고' 블록만 떼어 빈 환경에서 실행한다(DOM 없이 판정 로직만 검사)
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('// ---------- 데이터 지연 경고'), appJs.indexOf('// 시장별 묶음'));
+  assert.ok(block.length > 200 && block.includes('function staleOf'), '블록 추출');
+  const { staleOf } = vm.runInNewContext(`${block}; ({ staleOf })`, {});
+  const KR_NOON = T('2026-10-15T03:00:00Z'), US_11 = T('2026-10-15T15:00:00Z');
+  const q = (status, ageMin, at) => [{ marketStatus: status, asOf: new Date(at - ageMin * MIN).toISOString(), ok: true }];
+  const s = (m, list, closed, at) => staleOf(m, list, closed, at);
+  assert.equal(s('KR', q('OPEN', 10, KR_NOON), null, KR_NOON), '', '장중 10분 전 시세');
+  assert.equal(s('KR', q('OPEN', 45, KR_NOON), null, KR_NOON), '', '45분까지는 정상(15:30~16:00 무체결 26분 + 여유)');
+  assert.equal(s('KR', q('OPEN', 46, KR_NOON), null, KR_NOON), '46분째 갱신 없음');
+  assert.equal(s('KR', q('OPEN', 180, KR_NOON), null, KR_NOON), '3시간째 갱신 없음');
+  assert.equal(s('KR', q('OPEN', 30 * 60, KR_NOON), null, KR_NOON), '30시간째 갱신 없음', '이틀 미만은 시간');
+  assert.equal(s('US', q('OPEN', 3 * 1440, KR_NOON), null, KR_NOON), '3일째 갱신 없음', '장중 표시가 굳은 채면 장 밖이어도 경고');
+  const yClose = q('CLOSE', 16 * 60, KR_NOON); // 어제 20:00 마감 시세
+  assert.equal(s('KR', yClose, null, KR_NOON), '개장 후 갱신 없음');
+  assert.equal(s('KR', yClose, { KR: '2026-10-15' }, KR_NOON), '', '봇이 오늘 휴장 확인');
+  assert.equal(s('KR', yClose, { KR: '2026-10-14', US: '2026-10-15' }, KR_NOON), '개장 후 갱신 없음', '다른 날·다른 시장 기록은 무관');
+  const at = (hhmm) => T(`2026-10-15T${hhmm}:00+09:00`);
+  assert.equal(s('KR', q('CLOSE', 600, at('09:29')), null, at('09:29')), '', '개장 30분 전까지는 첫 수집 대기');
+  assert.equal(s('KR', q('CLOSE', 600, at('09:30')), null, at('09:30')), '개장 후 갱신 없음');
+  assert.equal(s('KR', q('CLOSE', 600, at('15:29')), null, at('15:29')), '개장 후 갱신 없음');
+  assert.equal(s('KR', q('CLOSE', 600, at('15:30')), null, at('15:30')), '', '정규장 마감 후');
+  assert.equal(s('KR', q('PREOPEN', 46, at('09:45')), null, at('09:45')), '개장 후 갱신 없음', '장 전 상태에서 멈춤');
+  assert.equal(s('KR', q('PREOPEN', 5, at('09:45')), null, at('09:45')), '', '상태가 이상해도 방금 받은 시세면 경고 안 함');
+  assert.equal(s('KR', q('CLOSE', 600, T('2026-10-17T03:00:00Z')), null, T('2026-10-17T03:00:00Z')), '', '토요일');
+  assert.equal(s('KR', q('CLOSE', 600, US_11), null, US_11), '', '국내 자정');
+  assert.equal(s('US', q('CLOSE', 19 * 60, US_11), null, US_11), '개장 후 갱신 없음', '미국 장중인데 어제 마감 시세');
+  assert.equal(s('US', q('CLOSE', 19 * 60, US_11), { US: '2026-10-15' }, US_11), '', '미국 휴장 확인');
+  const et = (hhmm) => T(`2026-10-15T${hhmm}:00-04:00`);
+  assert.equal(s('US', q('CLOSE', 600, et('09:59')), null, et('09:59')), '');
+  assert.equal(s('US', q('CLOSE', 600, et('10:00')), null, et('10:00')), '개장 후 갱신 없음');
+  assert.equal(s('KR', [{ marketStatus: 'OPEN', asOf: 'x', ok: true }], null, KR_NOON), '', '시각을 알 수 없으면 판단 안 함');
+  assert.equal(s('KR', [], null, KR_NOON), '');
+  const mixed = [...q('OPEN', 50, KR_NOON), ...q('CLOSE', 5, KR_NOON)];
+  assert.equal(s('KR', mixed, null, KR_NOON), '', '가장 최근 시세 기준');
+});
+await test('공시 도구: ZIP(압축·무압축·데이터 설명자) 속 XML · 상장사만 표로 · 우선주는 보통주 회사 · 종류 판정 · 한국 날짜', () => {
+  const xml = corpXml();
+  for (const opt of [{}, { method: 0 }, { descriptor: true }]) {
+    assert.equal(dartm.unzipXml(makeZip([['안내.txt', '설명'], ['CORPCODE.xml', xml]], opt)), xml, JSON.stringify(opt));
+  }
+  assert.throws(() => dartm.unzipXml(Buffer.from('<result><status>010</status></result>')), /ZIP 형식이 아님/);
+  assert.throws(() => dartm.unzipXml(makeZip([['a.txt', 'x']])), /XML 없음/);
+  const map = dartm.parseCorpXml(xml);
+  assert.equal(Object.keys(map).length, 1102, '비상장사(종목코드 빈칸) 제외');
+  assert.equal(map['005930'], '00126380');
+  assert.equal(dartm.corpOf(map, '005935'), '00126380', '우선주 → 보통주 회사');
+  assert.equal(dartm.corpOf(map, '005936'), null);
+  assert.equal(dartm.corpOf(map, 'AAPL'), null);
+  const titles = ['단일판매ㆍ공급계약체결', '연결재무제표기준영업(잠정)실적(공정공시)', '유상증자결정', '자기주식취득결정', '현금ㆍ현물배당결정',
+    '회사합병결정', '횡령ㆍ배임혐의발생', '조회공시요구(현저한시세변동)에대한답변', '반기보고서 (2026.06)', '임원ㆍ주요주주특정증권등소유상황보고서',
+    '기업설명회(IR)개최(안내공시)', '투자판단관련주요경영사항', '주주총회소집공고'];
+  assert.deepEqual(titles.map(dartm.tagOf), ['계약', '실적', '증자·사채', '자사주', '배당', 'M&A', '위험', '해명', '정기보고', '지분', 'IR', '주요사항', '기타']);
+  assert.equal(dartm.kstYmd(T('2026-10-15T15:30:00Z')), '20261016', '한국은 이미 다음 날 00:30');
+});
+await test('공시(OpenDART): 키 있을 때만 · 국내 종목만(ETF 제외·우선주는 보통주 회사) · 2주 · 철회 제외 · 최신 5건 · 종류 · 키는 파일·로그에 없음', async () => {
+  const off = workspace();
+  await pipeline(off);
+  assert.equal(callsTo(/opendart/), 0, '키 없음 → 요청 0건');
+  assert.ok(!fs.existsSync(file(off, 'disclosures.json')) && !('dart' in read(off, 'status.json')), '키 없음 → 파일·상태 그대로');
+  await withDartKey(async () => {
+    const items5 = [...ITEMS, { code: '069500', market: 'KR', name: 'KODEX 200' }, { code: '005935', market: 'KR', name: '삼성전자우' }];
+    const root = workspace(items5);
+    const { lines } = await pipeline(root);
+    assert.equal(callsTo(/corpCode\.xml/), 1);
+    const lists = NET.calls.filter((u) => /list\.json/.test(u)).map((u) => new URL(u));
+    assert.deepEqual(lists.map((u) => u.searchParams.get('corp_code')).sort(), ['00126380', '00126380', '00164779'], 'ETF·미국 종목은 요청 안 함');
+    assert.deepEqual(['bgn_de', 'end_de', 'last_reprt_at'].map((k) => lists[0].searchParams.get(k)), ['20261001', '20261015', 'Y']);
+    const d = read(root, 'disclosures.json');
+    assert.deepEqual(Object.keys(d).sort(), ['000660', '005930', '005935']);
+    assert.deepEqual(d['005930'].items, [
+      { title: '단일판매ㆍ공급계약체결', date: '20261015', no: '20261015000321', tag: '계약', key: true },
+      { title: '[기재정정]연결재무제표기준영업(잠정)실적(공정공시)', date: '20261015', no: '20261015000100', tag: '실적', key: true },
+      { title: '임원ㆍ주요주주특정증권등소유상황보고서', date: '20261014', no: '20261014000500', tag: '지분' },
+      { title: '현금ㆍ현물배당결정', date: '20261013', no: '20261013000200', tag: '배당', key: true },
+      { title: '기업설명회(IR)개최(안내공시)', date: '20261010', no: '20261010000050', tag: 'IR' },
+    ]);
+    assert.deepEqual(d['005935'], d['005930']);
+    assert.deepEqual(d['000660'].items.map((x) => x.tag), ['지분']);
+    const corp = read(root, 'dartcorp.json');
+    assert.equal(corp.map['005930'], '00126380');
+    assert.deepEqual([corp.at, corp.tried, corp.none], [NOW_KR, NOW_KR, ['069500']]);
+    assert.equal(read(root, 'status.json').dart, 'ok');
+    for (const f of fs.readdirSync(path.join(root, 'docs', 'data'))) assert.ok(!raw(root, f).includes(DART_KEY), `${f}에 키 없음`);
+    assert.ok(!lines.join('\n').includes(DART_KEY), '로그에 키 없음');
+    await pipeline(root, {}, NOW_KR + 5 * MIN);
+    assert.equal(callsTo(/corpCode\.xml/), 0, '표가 새것 → 다시 받지 않음');
+    await pipeline(root, {}, NOW_KR + 7 * 60 * MIN);
+    assert.equal(callsTo(/corpCode\.xml/), 0, 'ETF는 없음 목록에 기억 → 6시간이 지나도 다시 받지 않음');
+    fs.writeFileSync(path.join(root, 'config', 'watchlist.json'), JSON.stringify({ items: [...items5, { code: '123456', market: 'KR', name: '새 종목' }] }));
+    await pipeline(root, {}, NOW_KR + 7 * 60 * MIN + 5 * MIN);
+    assert.equal(callsTo(/corpCode\.xml/), 1, '표에 없는 새 종목 → 다시 받음');
+    assert.deepEqual(read(root, 'dartcorp.json').none, ['069500', '123456']);
+    await pipeline(root, {}, NOW_KR + 8 * 1440 * MIN);
+    assert.equal(callsTo(/corpCode\.xml/), 1, '7일 지나면 다시 받음');
+  });
+});
+await test('공시 오류: 키 오류면 이유 기록·30분 뒤 재시도 · 한도 초과면 그 회차 중단 · 공시 없음·일시 오류는 종목별로', async () => {
+  await withDartKey(async () => {
+    const root = workspace();
+    const keyErr = () => text('<?xml version="1.0" encoding="UTF-8"?>\n<result><status>010</status><message>등록되지 않은 키입니다.</message></result>');
+    await pipeline(root, { corpZip: keyErr });
+    assert.equal(callsTo(/list\.json/), 0, '고유번호 표가 없으면 목록 요청 안 함');
+    assert.equal(read(root, 'status.json').dart, '등록되지 않은 인증키(010)');
+    assert.deepEqual([read(root, 'dartcorp.json').at, read(root, 'dartcorp.json').tried], [null, NOW_KR]);
+    await pipeline(root, { corpZip: keyErr }, NOW_KR + 20 * MIN);
+    assert.equal(callsTo(/corpCode\.xml/), 0, '30분 안에는 다시 받지 않음');
+    await pipeline(root, {}, NOW_KR + 31 * MIN); // 키를 고친 뒤
+    assert.equal(callsTo(/corpCode\.xml/), 1);
+    assert.equal(read(root, 'status.json').dart, 'ok');
+    const before = read(root, 'disclosures.json');
+    assert.equal(before['005930'].items.length, 5);
+    await pipeline(root, { dartList: () => json({ status: '020', message: '요청 제한을 초과하였습니다.' }) }, NOW_KR + 45 * MIN);
+    assert.equal(callsTo(/list\.json/), 1, '첫 요청에서 멈춤');
+    assert.deepEqual(read(root, 'disclosures.json'), before, '직전 값 유지');
+    assert.equal(read(root, 'status.json').dart, '하루 요청 한도 초과(020)');
+    const mixed = (corp) => (corp === '00126380' ? text('error', 500) : json({ status: '013', message: '조회된 데이타가 없습니다.' }));
+    await pipeline(root, { dartList: mixed }, NOW_KR + 60 * MIN);
+    const d = read(root, 'disclosures.json');
+    assert.deepEqual(d['005930'], before['005930'], '일시 오류 → 그 종목만 직전 값');
+    assert.deepEqual(d['000660'], { ok: true, items: [] }, '기간 안에 공시 없음');
+    assert.equal(read(root, 'status.json').dart, 'ok', '일시 오류는 중단 사유가 아님');
+    const bad = workspace();
+    await pipeline(bad, { corpZip: () => new Response(makeZip([['CORPCODE.xml', corpXml().slice(0, 3000)]])) });
+    assert.match(read(bad, 'status.json').dart, /고유번호 목록 받기 실패 — 고유번호 목록이 너무 적음/, '잘린 목록은 쓰지 않음');
+    assert.deepEqual(read(bad, 'dartcorp.json').map, {});
+  });
+});
+await test('공시 → AI 분석: 국내 급등락 종목 요청에 최근 공시(오늘 표시) · 새 공시면 다시 분석 · 키 없으면 예전 그대로', async () => {
+  const stockBodies = () => NET.bodies.filter((b, i) => isGemini(NET.calls[i]) && b.includes("'삼성전자'"));
+  const plain = workspace();
+  await pipeline(plain);
+  assert.ok(stockBodies().length === 1 && !stockBodies()[0].includes('최근 공시'), '키 없음 → 공시 줄 없음');
+  assert.ok(!read(plain, 'analysis.json')['005930'].sig.includes('|d:'), '시그니처도 예전 형식');
+  await withDartKey(async () => {
+    const root = workspace();
+    await pipeline(root);
+    const body = stockBodies()[0];
+    assert.ok(body.includes('최근 공시(전자공시 2주, 최신순)') && body.includes('- 오늘 [계약] 단일판매ㆍ공급계약체결')
+      && body.includes('- 10/13 [배당] 현금ㆍ현물배당결정') && body.includes('뉴스+공시+수급+추세'), body.slice(0, 800));
+    assert.ok(read(root, 'analysis.json')['005930'].sig.endsWith('|d:20261015000321,20261015000100,20261014000500'));
+    await pipeline(root, {}, NOW_KR + 5 * MIN);
+    assert.equal(stockBodies().length, 0, '같은 공시 → 재사용');
+    const rows = { ...DART_ROWS, '00126380': [['20261015000999', '투자판단관련주요경영사항'], ...DART_ROWS['00126380']] };
+    await pipeline(root, { dartRows: rows }, NOW_KR + 10 * MIN);
+    assert.equal(stockBodies().length, 1, '새 공시 → 다시 분석');
+  });
+});
+await test('다음 분석 가능 시각: 리셋 직후·모델 수·몫 소진·지금 가능·주말·쓸 모델 없음', () => {
+  const mk = (ms, used = {}) => ({ ...bud.startBudget(null, ms), used });
+  assert.equal(bud.nextAllowanceAt(mk(NOW_EVE), ['a', 'b'], NOW_EVE), T('2026-10-14T14:12:00Z'), '미국장 시작 42분 뒤(23:12 KST)');
+  assert.equal(bud.nextAllowanceAt(mk(NOW_EVE), ['a', 'b', 'c'], NOW_EVE), T('2026-10-14T13:58:00Z'), '모델 3개면 더 빨리(22:58 KST)');
+  assert.equal(bud.nextAllowanceAt(mk(NOW_KR, { a: 12, b: 10 }), ['a', 'b'], NOW_KR), T('2026-10-15T03:07:00Z'), '몫을 다 썼으면 7분 뒤');
+  assert.equal(bud.nextAllowanceAt(mk(NOW_KR), ['a', 'b'], NOW_KR), NOW_KR, '지금 쓸 수 있으면 지금');
+  assert.equal(bud.nextAllowanceAt(mk(NOW_KR, { a: 20, b: 19 }), ['a', 'b'], NOW_KR), T('2026-10-15T06:00:00Z'), '거의 다 썼으면 리셋 1시간 전(15:00 KST)');
+  assert.equal(bud.nextAllowanceAt(mk(T('2026-10-18T03:00:00Z')), ['a', 'b'], T('2026-10-18T03:00:00Z')), T('2026-10-18T06:00:00Z'), '일요일 — 리셋 1시간 전(15:00 KST)');
+  assert.equal(bud.nextAllowanceAt({ ...mk(NOW_KR), out: { a: 'quota', b: 'quota' } }, ['a', 'b'], NOW_KR), null);
 });
 
 // ===== 종목 검색 목록(stocklist) =====

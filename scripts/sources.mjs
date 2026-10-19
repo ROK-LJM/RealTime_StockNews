@@ -472,12 +472,14 @@ function historyStats(history) {
 }
 
 // 뉴스·수급·추세·시세를 모두 넘겨 Gemini가 "오늘 왜 이렇게 움직이는지"를 종합 분석. 키 없거나 실패 시 null.
-export async function aiStockAnalysis({ quote, news, flow, history }) {
+export async function aiStockAnalysis({ quote, news, flow, history, disclosures, now = Date.now() }) {
   if (!GEMINI_KEY || !quote) return null;
   const name = quote.name || quote.code;
   const pct = quote.changePct ?? 0;
   const dir = pct < 0 ? '하락' : pct > 0 ? '상승' : '보합';
-  const cur = quote.currency === 'KRW' ? '원' : '달러';
+  // 미국 종목은 '미국 증시' 관점으로, 가격은 달러 소수 둘째 자리까지. 투자자별 수급은 국내 종목만 있다.
+  const us = quote.market === 'US' || quote.currency === 'USD';
+  const money = (v) => (v == null ? 'N/A' : us ? `$${Number(v).toFixed(2)}` : `${Math.round(v).toLocaleString('ko-KR')}원`);
   const p = (v) => v == null ? 'N/A' : `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
   const n = (v) => v == null ? 'N/A' : `${v >= 0 ? '+' : ''}${Math.round(v).toLocaleString('ko-KR')}`;
   const st = historyStats(history);
@@ -488,16 +490,25 @@ export async function aiStockAnalysis({ quote, news, flow, history }) {
   const histLine = st
     ? `1주 ${p(st.w1)} · 1개월 ${p(st.m1)} · 3개월 ${p(st.m3)} · 6개월 고점대비 ${p(st.fromHigh)}`
     : '(과거 시세 없음)';
+  // 국내 종목 최근 공시(OpenDART 키가 있을 때만) — 오늘 접수분은 '오늘'로 적어 원인 후보로 먼저 보게 한다
+  const today = new Date(now + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const discs = us ? [] : (disclosures?.items || []).slice(0, 5);
+  const discLines = discs.map((d) => {
+    const ds = String(d.date || '');
+    return `- ${ds === today ? '오늘' : `${ds.slice(4, 6)}/${ds.slice(6, 8)}`} [${d.tag || '기타'}] ${d.title}`;
+  }).join('\n');
+  const basis = us ? '뉴스·추세' : discs.length ? '뉴스·공시·수급·추세' : '뉴스·수급·추세';
   const prompt =
-    `너는 한국 증시 애널리스트다. 아래 정보를 종합해 '${name}'이(가) 오늘 왜 ${dir}하는지 핵심 원인을 분석하라.\n` +
-    `오늘 등락: ${pct.toFixed(2)}% · 현재가 ${quote.price != null ? Math.round(quote.price).toLocaleString('ko-KR') : 'N/A'}${cur} (고가 ${quote.high ?? 'N/A'} / 저가 ${quote.low ?? 'N/A'})\n` +
+    `너는 ${us ? '미국' : '한국'} 증시 애널리스트다(답은 한국어로). 아래 정보를 종합해 '${name}'이(가) 오늘 왜 ${dir}하는지 핵심 원인을 분석하라.\n` +
+    `오늘 등락: ${pct.toFixed(2)}% · 현재가 ${money(quote.price)} (고가 ${money(quote.high)} / 저가 ${money(quote.low)})\n` +
     `과거 흐름: ${histLine}\n` +
-    `수급(순매수): ${flowLine}\n` +
+    (us ? '' : `수급(순매수): ${flowLine}\n`) +
+    (discs.length ? `최근 공시(전자공시 2주, 최신순):\n${discLines}\n` : '') +
     `최근 뉴스 제목:\n${heads}\n\n` +
-    `단순 시황 중계가 아니라 '원인'에 집중하라. 뉴스·수급·추세를 서로 연결해 설명하고, 근거가 약하면 단정하지 말 것.\n` +
+    `단순 시황 중계가 아니라 '원인'에 집중하라. ${basis}를 서로 연결해 설명하고, 근거가 약하면 단정하지 말 것.\n` +
     `반드시 이 JSON만 출력:\n` +
     `{"headline":"오늘 왜 ${dir}하는지 한 문장 진단(한국어, 50자 내외)",` +
-    `"summary":"종합 분석 2~3문장(한국어, 뉴스+수급+추세를 연결)",` +
+    `"summary":"종합 분석 2~3문장(한국어, ${basis.replace(/·/g, '+')}를 연결)",` +
     `"factors":["핵심 요인 2~4개, 각 25자 내외"],` +
     `"outlook":"단기 관전 포인트 한 줄(조심스럽게, 단정·투자권유 금지)"}`;
   const r = await geminiJSON(prompt);
@@ -521,7 +532,8 @@ export async function aiStockAnalysis({ quote, news, flow, history }) {
 //  · 새로 부르다 실패·보류되면 이전 판단을 유지하고, aiAt(분석 시각)을 남겨 화면에 '몇 시 분석'으로 보여준다.
 // 재사용은 이전에 AI가 '성공'했을 때만. 실패(null)까지 재사용하면 한도가 풀려도 다시 시도하지 않는다.
 export const INDEX_AI_MIN_INTERVAL_MS = 90 * 60 * 1000;
-export async function getIndexReason(name, changePct, prev = null, now = Date.now()) {
+// open: 국내 시장이 열려 있는지(기본은 시계 기준 장 시간 — 호출부가 시세의 '마감' 상태로 휴장일을 반영해 넘긴다)
+export async function getIndexReason(name, changePct, prev = null, now = Date.now(), open = isKrSession(now)) {
   const dir = changePct <= -1 ? 'down' : changePct >= 1 ? 'up' : 'flat';
   const q = dir === 'down' ? `${name} 급락 이유` : dir === 'up' ? `${name} 급등 이유` : `${name} 증시 마감`;
   // (aiSig가 없던 이전 형식은 sig가 곧 판단 당시 입력)
@@ -533,7 +545,7 @@ export async function getIndexReason(name, changePct, prev = null, now = Date.no
     const sig = `${Math.round(changePct ?? 0)}|${items.slice(0, 4).map((i) => i.title).join('|')}`;
     let { ai, aiAt, aiSig } = keep;
     const recent = ai && aiAt != null && now - aiAt >= 0 && now - aiAt < INDEX_AI_MIN_INTERVAL_MS;
-    const settled = !isKrSession(now) && sigMove(aiSig) === sigMove(sig); // 장 밖 + 등락 그대로 → 뉴스만 바뀜
+    const settled = !open && sigMove(aiSig) === sigMove(sig); // 장 밖(휴장 포함) + 등락 그대로 → 뉴스만 바뀜
     if (!ai || (aiSig !== sig && !recent && !settled)) {
       const fresh = await aiCoreNews(name, changePct, items);
       if (fresh) { ai = fresh; aiAt = now; aiSig = sig; }

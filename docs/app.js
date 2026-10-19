@@ -9,7 +9,7 @@ const CHART_H = 120;      // 차트 높이(px). style.css의 .chart/.chart canva
 const $ = (s) => document.querySelector(s);
 // openAnalysis: 펼쳐 둔 AI 종합분석의 종목코드. 자동 새로고침으로 카드를 다시 그려도 접히지 않게 유지한다.
 // loadedOnce: 한 번이라도 시세를 그렸는지. 이후의 일시적 로드 실패로 화면을 비우지 않기 위한 표시.
-const state = { timer: null, intervalSec: 60, hist: {}, news: {}, inv: {}, analysis: {}, openAnalysis: new Set(), loadedOnce: false };
+const state = { timer: null, intervalSec: 60, hist: {}, news: {}, inv: {}, analysis: {}, disc: {}, openAnalysis: new Set(), loadedOnce: false };
 
 // ---------- 포맷 ----------
 function fmtPrice(q) {
@@ -333,14 +333,15 @@ function renderBriefs(briefs) {
 
 // ---------- 보유 종목 ----------
 async function loadQuotes() {
-  let data, news, hist, inv, analysis;
+  let data, news, hist, inv, analysis, disc;
   try {
-    [data, news, hist, inv, analysis] = await Promise.all([
+    [data, news, hist, inv, analysis, disc] = await Promise.all([
       loadJson('quotes.json'),
       loadJson('news.json').catch(() => ({})),
       loadJson('history.json').catch(() => ({})),
       loadJson('investors.json').catch(() => ({})),
       loadJson('analysis.json').catch(() => ({})),
+      loadJson('disclosures.json').catch(() => ({})),
     ]);
   } catch (e) {
     // 자동 새로고침 중 일시적 실패(5xx·오프라인 등)로 이미 그려진 화면을 지우지 않는다.
@@ -354,6 +355,7 @@ async function loadQuotes() {
   state.hist = hist || {};
   state.inv = inv || {};
   state.analysis = analysis || {};
+  state.disc = disc || {};
   const quotes = data.quotes || [];
   if (!quotes.length) { $('#grid').innerHTML = '<div class="muted">추적 종목이 없습니다. config/watchlist.json을 편집하세요.</div>'; return; }
 
@@ -370,7 +372,7 @@ async function loadQuotes() {
   const html = [...MARKET_GROUPS, ...extra].map((g) => {
     const list = groups[g.key];
     if (!list || !list.length) return ''; // 빈 그룹은 헤더도 만들지 않음
-    try { return renderGroup(g, list); }
+    try { return renderGroup(g, list, data.closed); }
     catch (e) { console.warn('그룹 렌더 실패:', g.key, e); return ''; }
   }).join('');
   hideTip(); // 카드를 통째로 교체하므로, 가리키던 종목의 툴팁이 화면에 남지 않게 먼저 지운다
@@ -390,6 +392,7 @@ async function loadQuotes() {
     } catch (e) { console.warn('차트 렌더 실패:', q && q.code, e); }
   }
   for (const q of quotes) { try { renderAnalysis(q, state.analysis[q.code]); } catch (e) { console.warn('분석 렌더 실패:', q && q.code, e); } }
+  for (const q of quotes) { try { renderDisc(q, state.disc[q.code]); } catch (e) { console.warn('공시 렌더 실패:', q && q.code, e); } }
   for (const q of quotes) { try { renderNews(q, state.news[q.code]); } catch (e) { console.warn('뉴스 렌더 실패:', q && q.code, e); } }
 }
 
@@ -407,17 +410,49 @@ function lastTimeOf(list) {
   return new Date(Math.max(...times)).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
+// ---------- 데이터 지연 경고 ----------
+// 수집 봇(5분 간격)이 멈추거나 시세 출처가 막혀도 화면은 마지막 값을 그대로 보여준다 — 장중인데 오래 그대로면 알린다.
+//  ① 시세가 '장중'인데 마지막 시각이 45분 넘게 지남. 국내는 15:30~16:00 체결이 없어 정상이어도 26분까지 벌어진다(실측).
+//  ② 시계로는 정규장(개장 30분 뒤부터)인데 시세가 '장중'이 아님 — 봇이 오늘을 휴장(조기 폐장)으로 확인했으면(closed) 제외.
+const STALE_OPEN_MIN = 45;
+const REG_SESSION = { KR: ['Asia/Seoul', 9 * 60, 15 * 60 + 30], US: ['America/New_York', 9 * 60 + 30, 16 * 60] };
+function marketClock(timeZone, ms) {
+  const p = {};
+  const f = new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  for (const x of f.formatToParts(new Date(ms))) p[x.type] = x.value;
+  return { day: `${p.year}-${p.month}-${p.day}`, weekend: p.weekday === 'Sat' || p.weekday === 'Sun', min: +p.hour * 60 + +p.minute };
+}
+function fmtAge(ms) {
+  const m = Math.floor(ms / 60e3);
+  return m < 60 ? `${m}분` : m < 48 * 60 ? `${Math.floor(m / 60)}시간` : `${Math.floor(m / 1440)}일`;
+}
+// 지연이면 경고 문구, 아니면 '' — valid: 수집 성공 종목, closed: quotes.json의 휴장 확인 기록
+function staleOf(market, valid, closed, ms = Date.now()) {
+  const last = Math.max(...valid.map((q) => +new Date(q.asOf)).filter(Number.isFinite));
+  if (!Number.isFinite(last)) return '';
+  const age = ms - last;
+  if (valid.some((q) => q.marketStatus === 'OPEN')) return age > STALE_OPEN_MIN * 60e3 ? `${fmtAge(age)}째 갱신 없음` : '';
+  const s = REG_SESSION[market];
+  if (!s || age <= 30 * 60e3) return '';
+  const c = marketClock(s[0], ms);
+  const regular = !c.weekend && c.min >= s[1] + 30 && c.min < s[2];
+  return regular && closed?.[market] !== c.day ? '개장 후 갱신 없음' : '';
+}
+
 // 시장별 묶음: 헤더(종목수·상승/하락 개수·해당 시장 장상태·갱신시각) + 그 시장의 카드 그리드
-function renderGroup(g, list) {
+function renderGroup(g, list, closed) {
   // 수집 실패(ok:false) 종목은 집계에서 뺀다 — 넣으면 '전 종목 보합·마감'처럼 잘못 단정된다.
   const valid = list.filter((q) => q && q.ok);
   const failed = list.length - valid.length;
   const up = valid.filter((q) => (q.changePct ?? 0) > 0).length;
   const down = valid.filter((q) => (q.changePct ?? 0) < 0).length;
   const t = lastTimeOf(valid);
+  // 오래된 '장중' 표시는 지금도 장중이라는 보장이 없으므로 지연 경고로 바꿔 보여준다
+  const stale = valid.length ? staleOf(g.key, valid, closed) : '';
   // '장중 아님'과 '상태를 알 수 없음'을 구분한다(전부 실패했는데 마감이라고 하지 않도록).
   let status;
   if (!valid.length) status = '⚠️ 수집 실패';
+  else if (stale) status = `⚠️ ${stale}`;
   else if (valid.some((q) => q.marketStatus === 'OPEN')) status = '🟢 장중';
   else if (valid.some((q) => q.marketStatus)) status = '⚪ 마감';
   else status = '';
@@ -433,7 +468,7 @@ function renderGroup(g, list) {
       <span class="mgroup-count">${list.length}종목</span>
       ${failed && valid.length ? `<span class="mgroup-fail">${failed}개 수집 실패</span>` : ''}
       ${valid.length ? `<span class="mgroup-updown"><b class="up-c">▲ ${up}</b> <b class="down-c">▼ ${down}</b></span>` : ''}
-      <span class="mgroup-status">${status}${t ? ` · ${t}` : ''}</span>
+      <span class="mgroup-status${stale ? ' stale' : ''}"${stale ? ' title="보통 5분마다 갱신됩니다. 수집 봇(GitHub Actions)이 멈췄거나 시세 출처에 문제가 있을 수 있어요 — 도움말 FAQ 참고"' : ''}>${status}${t ? ` · ${t}` : ''}</span>
     </div>
     <div class="grid">${cards}</div>
   </section>`;
@@ -447,6 +482,33 @@ function errCard(q) {
 }
 
 // 급등락 종목 AI 종합분석 — 한 줄 진단은 항상 보이고, 클릭하면 종합분석·핵심요인·관전포인트가 펼쳐진다.
+// 분석에 쓴 입력 — 미국 종목은 수급이 없고, 공시는 분석 당시 입력(sig)에 공시 접수번호가 있을 때만
+function basisOf(q, data) {
+  if (marketOf(q) === 'US') return '뉴스·추세';
+  return String(data?.sig || '').includes('|d:') ? '뉴스·공시·수급·추세' : '뉴스·수급·추세';
+}
+
+// ---------- 최근 공시(국내 종목, OpenDART 인증키가 있을 때만 데이터가 있음) ----------
+// 주가에 영향이 큰 종류(실적·계약·증자 등)는 강조, '위험'(횡령·거래정지 등)은 빨강, 오늘 접수분은 '오늘'
+const DART_VIEW = 'https://dart.fss.or.kr/dsaf001/main.do?rcpNo=';
+const kstYmd = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+function renderDisc(q, data) {
+  const el = document.getElementById('disc-' + cssId(q.code));
+  if (!el) return;
+  const items = (data && Array.isArray(data.items) ? data.items : []).filter((x) => x && /^\d{14}$/.test(String(x.no)) && x.title);
+  if (!items.length) { el.hidden = true; el.innerHTML = ''; return; }
+  const today = kstYmd(Date.now());
+  const rows = items.slice(0, Math.abs(q.changePct ?? 0) >= MOVER_THRESHOLD ? 5 : 3).map((x) => {
+    const d = String(x.date || '');
+    const when = d === today ? '<b class="disc-today">오늘</b>' : /^\d{8}$/.test(d) ? `${+d.slice(4, 6)}/${+d.slice(6, 8)}` : '';
+    const cls = x.tag === '위험' ? 'neg' : x.key ? 'key' : 'neutral';
+    return `<div class="news-item"><span class="tag ${cls}">${esc(x.tag || '기타')}</span>
+      <span>${extLink(DART_VIEW + x.no, x.title)} <span class="news-time">${when}</span></span></div>`;
+  }).join('');
+  el.innerHTML = `<div class="news-head"><span>📋 최근 공시</span><span class="disc-src">전자공시(DART)</span></div>${rows}`;
+  el.hidden = false;
+}
+
 function renderAnalysis(q, data) {
   const el = document.getElementById('analysis-' + cssId(q.code));
   if (!el) return;
@@ -456,7 +518,7 @@ function renderAnalysis(q, data) {
   const detail = `${data.summary ? `<p class="an-summary">${esc(data.summary)}</p>` : ''}`
     + `${factors ? `<ul class="an-factors">${factors}</ul>` : ''}`
     + `${data.outlook ? `<p class="an-outlook">📌 ${esc(data.outlook)}</p>` : ''}`
-    + `<p class="an-disc">AI가 뉴스·수급·추세를 종합한 추정입니다${fmtAiTime(data.at) ? `(${esc(fmtAiTime(data.at))} 분석)` : ''}. 투자조언이 아닙니다.</p>`;
+    + `<p class="an-disc">AI가 ${basisOf(q, data)}를 종합한 추정입니다${fmtAiTime(data.at) ? `(${esc(fmtAiTime(data.at))} 분석)` : ''}. 투자조언이 아닙니다.</p>`;
   const wasOpen = state.openAnalysis.has(q.code); // 새로고침 전에 펼쳐 뒀다면 그대로 유지
   el.innerHTML = `<button class="an-toggle ${dirCls}" type="button" aria-expanded="${wasOpen}">
       <span class="an-badge">🧠 AI 종합분석</span>
@@ -537,6 +599,7 @@ function renderCard(q, hist, inv) {
       <span>${status}</span>
     </div>
     <div class="analysis" id="analysis-${id}"></div>
+    ${marketOf(q) === 'KR' ? `<div class="news disc" id="disc-${id}" hidden></div>` : ''}
     <div class="news" id="news-${id}"></div>
   </div>`;
 }
@@ -580,14 +643,34 @@ const AI_STATE = {
   'no-model': ['🔴', 'AI 오류 — 사용 가능한 모델 없음'],
 };
 const AI_OUT = { quota: '한도 소진', unavailable: '사용 불가' };
+// 다음 AI 분석 가능 시각 — 오늘이면 '22:58', 내일이면 '내일 09:07', 그 뒤면 '10. 20. 09:07'. 이미 지났으면 '곧'
+function fmtNextAt(ms) {
+  if (!Number.isFinite(ms)) return '';
+  if (ms <= Date.now() + 60e3) return '곧';
+  const d = new Date(ms), today = new Date();
+  const hm = d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  if (d.toDateString() === today.toDateString()) return hm;
+  const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+  if (d.toDateString() === tomorrow.toDateString()) return `내일 ${hm}`;
+  return d.toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+}
 async function loadStatus() {
   const el = $('#aiStatus');
+  const dEl = $('#dartStatus');
   if (!el) return;
   try {
     const st = await loadJson('status.json');
+    // 공시 수집이 멈췄으면(키 오류·하루 한도 초과·점검) 이유를 한 줄로 — 정상('ok')이거나 키가 없으면(값 없음) 숨김
+    if (dEl) {
+      const d = st?.dart;
+      dEl.hidden = !(typeof d === 'string' && d && d !== 'ok');
+      dEl.textContent = dEl.hidden ? '' : `📋 공시 수집 멈춤 — ${d}`;
+    }
     const ai = st?.ai;
     if (!ai || !AI_STATE[ai.state]) { el.hidden = true; return; }
-    const [icon, label] = AI_STATE[ai.state];
+    const [icon, baseLabel] = AI_STATE[ai.state];
+    const next = ai.state === 'wait' ? fmtNextAt(ai.next) : '';
+    const label = next ? `AI 순서 대기 — 다음 분석 ${next === '곧' ? '곧 재개' : `${next}부터`} (국내 장 우선 배분)` : baseLabel;
     const count = Number.isFinite(ai.used) && Number.isFinite(ai.cap) && ai.cap > 0 ? ` · 무료 한도 ${ai.used}/${ai.cap}회` : '';
     el.textContent = `${icon} ${label}${count}`;
     // 자세한 내용은 마우스를 올리면 — 모델별 사용 횟수·제외된 모델·초기화 시각
@@ -601,7 +684,7 @@ async function loadStatus() {
       count ? '무료 한도는 매일 오후 4시(겨울철 5시)에 초기화되며, 국내 장 시간에 우선 배분됩니다.' : '',
     ].filter(Boolean).join('\n');
     el.hidden = false;
-  } catch { el.hidden = true; }
+  } catch { el.hidden = true; if (dEl) dEl.hidden = true; }
 }
 
 function tick() {
@@ -611,8 +694,14 @@ function tick() {
 }
 function restartTimer() {
   if (state.timer) clearInterval(state.timer);
-  if (state.intervalSec > 0) state.timer = setInterval(tick, state.intervalSec * 1000);
+  state.timer = null;
+  // 다른 탭·앱을 보는 동안엔 자동 새로고침을 쉰다(데이터·배터리 절약) — 돌아오면 아래 visibilitychange가 바로 갱신
+  if (state.intervalSec > 0 && !document.hidden) state.timer = setInterval(tick, state.intervalSec * 1000);
 }
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { if (state.timer) clearInterval(state.timer); state.timer = null; }
+  else { tick(); restartTimer(); }
+});
 
 // index.html 구조 변경 등으로 요소가 없어도 스크립트 초기화가 중단되지 않도록 옵셔널 체이닝으로 보호.
 $('#refreshBtn')?.addEventListener('click', tick);
