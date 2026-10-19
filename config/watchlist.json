@@ -22,6 +22,9 @@
     { "code": "AMZN", "market": "US", "name": "아마존닷컴" },
     { "code": "000720", "market": "KR", "name": "현대건설" },
     { "code": "042700", "market": "KR", "name": "한미반도체" },
-    { "code": "373220", "market": "KR", "name": "LG에너지솔루션" }
+    { "code": "373220", "market": "KR", "name": "LG에너지솔루션" },
+    { "code": "TSM", "market": "US", "name": "TSMC" },
+    { "code": "NVDA", "market": "US", "name": "엔비디아" },
+    { "code": "SPCX", "market": "US", "name": "스페이스X" }
   ]
 }
