@@ -25,6 +25,10 @@
     { "code": "373220", "market": "KR", "name": "LG에너지솔루션" },
     { "code": "TSM", "market": "US", "name": "TSMC" },
     { "code": "NVDA", "market": "US", "name": "엔비디아" },
-    { "code": "SPCX", "market": "US", "name": "스페이스X" }
+    { "code": "SPCX", "market": "US", "name": "스페이스X" },
+    { "code": "053800", "market": "KR", "name": "안랩" },
+    { "code": "090710", "market": "KR", "name": "휴림로봇" },
+    { "code": "056080", "market": "KR", "name": "유진로봇" },
+    { "code": "005380", "market": "KR", "name": "현대차" }
   ]
 }
