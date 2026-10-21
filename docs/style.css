@@ -114,7 +114,7 @@ button:hover { border-color: var(--accent); }
 .hh-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .edit-btn { font-size: 13px; padding: 5px 11px; border-radius: 999px; }
 .edit-status { font-size: 12px; color: var(--muted); }
-.hh-right { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.hh-right { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
 .hh-count { font-size: 12px; }
 /* 카드 순서 토글(내 순서 / 등락 큰 순) */
 .seg { display: inline-flex; padding: 2px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); }
@@ -285,6 +285,15 @@ button:hover { border-color: var(--accent); }
 
 
 .err { color: var(--neg); font-size: 13px; }
+/* 시세를 못 받는 종목 카드 — 이유와 고치는 방법 */
+.stock-err { border-style: dashed; }
+.err-help { margin: 6px 0 8px; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.err-edit { padding: 5px 11px; border-radius: 999px; font-size: 12.5px; }
+/* 카드 '간단히' 보기 — 시세 · 🧠 AI 분석 · 수급만 (차트·예측·기간 수익률·고저·공시·뉴스 숨김) */
+#grid.compact .rets, #grid.compact .chart, #grid.compact .fc, #grid.compact .meta, #grid.compact .news { display: none; }
+#grid.compact .grid { grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px; }
+#grid.compact .stock { padding: 12px 14px; }
+#grid.compact .price { font-size: 22px; }
 .foot { text-align: center; color: var(--muted); font-size: 12px; padding: 18px; border-top: 1px solid var(--border); }
 /* 출처 문구와 섞이지 않게 별도 줄 가운데. 좁은 화면에서 두 줄이 돼도 어색하지 않게 둥근 사각형 */
 .ai-status { display: table; margin: 0 auto 8px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 12px; color: var(--text); font-size: 12px; }

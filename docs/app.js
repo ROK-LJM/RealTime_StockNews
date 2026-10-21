@@ -11,7 +11,7 @@ const $ = (s) => document.querySelector(s);
 // loadedOnce: 한 번이라도 시세를 그렸는지. 이후의 일시적 로드 실패로 화면을 비우지 않기 위한 표시.
 // sort: 카드 순서('mine' 내 순서 | 'move' 등락 큰 순, 이 기기에 기억). whyAll: '왜 움직였나' 전체 펼침. data: 마지막으로 받은 quotes.json
 const state = { timer: null, intervalSec: 60, hist: {}, news: {}, inv: {}, analysis: {}, disc: {}, openAnalysis: new Set(), loadedOnce: false,
-  sort: 'mine', whyAll: false, data: null, gauge: null, briefOpen: new Map() };
+  sort: 'mine', view: 'full', whyAll: false, data: null, gauge: null, briefOpen: new Map() };
 
 // ---------- 포맷 ----------
 function fmtPrice(q) {
@@ -535,7 +535,7 @@ function whyOf(q) {
 }
 function tileHtml(q) {
   if (!q || !q.ok) {
-    return `<button type="button" class="tile err" data-code="${esc(q?.code)}" title="데이터 오류"><span class="t-nm">${esc(q?.name || q?.code)}</span><span class="t-pct">오류</span></button>`;
+    return `<button type="button" class="tile err" data-code="${esc(q?.code)}" title="시세를 받지 못함 — 눌러서 이유 보기"><span class="t-nm">${esc(q?.name || q?.code)}</span><span class="t-pct">시세 없음</span></button>`;
   }
   const p = q.changePct ?? 0;
   const a = (0.12 + 0.68 * Math.min(Math.abs(p), 5) / 5).toFixed(2); // 색 진하기: 0% 0.12 ~ 5% 이상 0.8
@@ -612,6 +612,25 @@ document.querySelectorAll('.seg [data-sort]').forEach((b) => b.addEventListener(
   renderQuotes();
 }));
 syncSortButtons();
+
+// ---------- 카드 보기 (자세히 / 간단히) — 이 기기에 기억 ----------
+// 종목이 많으면(30개 이상) 카드가 길어 휴대폰에서 스크롤이 매우 길다. '간단히'는 시세·🧠 AI 분석·수급만 남긴다
+// (차트·예측·기간 수익률·고저·공시·뉴스는 숨김 — 공시·이유는 위 '한눈에'에 있다). 다시 받지 않고 보이기만 바꾼다.
+const VIEW_KEY = 'stockdash.view';
+try { const v = localStorage.getItem(VIEW_KEY); if (v === 'full' || v === 'compact') state.view = v; } catch {}
+function applyView() {
+  $('#grid')?.classList.toggle('compact', state.view === 'compact');
+  document.querySelectorAll('.seg [data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === state.view)));
+}
+document.querySelectorAll('.seg [data-view]').forEach((b) => b.addEventListener('click', () => {
+  if (state.view === b.dataset.view) return;
+  state.view = b.dataset.view;
+  applyView();
+  try { localStorage.setItem(VIEW_KEY, state.view); } catch {}
+  if (state.view === 'full') redrawCharts(); // 숨겨진 채 그려진 차트를 실제 크기로
+  if (window.syncJump) window.syncJump();
+}));
+applyView();
 
 // 카드 렌더가 예기치 못한 데이터로 실패했을 때 보여줄 최소 안전 카드.
 function errCard(q) {
@@ -694,9 +713,12 @@ function retSpan(label, v) {
 function renderCard(q, hist, inv) {
   const id = cssId(q.code);
   if (!q.ok) {
-    return `<div class="stock" id="card-${id}">
-      <div class="stock-head"><div class="nm">${esc(q.name)}<span class="code">${esc(q.code)}</span></div></div>
-      <div class="err">데이터 오류: ${esc(q.error || '')}</div></div>`;
+    // 계속 실패하는 종목(티커 오타·상장폐지·국내/미국 외 종목)은 이유와 고치는 방법을 함께 보여준다
+    return `<div class="stock stock-err" id="card-${id}">
+      <div class="stock-head"><div class="nm">${esc(q.name)}<span class="code">${esc(q.code)}</span></div><span class="badge flat">시세 없음</span></div>
+      <div class="err">⚠️ 시세를 받지 못했어요${q.error ? ` <span class="muted">(${esc(q.error)})</span>` : ''}</div>
+      <p class="err-help">국내 6자리 코드·미국 상장 티커만 지원해요. 티커가 틀렸거나 상장폐지·다른 나라 종목이면 계속 실패하니, 종목 편집에서 고치거나 빼 주세요.</p>
+      <button type="button" class="err-edit" data-open-editor>✏️ 종목 편집 열기</button></div>`;
   }
   const c = dirClass(q.changePct);
   const isMover = Math.abs(q.changePct ?? 0) >= MOVER_THRESHOLD;
@@ -868,12 +890,18 @@ window.addEventListener('resize', () => {
   clearTimeout(_resizeTimer);
   _resizeTimer = setTimeout(() => {
     if (state.gauge) drawGauge($('#moodCanvas'), state.gauge.score, state.gauge.tone); // 휴대폰 회전 등으로 크기가 바뀌면 선명하게 다시
-    document.querySelectorAll('.chart canvas').forEach((cv) => {
-      try { const c = cv.__c; if (c) drawChart(cv, c.hist, c.fc, { dates: c.dates, currency: c.currency }); }
-      catch (e) { console.warn('리사이즈 차트 재렌더 실패:', e); }
-    });
+    redrawCharts();
   }, 150);
 });
+// 보이는 크기에 맞춰 차트를 다시 그린다 — 창 크기 변경, '간단히'에서 '자세히'로 바꿀 때(숨겨진 채 그려진 차트 보정)
+function redrawCharts() {
+  document.querySelectorAll('.chart canvas').forEach((cv) => {
+    try { const c = cv.__c; if (c && cv.clientWidth) drawChart(cv, c.hist, c.fc, { dates: c.dates, currency: c.currency }); }
+    catch (e) { console.warn('차트 다시 그리기 실패:', e); }
+  });
+}
+// 시세를 못 받는 종목 카드의 '종목 편집 열기'
+$('#grid')?.addEventListener('click', (e) => { if (e.target.closest('[data-open-editor]')) $('#editBtn')?.click(); });
 // 최후의 안전망: 어디서든 처리되지 않은 비동기 오류가 나도 콘솔 경고만 남기고 페이지는 동작 유지.
 window.addEventListener('unhandledrejection', (e) => console.warn('처리되지 않은 비동기 오류:', e.reason));
 
