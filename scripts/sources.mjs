@@ -240,12 +240,14 @@ export function tagSentiment(text) {
 }
 
 // recentDays>0 이면 최근 N일 뉴스만(구글 when: 연산자 + pubDate 필터), 최신순 정렬.
-async function googleNews(query, ko, recentDays = 0) {
+// keep(title): 남길 기사 판정(종목 뉴스의 관련도 필터). 주면 후보를 넉넉히(40건) 읽고 걸러 8건까지.
+// 도박·카지노 광고 같은 스팸 제목은 어느 검색이든 뺀다.
+async function googleNews(query, ko, recentDays = 0, keep = null) {
   const hl = ko ? 'ko' : 'en-US', gl = ko ? 'KR' : 'US', ceid = ko ? 'KR:ko' : 'US:en';
   const q = recentDays > 0 ? `${query} when:${recentDays}d` : query;
   const xml = await http(`https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=${hl}&gl=${gl}&ceid=${ceid}`, { as: 'text' });
   const items = [];
-  for (const b of xml.split('<item>').slice(1, 13)) {
+  for (const b of xml.split('<item>').slice(1, keep ? 41 : 13)) {
     const pick = (tag) => { const m = b.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`)); return m ? decodeEntities(m[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim()) : ''; };
     let title = pick('title');
     let source = pick('source');
@@ -255,13 +257,60 @@ async function googleNews(query, ko, recentDays = 0) {
     const pubMs = pub ? Date.parse(pub) : null;
     items.push({ title, source, time: pub ? new Date(pub).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '', pubMs, link: pick('link'), sentiment: tagSentiment(title) });
   }
-  let out = items;
+  let out = items.filter((it) => it.title && !SPAM_RE.test(it.title) && (!keep || keep(it.title)));
   if (recentDays > 0) {
     const cutoff = Date.now() - recentDays * 86400000;
-    out = items.filter((it) => it.pubMs == null || it.pubMs >= cutoff);
+    out = out.filter((it) => it.pubMs == null || it.pubMs >= cutoff);
   }
   out.sort((a, b) => (b.pubMs || 0) - (a.pubMs || 0));
   return out.slice(0, 8);
+}
+
+// ---------- 종목 뉴스 관련도 ----------
+// 구글 뉴스 검색은 느슨해서 도박·카지노 광고, 다른 종목이 주인공인 시황·상장 공지 기사가 섞인다
+// (실측 2026-10-21: 238건 중 93건(39%)이 제목에 종목 이름 없음 — '토토미 쌀국수', 'a1 카지노', 'ELW 224종목 신규 상장' 등).
+// → 제목에 그 종목의 이름·별칭·티커가 있는 기사만 남긴다. 다른 이름으로 불리는 종목은 별칭으로 보완.
+export const SPAM_RE = /카지노|바카라|토토\s?사이트|스포츠\s?토토|먹튀|꽁머니|홀덤|양방\s?배팅|파워볼|릴게임|슬롯\s?머신|온라인\s?슬롯/;
+// 뉴스에서 흔히 쓰는 다른 이름(종목코드·티커별). 없는 종목은 이름·영문명·티커로만 판단.
+const NEWS_ALIAS = {
+  '000660': ['하이닉스', '삼전닉스'], '010120': ['LS일렉트릭'], '329180': ['현대중공업'], '005380': ['현대자동차'],
+  '373220': ['LG엔솔', '엘지에너지솔루션'], '028050': ['삼성이앤에이', '삼성엔지니어링'], '012450': ['한화에어로'],
+  '079550': ['LIG D&A', 'LIG디펜스', 'LIG넥스원'], '005930': ['삼전'],
+  SPCX: ['SpaceX'], TSM: ['TSMC', 'Taiwan Semi'], SMCI: ['Supermicro'], GOOGL: ['Google', 'Alphabet'], GOOG: ['Google', 'Alphabet'], META: ['Meta'],
+};
+const normTitle = (s) => String(s ?? '').toLowerCase().replace(/[\s·.,'"’‘“”()[\]\-–—]/g, '');
+// 우선주(코드 끝자리 5·7·9 + 이름 끝 '우', '2우B' 등)는 보통주 이름으로 — 'LG전자우' → 'LG전자'
+export function krBaseName(name, code) {
+  const n = String(name ?? '').trim();
+  return /^\d{5}[579]$/.test(String(code ?? '')) ? n.replace(/\d?우[A-C]?$/, '') || n : n;
+}
+// 영문 회사명에서 법인 형태·주식 종류를 뗀 핵심 이름 — 'Tesla, Inc.' → 'Tesla', 'Amazon.com, Inc.' → 'Amazon'
+export function enCoreName(en) {
+  return String(en ?? '').replace(/\.com\b/i, '')
+    .replace(/,?\s+(Inc\.?|Incorporated|Corporation|Corp\.?|Co\.|Company|Ltd\.?|Limited|Holdings?|plc|N\.V\.|S\.A\.|AG|SE|Class [A-Z]|Common Stock|Ordinary Shares|American Depositary.*|ADR|ADS)\b.*$/i, '')
+    .replace(/[,.]\s*$/, '').trim();
+}
+// 제목에서 찾을 열쇠말(정규화) — 이름·보통주 이름·영문 핵심 이름(두 단어 이상이면 앞 두 단어도)·별칭
+export function newsKeys(item) {
+  const keys = new Set();
+  const add = (s) => { const k = normTitle(s); if (k.length >= 2) keys.add(k); };
+  const code = String(item?.code ?? '').trim();
+  add(item?.name);
+  if (item?.market === 'KR') add(krBaseName(item.name, code));
+  else {
+    const core = enCoreName(item?.en);
+    if (core) { add(core); const w = core.split(/\s+/); if (w.length > 2) add(w.slice(0, 2).join(' ')); }
+  }
+  for (const a of NEWS_ALIAS[code] || []) add(a);
+  return [...keys];
+}
+// 관련 기사인가 — 열쇠말이 제목에 있거나, 미국 종목이면 티커가 대문자 단어로 있으면('PLUG'는 되고 'plug-in'은 안 됨)
+export function isRelevantNews(title, item, keys = newsKeys(item)) {
+  const t = normTitle(title);
+  if (keys.some((k) => t.includes(k))) return true;
+  const code = String(item?.code ?? '').trim();
+  return item?.market !== 'KR' && /^[A-Z][A-Z.\-]{0,9}$/.test(code)
+    && new RegExp(`(^|[^A-Za-z])${code.replace(/[.\-]/g, '\\$&')}([^A-Za-z]|$)`).test(String(title ?? ''));
 }
 
 export async function getNews(item) {
@@ -272,9 +321,13 @@ export async function getNews(item) {
   if (cached) return cached;
   try {
     // 당일 위주(최근 2일) 뉴스만. (급등락 종목의 "왜?"는 aiStockAnalysis가 종합 분석 — 여기선 헤드라인만)
+    // 제목에 종목 이름·별칭·티커가 있는 기사만(관련도), 우선주는 보통주 이름으로 검색(그 회사 뉴스가 우선주도 움직임)
+    const it = { ...item, code, market };
+    const keys = newsKeys(it);
+    const keep = (title) => isRelevantNews(title, it, keys);
     const items = market === 'KR'
-      ? await googleNews(`${item.name || code} 주가`, true, 2)
-      : await googleNews(`${item.name || code} ${code} stock`, false, 2);
+      ? await googleNews(`${krBaseName(item.name || code, code)} 주가`, true, 2, keep)
+      : await googleNews(`${item.name || code} ${code} stock`, false, 2, keep);
     let pos = 0, neg = 0;
     for (const it of items) { if (it.sentiment.tone === 'pos') pos++; else if (it.sentiment.tone === 'neg') neg++; }
     const summary = { label: pos > neg ? '호재 우세' : neg > pos ? '악재 우세' : '중립', tone: pos > neg ? 'pos' : neg > pos ? 'neg' : 'neutral', pos, neg, total: items.length };

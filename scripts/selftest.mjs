@@ -65,9 +65,11 @@ const naverIndex = (pct, status = 'OPEN') => ({ datas: [{ closePriceRaw: '2,600.
 const trendStock = [{ bizdate: '20261015', foreignerPureBuyQuant: '-1,000', organPureBuyQuant: '500', individualPureBuyQuant: '500', foreignerHoldRatio: '50.00%' }];
 const trendIndex = { bizdate: '20261015', personalValue: '+1,000', foreignValue: '-800', institutionalValue: '-200' };
 // tag를 바꾸면 헤드라인이 달라진다(= 분석 입력이 바뀐 상황)
-function rss(tag = '') {
+// 실제 뉴스처럼 제목에 검색한 종목 이름이 들어간다(관련도 필터 통과) — name은 검색어에서 '주가'·'stock' 앞부분
+const queryName = (u) => String(new URL(u).searchParams.get('q') || '').replace(/\s+when:\S+/, '').replace(/\s+(주가|stock)$/, '').trim();
+function rss(tag = '', name = '') {
   const pub = new Date(Date.now() - 3600e3).toUTCString(); // 최근 2일 필터 통과
-  const items = [1, 2, 3].map((i) => `<item><title>${tag ? `${tag} ` : ''}테스트 뉴스 ${i} 급등 - 테스트일보</title><link>https://news.example.com/a${i}</link><pubDate>${pub}</pubDate><source url="https://news.example.com">테스트일보</source></item>`).join('');
+  const items = [1, 2, 3].map((i) => `<item><title>${tag ? `${tag} ` : ''}${name ? `${name} ` : ''}테스트 뉴스 ${i} 급등 - 테스트일보</title><link>https://news.example.com/a${i}</link><pubDate>${pub}</pubDate><source url="https://news.example.com">테스트일보</source></item>`).join('');
   return `<?xml version="1.0"?><rss><channel>${items}</channel></rss>`;
 }
 // 지수 브리핑(summary·items)과 종목 분석(headline·factors) 양쪽 형식을 모두 만족하는 응답
@@ -136,7 +138,7 @@ async function withDartKey(fn) {
   try { return await fn(); } finally { delete process.env.DART_API_KEY; }
 }
 
-function routes({ krPct = { '005930': 4.2, '000660': 0.3 }, usPct = {}, idxPct = -1.2, krStatus = 'OPEN', idxStatus = 'OPEN', newsTag = '', news = () => text(rss(newsTag)),
+function routes({ krPct = { '005930': 4.2, '000660': 0.3 }, usPct = {}, idxPct = -1.2, krStatus = 'OPEN', idxStatus = 'OPEN', newsTag = '', news = (m, u) => text(rss(newsTag, queryName(u))),
   yahoo = (m) => { const sym = decodeURIComponent(m[1]); return json(yahooChart(sym, usPct[sym])); }, gemini = () => json(geminiOk),
   corpZip = () => new Response(makeZip([['CORPCODE.xml', corpXml()]])), dartRows = DART_ROWS,
   dartList: listFn = (corp) => json(dartList(corp, dartRows[corp] || [])) } = {}) {
@@ -642,7 +644,7 @@ await test('받기에 실패한 종목은 직전 과거시세·뉴스를 유지(
   const before = read(root, 'history.json').AAPL;
   const yahoo = (m, u) => (/range=6mo/.test(u) && /AAPL/.test(u) ? text('error', 500) : json(yahooChart(decodeURIComponent(m[1]))));
   // 삼성전자 뉴스만 실패(나머지는 성공 → 파일은 새로 써짐) — 실패한 종목은 직전 뉴스를 지켜야 한다
-  const news = (m, u) => (decodeURIComponent(u).includes('삼성전자') ? text('error', 500) : text(rss('new')));
+  const news = (m, u) => (decodeURIComponent(u).includes('삼성전자') ? text('error', 500) : text(rss('new', queryName(u))));
   await pipeline(root, { yahoo, news }, NOW_KR + 30 * MIN);
   assert.deepEqual(read(root, 'history.json').AAPL, before, 'AAPL 과거시세 유지');
   const all = read(root, 'news.json');
@@ -665,6 +667,52 @@ await test('해외 종목 AI 분석: 미국 증시 관점 · 달러 소수 둘�
   assert.ok(us && kr, '두 종목 모두 분석 요청');
   assert.ok(us.includes('미국 증시 애널리스트') && !us.includes('수급(순매수)') && /현재가 \$\d+\.\d{2}/.test(us), us.slice(0, 200));
   assert.ok(kr.includes('한국 증시 애널리스트') && kr.includes('수급(순매수)') && /현재가 [\d,]+원/.test(kr));
+});
+await test('뉴스 관련도: 우선주는 보통주 이름 · 영문 핵심 이름 · 별칭 · 미국 티커(대문자 단어) · 무관 기사·도박 스팸 제외', () => {
+  assert.deepEqual([src.krBaseName('LG전자우', '066575'), src.krBaseName('현대차2우B', '005387'), src.krBaseName('삼성전자', '005930')], ['LG전자', '현대차', '삼성전자']);
+  assert.deepEqual(['Tesla, Inc.', 'Amazon.com, Inc.', 'Super Micro Computer, Inc.', 'Taiwan Semiconductor Manufacturing Company Ltd.', 'Space Exploration Technologies Corp. Class A', 'NVIDIA Corporation']
+    .map(src.enCoreName), ['Tesla', 'Amazon', 'Super Micro Computer', 'Taiwan Semiconductor Manufacturing', 'Space Exploration Technologies', 'NVIDIA']);
+  const ok = (title, item) => src.isRelevantNews(title, item);
+  const kr = (code, name) => ({ code, name, market: 'KR' });
+  const us = (code, name, en) => ({ code, name, market: 'US', en });
+  assert.equal(ok('여러 기능이 함께 나올 때 읽는 토토미 쌀국수 작동 순서', kr('066575', 'LG전자우')), false, '무관 기사');
+  assert.equal(ok('LG전자, 3분기 영업이익 시장 기대 웃돌아', kr('066575', 'LG전자우')), true, '우선주는 보통주 이름으로');
+  assert.equal(ok('LS일렉트릭, 사상 최대 실적…100분기 연속 흑자', kr('010120', 'LS ELECTRIC')), true, '별칭');
+  assert.equal(ok('대한전선 | 미국 송전망 투자는 이제 시작', kr('010120', 'LS ELECTRIC')), false, '다른 회사 기사');
+  assert.equal(ok('한국투자증권, ELW 224종목 신규 상장', kr('000720', '현대건설')), false, '상장 공지');
+  assert.equal(ok('현대중공업 주가 2,000원 상승 후 장마감', kr('329180', 'HD현대중공업')), true);
+  assert.equal(ok("Did Tesla's Fall Catch You Out?", us('TSLA', '테슬라', 'Tesla, Inc.')), true, '영문 이름');
+  assert.equal(ok('Micron stock forecast: AI demand, China competition', us('TSLA', '테슬라', 'Tesla, Inc.')), false);
+  assert.equal(ok('Why PLUG stock jumped today', us('PLUG', '플러그파워', 'Plug Power, Inc.')), true, '티커');
+  assert.equal(ok('Best plug-in hybrids of 2026', us('PLUG', '플러그파워', 'Plug Power, Inc.')), false, '소문자 일반 단어는 티커 아님');
+  assert.equal(ok('Supermicro spikes after raising guidance', us('SMCI', '슈퍼 마이크로 컴퓨터', 'Super Micro Computer, Inc.')), true);
+  assert.equal(ok('Advanced Micro rallies on new AI chip', us('AMD', 'AMD', 'Advanced Micro Devices, Inc.')), true, '별칭 없는 세 단어 이름 → 앞 두 단어');
+  assert.equal(ok('삼전닉스 반등에도 갈 길 먼 주가', kr('000660', 'SK하이닉스')), true, '줄임말 별칭');
+  assert.equal(ok('Musk Vows to Give Each U.S. Child a SpaceX Share', us('SPCX', '스페이스X', 'Space Exploration Technologies Corp. Class A')), true);
+  assert.equal(ok('엔비디아 주가 반등', us('NVDA', '엔비디아', '')), true, '한글 이름(목록 없을 때)');
+  assert.ok(src.SPAM_RE.test('규칙이 적용되는 순서가 궁금한 a1 카지노') && src.SPAM_RE.test('먹튀 없는 토토사이트 추천'));
+  assert.ok(!src.SPAM_RE.test('개미들, 엔비디아에 베팅') && !src.SPAM_RE.test('삼성전자, 새 메모리 슬롯 규격 공개'), '금융 기사의 베팅·슬롯은 스팸 아님');
+});
+await test('뉴스 관련도(파이프라인): 무관 기사·스팸은 빼고 관련 기사만 저장 · 우선주는 보통주로 검색 · 미국은 검색 목록 영문명으로', async () => {
+  const root = workspace([...ITEMS, { code: '066575', market: 'KR', name: 'LG전자우' }]);
+  writeData(root, 'stocklist.json', { v: 2, kr: [], us: [['AAPL', '애플', 'Apple Inc.', 'NASDAQ', 1]], meta: {} });
+  const pub = new Date(Date.now() - 3600e3).toUTCString();
+  const item = (t) => `<item><title>${t} - 테스트일보</title><link>https://news.example.com/${encodeURIComponent(t)}</link><pubDate>${pub}</pubDate></item>`;
+  const news = (m, u) => {
+    const name = queryName(u).split(' ')[0];
+    const titles = /stock/.test(new URL(u).searchParams.get('q'))
+      ? ['Apple stock jumps on iPhone demand', 'Micron stock forecast: AI demand', 'Best plug-in hybrids of 2026']
+      : [`${name} 실적 기대에 급등`, '여러 기능이 함께 나올 때 읽는 토토미 쌀국수 작동 순서', `${name} 주가 카지노 바카라 안내`, '한국투자증권, ELW 224종목 신규 상장'];
+    return text(`<?xml version="1.0"?><rss><channel>${titles.map(item).join('')}</channel></rss>`);
+  };
+  await pipeline(root, { news });
+  const d = read(root, 'news.json');
+  assert.deepEqual(d['005930'].items.map((x) => x.title), ['삼성전자 실적 기대에 급등']);
+  assert.deepEqual(d['066575'].items.map((x) => x.title), ['LG전자 실적 기대에 급등'], '우선주 → 보통주 기사');
+  assert.deepEqual(d.AAPL.items.map((x) => x.title), ['Apple stock jumps on iPhone demand'], '영문 이름으로 관련 판단');
+  const qs = NET.calls.filter((u) => /news\.google\.com/.test(u)).map((u) => new URL(u).searchParams.get('q'));
+  assert.ok(qs.some((q) => q.startsWith('LG전자 주가')) && !qs.some((q) => q.startsWith('LG전자우')), qs.join(' / '));
+  assert.equal(d['005930'].summary.total, 1, '호재·악재 집계도 관련 기사만');
 });
 await test('수급 날짜: AI 입력에 오늘 값인지 전 거래일 확정치인지 밝힘(장중엔 전날 값 — 오늘 원인으로 오해 방지)', async () => {
   const bodyOf = () => NET.bodies.find((b, i) => isGemini(NET.calls[i]) && b.includes("'삼성전자'")) || '';

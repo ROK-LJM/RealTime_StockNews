@@ -155,8 +155,11 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
   } catch (e) { console.error('  ✗ 수급 실패 — investors.json 유지:', e.message); }
 
   // 5) 종목별 뉴스 (순차 수집으로 과호출 방지) — 받기 실패(ok:false)면 직전 뉴스 유지
+  //    미국 종목은 검색 목록(stocklist.json)의 영문 회사명을 함께 넘겨 'Tesla'·'Nvidia'처럼 영문 제목도 관련 기사로 인정한다.
   try {
-    await collect('news', '뉴스', 'news.json', (v) => isObj(v) && v.ok === true && Array.isArray(v.items), getNews, news);
+    const usEn = new Map((readJson('stocklist.json')?.us || []).filter((r) => Array.isArray(r) && r[0]).map((r) => [r[0], r[2] || '']));
+    const withEn = (it) => (it.market === 'US' ? { ...it, en: usEn.get(it.code) || '' } : it);
+    await collect('news', '뉴스', 'news.json', (v) => isObj(v) && v.ok === true && Array.isArray(v.items), (it) => getNews(withEn(it)), news);
     const anyNews = Object.values(news).some((n) => n && n.items && n.items.length);
     if (anyNews) write('news.json', news);
     else console.warn('  ! 뉴스 전부 비어 있음 — news.json 유지');
