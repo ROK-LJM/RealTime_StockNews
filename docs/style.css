@@ -221,7 +221,8 @@ button:hover { border-color: var(--accent); }
 
 /* 종목 카드 수급 행 */
 .flow { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 12px; margin: 4px 0 2px; }
-.flow-label { color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 0 6px; }
+.flow-label { color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 0 6px; cursor: help; }
+.flow-label.old { color: var(--warn); border-color: rgba(255, 180, 84, .45); } /* 전 거래일 확정치 — 오늘 등락과 다른 날 */
 .flow i { font-style: normal; color: var(--muted); margin-right: 3px; }
 .flow b { font-variant-numeric: tabular-nums; }
 

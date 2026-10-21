@@ -666,6 +666,13 @@ await test('해외 종목 AI 분석: 미국 증시 관점 · 달러 소수 둘�
   assert.ok(us.includes('미국 증시 애널리스트') && !us.includes('수급(순매수)') && /현재가 \$\d+\.\d{2}/.test(us), us.slice(0, 200));
   assert.ok(kr.includes('한국 증시 애널리스트') && kr.includes('수급(순매수)') && /현재가 [\d,]+원/.test(kr));
 });
+await test('수급 날짜: AI 입력에 오늘 값인지 전 거래일 확정치인지 밝힘(장중엔 전날 값 — 오늘 원인으로 오해 방지)', async () => {
+  const bodyOf = () => NET.bodies.find((b, i) => isGemini(NET.calls[i]) && b.includes("'삼성전자'")) || '';
+  await pipeline(workspace());                // 10/15 장중, 수급 날짜 20261015 → 오늘
+  assert.ok(bodyOf().includes('외국인지분 50.00% (오늘)'), bodyOf().slice(0, 400));
+  await pipeline(workspace(), {}, NEXT_DAY);  // 10/16 장중인데 수급은 아직 10/15 값
+  assert.ok(bodyOf().includes('(10/15 확정치 — 오늘 장중 수급 아님)'), bodyOf().slice(0, 400));
+});
 await test('휴장 확인 시간대: 개장 10분 뒤~마감 10분 전 · 시장 날짜 · 주말 제외 · 서머타임', () => {
   const d = (m, s) => bud.closedCheckDay(m, T(s));
   assert.equal(d('KR', '2026-10-15T00:09:00Z'), null, '09:09 KST');

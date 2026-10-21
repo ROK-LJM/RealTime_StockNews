@@ -286,6 +286,7 @@ export async function getNews(item) {
 
 // ---------- 투자자별 순매매(수급) — 네이버 ----------
 // 종목별 외국인/기관/개인 순매수 수량(최근 거래일). 한국 종목만. (해외 IP에서 막히면 null)
+// 네이버는 장 마감 후 저녁(실측 20:30 회차쯤)에 그날 확정치를 올린다 → 장중엔 전 거래일 값(date로 구분, 화면·AI에 날짜 표시).
 export async function getStockInvestors(item) {
   const code = String(item.code).trim();
   if (!isKRCode(code)) return null;
@@ -484,14 +485,17 @@ export async function aiStockAnalysis({ quote, news, flow, history, disclosures,
   const n = (v) => v == null ? 'N/A' : `${v >= 0 ? '+' : ''}${Math.round(v).toLocaleString('ko-KR')}`;
   const st = historyStats(history);
   const heads = (news?.items || []).slice(0, 6).map((it, i) => `${i + 1}. ${it.title}`).join('\n') || '(수집된 뉴스 없음)';
+  const today = new Date(now + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, ''); // 한국 날짜 YYYYMMDD
+  // 종목 수급은 장 마감 후 저녁에 그날 확정치가 나와 장중엔 전 거래일 값이다 — 오늘 움직임의 원인으로 오해하지 않게 날짜를 밝힌다
+  const fd = /^\d{8}$/.test(String(flow?.date ?? '')) ? String(flow.date) : '';
+  const flowWhen = !fd ? '최근 거래일' : fd === today ? '오늘' : `${+fd.slice(4, 6)}/${+fd.slice(6, 8)} 확정치 — 오늘 장중 수급 아님`;
   const flowLine = flow
-    ? `외국인 ${n(flow.foreign)}주, 기관 ${n(flow.institution)}주, 개인 ${n(flow.individual)}주${flow.foreignRatio ? ` · 외국인지분 ${flow.foreignRatio}` : ''} (${flow.date || '최근 거래일'})`
+    ? `외국인 ${n(flow.foreign)}주, 기관 ${n(flow.institution)}주, 개인 ${n(flow.individual)}주${flow.foreignRatio ? ` · 외국인지분 ${flow.foreignRatio}` : ''} (${flowWhen})`
     : '(수급 데이터 없음)';
   const histLine = st
     ? `1주 ${p(st.w1)} · 1개월 ${p(st.m1)} · 3개월 ${p(st.m3)} · 6개월 고점대비 ${p(st.fromHigh)}`
     : '(과거 시세 없음)';
   // 국내 종목 최근 공시(OpenDART 키가 있을 때만) — 오늘 접수분은 '오늘'로 적어 원인 후보로 먼저 보게 한다
-  const today = new Date(now + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
   const discs = us ? [] : (disclosures?.items || []).slice(0, 5);
   const discLines = discs.map((d) => {
     const ds = String(d.date || '');

@@ -328,7 +328,7 @@ function renderBriefs(briefs) {
     }
     const f = b.flow;
     const flowHtml = f
-      ? `<div class="brief-flow">수급<span class="u">(억원)</span>
+      ? `<div class="brief-flow">수급<span class="u">(억원${flowWhen(f.date)})</span>
           <span><i>외국인</i> <b class="${dirClass(f.foreign)}-c">${fmtFlow(f.foreign)}</b></span>
           <span><i>기관</i> <b class="${dirClass(f.institution)}-c">${fmtFlow(f.institution)}</b></span>
           <span><i>개인</i> <b class="${dirClass(f.personal)}-c">${fmtFlow(f.personal)}</b></span></div>`
@@ -677,6 +677,15 @@ function renderAnalysis(q, data) {
   });
 }
 
+// 수급 날짜 표시 — 종목 수급은 장 마감 후 저녁에 그날 확정치가 나와 장중엔 전 거래일 값이다.
+// 오늘 등락 옆에 날짜 없이 붙으면 '급등했는데 다 팔았다'처럼 보여 헷갈리므로 ' · 오늘' / ' · 10/20 기준'을 붙인다.
+const FLOW_TIP = '종목별 투자자 수급은 장 마감 후 저녁(20시 이후)에 그날 확정치가 나와요. 장중에는 전 거래일 값이니 날짜를 확인하세요.';
+function flowWhen(d) {
+  const s = String(d ?? '');
+  if (!/^\d{8}$/.test(s)) return '';
+  return s === kstYmd(Date.now()) ? ' · 오늘' : ` · ${+s.slice(4, 6)}/${+s.slice(6, 8)} 기준`;
+}
+
 function retSpan(label, v) {
   if (v == null) return `<span class="ret"><i>${label}</i> —</span>`;
   return `<span class="ret"><i>${label}</i> <b class="${dirClass(v)}-c">${fmtPct(v)}</b></span>`;
@@ -712,10 +721,16 @@ function renderCard(q, hist, inv) {
       <span class="muted">· 변동범위 ±${fc.endBandPct.toFixed(1)}%</span>
       <span class="fc-note" title="최근 60거래일 추세·변동성 기반 단순 통계 추정. 실제와 다를 수 있으며 투자조언 아님.">ⓘ 참고용</span></div>`;
   }
-  const flowRow = inv ? `<div class="flow"><span class="flow-label">수급</span>
+  // 순매수는 모든 주체를 더하면 0 — 외국인·기관·개인이 모두 같은 방향이면 반대편(기타법인 등)을 함께 보여준다
+  const three = inv ? [inv.foreign, inv.institution, inv.individual] : [];
+  const sameDir = three.length && three.every((v) => Number.isFinite(v)) && (three.every((v) => v > 0) || three.every((v) => v < 0));
+  const etc = sameDir ? -(inv.foreign + inv.institution + inv.individual) : 0;
+  const flowOld = inv && /^\d{8}$/.test(String(inv.date ?? '')) && String(inv.date) !== kstYmd(Date.now()); // 오늘 값이 아님
+  const flowRow = inv ? `<div class="flow"><span class="flow-label${flowOld ? ' old' : ''}" title="${esc(FLOW_TIP)}">수급${flowWhen(inv.date)}</span>
       <span><i>외국인</i> <b class="${dirClass(inv.foreign)}-c">${fmtShares(inv.foreign)}</b></span>
       <span><i>기관</i> <b class="${dirClass(inv.institution)}-c">${fmtShares(inv.institution)}</b></span>
       <span><i>개인</i> <b class="${dirClass(inv.individual)}-c">${fmtShares(inv.individual)}</b></span>
+      ${etc ? `<span title="외국인·기관·개인이 모두 같은 방향일 때의 반대편(기타법인 등). 순매수 합계는 0"><i>기타</i> <b class="${dirClass(etc)}-c">${fmtShares(etc)}</b></span>` : ''}
       ${inv.foreignRatio ? `<span class="muted">외인 ${esc(inv.foreignRatio)}</span>` : ''}</div>` : '';
 
   // 순서: 시세 → 🧠 왜 움직였나(급등락 종목) → 기간 수익률·차트·예측 → 수급·고저 → 공시 → 뉴스
