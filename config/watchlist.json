@@ -29,6 +29,7 @@
     { "code": "053800", "market": "KR", "name": "안랩" },
     { "code": "090710", "market": "KR", "name": "휴림로봇" },
     { "code": "056080", "market": "KR", "name": "유진로봇" },
-    { "code": "005380", "market": "KR", "name": "현대차" }
+    { "code": "005380", "market": "KR", "name": "현대차" },
+    { "code": "SMCI", "market": "US", "name": "슈퍼 마이크로 컴퓨터" }
   ]
 }
