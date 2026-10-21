@@ -1,1 +1,1 @@
-{"ai":{"state":"ok","model":"gemini-3.5-flash-lite","used":61,"cap":61},"budget":{"day":"2026-10-20","used":{"gemini-2.5-flash-lite":18,"gemini-3.5-flash-lite":22,"gemini-3.1-flash-lite":21},"out":{"gemini-2.5-flash-lite":"quota"}},"dart":"ok"}
+{"ai":{"state":"ok","model":"gemini-3.1-flash-lite","used":64,"cap":64},"budget":{"day":"2026-10-20","used":{"gemini-2.5-flash-lite":18,"gemini-3.5-flash-lite":23,"gemini-3.1-flash-lite":23},"out":{"gemini-2.5-flash-lite":"quota"}},"dart":"ok"}
