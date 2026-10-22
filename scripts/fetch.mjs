@@ -14,10 +14,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  getMarket, getQuotes, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis,
+  getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis,
   aiStatus, aiGate, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD,
 } from './sources.mjs';
-import { startBudget, toStored, totalUsed, capacity, inSession, isKrSession, nextAllowanceAt, closedCheckDay } from './aibudget.mjs';
+import { startBudget, toStored, totalUsed, capacity, inSession, isKrSession, nextAllowanceAt, closedCheckDay, usExtWindow, usAfterPostSameDay } from './aibudget.mjs';
 import { validateWatchlist, writeJsonAtomic, analysisSig, sigMove } from './util.mjs';
 import { dartEnabled, resetDart, dartHalted, ensureCorpTable, getDisclosures } from './dart.mjs';
 
@@ -102,10 +102,33 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
     const quotes = await getQuotes(items);
     quotes.forEach((q) => { quotesByCode[q.code] = q; });
     if (quotes.some((q) => q.ok)) {
+      const prevQuotesFile = readJson('quotes.json');
+      // 미국 시간외 가격(ext) — 정규장 밖 종목에만. 시간외 시간대(프리 04:00~09:30·애프터 16:00~20:00 ET)에만 새로 받고,
+      // 그 밖이거나 받기 실패면 직전 값을 이어 쓴다 — 단 마지막 정규장 체결(asOf) 뒤의 거래일 때만(새 정규장이 열리면 버림).
+      // 등락은 정규장 종가(price) 대비. 정규장 중엔 붙이지 않는다(정규장 가격이 곧 최신).
+      // 애프터마켓이 끝난 같은 날 밤엔 직전 값이 없는 종목(배포 직후·새로 추가)만 한 번 받아 마지막 시간외 가격을 채운다
+      const win = usExtWindow(now), late = usAfterPostSameDay(now);
+      const prevExt = new Map((prevQuotesFile?.quotes || []).filter((q) => q && q.ext).map((q) => [q.code, q.ext]));
+      let extFresh = 0, extKept = 0;
+      for (const q of quotes) {
+        if (!q.ok || q.market !== 'US' || q.marketStatus === 'OPEN' || !(q.price > 0)) continue;
+        let ext = null;
+        if (win || (late && !prevExt.has(q.code))) {
+          try { ext = await getUsExt(q.code); if (ext) extFresh++; }
+          catch (e) { console.error(`    시간외 실패(${q.code}):`, e.message); }
+        }
+        if (!ext) { ext = prevExt.get(q.code) || null; if (ext) extKept++; }
+        const lastRegular = +new Date(q.asOf);
+        if (!ext || !(ext.price > 0) || !Number.isFinite(ext.at) || (Number.isFinite(lastRegular) && ext.at <= lastRegular)) continue;
+        const change = ext.price - q.price;
+        q.ext = { session: ext.session === 'pre' ? 'pre' : 'post', price: ext.price, change: Math.round(change * 10000) / 10000,
+          changePct: Math.round((change / q.price) * 10000) / 100, at: ext.at };
+      }
+      if (win || extKept) console.log(`  · 미국 시간외: 새로 ${extFresh}건 · 직전 값 ${extKept}건${win ? ` (${win === 'pre' ? '프리마켓' : '애프터마켓'} 시간대)` : ''}`);
       // 휴장 확인 기록 { KR: 'YYYY-MM-DD', US: … } — 장 시간인데 그 시장 시세가 하나도 '장중'이 아니면 오늘 날짜를 남긴다.
       // 화면은 오늘 기록이 없을 때만 '개장 후 갱신 없음'을 띄운다(수집 중단 경고가 휴장일에 뜨지 않게). 휴장일마다 한 번만 바뀐다.
       const closed = {};
-      for (const [m, d] of Object.entries(readJson('quotes.json')?.closed || {})) {
+      for (const [m, d] of Object.entries(prevQuotesFile?.closed || {})) {
         if ((m === 'KR' || m === 'US') && /^\d{4}-\d{2}-\d{2}$/.test(d)) closed[m] = d;
       }
       for (const m of ['KR', 'US']) {

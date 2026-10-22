@@ -94,6 +94,11 @@ button:hover { border-color: var(--accent); }
 .t-nm { max-width: 100%; font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .t-pct { font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .t-dot { position: absolute; top: 3px; right: 5px; font-size: 10px; }
+.t-ext { font-size: 10.5px; font-weight: 600; opacity: .9; font-variant-numeric: tabular-nums; } /* 미국 시간외 등락 */
+/* 미국 시간외(프리·애프터마켓) 가격 줄 — 정규장 가격 바로 아래 */
+.ext-row { margin-top: 3px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.ext-row .ext-label { color: var(--muted); font-size: 12px; }
+.ext-row b { font-weight: 700; }
 .why { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
 .why-head { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
 .why-head .muted { font-weight: 400; font-size: 12px; }

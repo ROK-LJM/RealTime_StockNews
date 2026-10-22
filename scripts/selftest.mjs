@@ -139,7 +139,10 @@ async function withDartKey(fn) {
 }
 
 function routes({ krPct = { '005930': 4.2, '000660': 0.3 }, usPct = {}, idxPct = -1.2, krStatus = 'OPEN', idxStatus = 'OPEN', newsTag = '', news = (m, u) => text(rss(newsTag, queryName(u))),
-  yahoo = (m) => { const sym = decodeURIComponent(m[1]); return json(yahooChart(sym, usPct[sym])); }, gemini = () => json(geminiOk),
+  yahoo = (m, u) => { // 시간외(5분봉) 요청엔 기본적으로 체결 없음 — 시간외 전용 테스트만 봉을 준다
+    const sym = decodeURIComponent(m[1]);
+    return json(/interval=5m/.test(u) ? { chart: { result: [{ meta: {}, timestamp: [], indicators: { quote: [{ close: [] }] } }] } } : yahooChart(sym, usPct[sym]));
+  }, gemini = () => json(geminiOk),
   corpZip = () => new Response(makeZip([['CORPCODE.xml', corpXml()]])), dartRows = DART_ROWS,
   dartList: listFn = (corp) => json(dartList(corp, dartRows[corp] || [])) } = {}) {
   return [
@@ -667,6 +670,60 @@ await test('해외 종목 AI 분석: 미국 증시 관점 · 달러 소수 둘�
   assert.ok(us && kr, '두 종목 모두 분석 요청');
   assert.ok(us.includes('미국 증시 애널리스트') && !us.includes('수급(순매수)') && /현재가 \$\d+\.\d{2}/.test(us), us.slice(0, 200));
   assert.ok(kr.includes('한국 증시 애널리스트') && kr.includes('수급(순매수)') && /현재가 [\d,]+원/.test(kr));
+});
+await test('미국 시간외: 시간대(프리 04:00~09:30·애프터 16:00~20:00 ET, 평일·서머타임) · 5분봉 마지막 체결 판정', () => {
+  const w = (s) => bud.usExtWindow(T(s));
+  assert.deepEqual(['2026-10-15T07:59:00Z', '2026-10-15T08:00:00Z', '2026-10-15T13:29:00Z', '2026-10-15T13:30:00Z', '2026-10-15T19:59:00Z',
+    '2026-10-15T20:00:00Z', '2026-10-15T23:59:00Z', '2026-10-16T00:00:00Z', '2026-10-17T22:00:00Z', '2026-12-15T09:00:00Z', '2026-12-15T21:30:00Z'].map(w),
+    [null, 'pre', 'pre', null, null, 'post', 'post', null, null, 'pre', 'post'], 'EDT 경계 · 토요일 · 겨울(EST)');
+  const S = (s) => T(s) / 1000;
+  const chart = (bars, reg = { start: S('2026-10-15T13:30:00Z'), end: S('2026-10-15T20:00:00Z') }) => ({ chart: { result: [{
+    meta: { currentTradingPeriod: { regular: reg } }, timestamp: bars.map((b) => S(b[0])), indicators: { quote: [{ close: bars.map((b) => b[1]) }] } }] } });
+  assert.deepEqual(src.extFromChart(chart([['2026-10-15T19:55:00Z', 200], ['2026-10-15T21:55:00Z', 206.5], ['2026-10-15T22:00:00Z', null]])),
+    { session: 'post', price: 206.5, at: T('2026-10-15T21:55:00Z') }, '빈 봉은 건너뛰고 마지막 체결');
+  assert.deepEqual(src.extFromChart(chart([['2026-10-15T11:00:00Z', 199]])), { session: 'pre', price: 199, at: T('2026-10-15T11:00:00Z') });
+  assert.equal(src.extFromChart(chart([['2026-10-15T11:00:00Z', 199], ['2026-10-15T15:00:00Z', 201]])), null, '마지막 체결이 정규장 → 시간외 아님');
+  assert.equal(src.extFromChart({ chart: { result: [{ meta: {} }] } }), null);
+});
+await test('미국 시간외(파이프라인): 애프터마켓에 받아 정규장 종가 대비로 · 시간대 밖엔 직전 값 · 새 정규장 뒤엔 버림 · 장중엔 없음', async () => {
+  const S = (s) => T(s) / 1000;
+  const REG_CLOSE = '2026-10-15T20:00:00Z';
+  // 정규장 밖(마감) 시세 — normalize가 실제 현재 시각으로 장 상태를 정하므로 정규장 구간을 과거로, 마지막 정규장 체결은 고정 시각
+  const closedQuote = (sym, lastRegular) => {
+    const j = yahooChart(sym); const now = Math.floor(Date.now() / 1000);
+    Object.assign(j.chart.result[0].meta, { regularMarketTime: S(lastRegular), currentTradingPeriod: { regular: { start: now - 7200, end: now - 3600 } } });
+    return j;
+  };
+  const extChart = { chart: { result: [{ meta: { currentTradingPeriod: { regular: { start: S('2026-10-15T13:30:00Z'), end: S(REG_CLOSE) } } },
+    timestamp: [S('2026-10-15T19:55:00Z'), S('2026-10-15T21:55:00Z')], indicators: { quote: [{ close: [225, 230] }] } }] } };
+  const yahoo = (lastRegular) => (m, u) => {
+    const sym = decodeURIComponent(m[1]);
+    if (/interval=5m/.test(u)) return json(extChart);
+    return json(sym === 'AAPL' ? closedQuote(sym, lastRegular) : yahooChart(sym));
+  };
+  const root = workspace();
+  await pipeline(root, { yahoo: yahoo(REG_CLOSE) }, T('2026-10-15T22:00:00Z'));          // 목 18:00 ET — 애프터마켓
+  const q1 = read(root, 'quotes.json').quotes.find((x) => x.code === 'AAPL');
+  assert.equal(q1.marketStatus, 'CLOSE');
+  assert.deepEqual(q1.ext, { session: 'post', price: 230, change: Math.round((230 - q1.price) * 10000) / 10000,
+    changePct: Math.round(((230 - q1.price) / q1.price) * 10000) / 100, at: T('2026-10-15T21:55:00Z') });
+  assert.equal(callsTo(/interval=5m/), 1, '미국 마감 종목만 시간외 요청(국내 제외)');
+  await pipeline(root, { yahoo: yahoo(REG_CLOSE) }, T('2026-10-16T01:30:00Z'));          // 21:30 ET — 시간외 끝
+  assert.equal(callsTo(/interval=5m/), 0, '시간대 밖엔 요청 안 함');
+  assert.deepEqual(read(root, 'quotes.json').quotes.find((x) => x.code === 'AAPL').ext, q1.ext, '직전 값 유지');
+  await pipeline(root, { yahoo: yahoo('2026-10-15T22:30:00Z') }, T('2026-10-16T02:00:00Z')); // 그 뒤에 정규장 체결이 생긴 상황
+  assert.ok(!('ext' in read(root, 'quotes.json').quotes.find((x) => x.code === 'AAPL')), '새 정규장 체결보다 오래된 시간외는 버림');
+  const fresh = workspace();                                                              // 배포 직후처럼 직전 값이 없으면
+  await pipeline(fresh, { yahoo: yahoo(REG_CLOSE) }, T('2026-10-16T01:30:00Z'));         // 애프터마켓 끝난 밤에도 한 번 받음
+  assert.equal(callsTo(/interval=5m/), 1);
+  assert.equal(read(fresh, 'quotes.json').quotes.find((x) => x.code === 'AAPL').ext?.price, 230, '그날 마지막 시간외 가격');
+  await pipeline(fresh, { yahoo: yahoo(REG_CLOSE) }, T('2026-10-16T01:35:00Z'));
+  assert.equal(callsTo(/interval=5m/), 0, '채운 뒤엔 다시 받지 않음');
+  assert.equal(bud.usAfterPostSameDay(T('2026-10-16T04:30:00Z')), false, '자정 지나면(새 날) 아님');
+  const open = workspace();
+  await pipeline(open, {}, T('2026-10-15T22:00:00Z'));                                   // 시세가 장중(OPEN)이면
+  assert.equal(callsTo(/interval=5m/), 0);
+  assert.ok(!('ext' in read(open, 'quotes.json').quotes.find((x) => x.code === 'AAPL')), '장중엔 시간외 없음');
 });
 await test('뉴스 관련도: 우선주는 보통주 이름 · 영문 핵심 이름 · 별칭 · 미국 티커(대문자 단어) · 무관 기사·도박 스팸 제외', () => {
   assert.deepEqual([src.krBaseName('LG전자우', '066575'), src.krBaseName('현대차2우B', '005387'), src.krBaseName('삼성전자', '005930')], ['LG전자', '현대차', '삼성전자']);

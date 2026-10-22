@@ -540,9 +540,29 @@ function tileHtml(q) {
   const p = q.changePct ?? 0;
   const a = (0.12 + 0.68 * Math.min(Math.abs(p), 5) / 5).toFixed(2); // 색 진하기: 0% 0.12 ~ 5% 이상 0.8
   const disc = keyDiscToday(q.code);
-  const tip = `${q.name} ${fmtPct(p)}${disc ? ` · 오늘 주요 공시: ${disc.title}` : ''}`;
+  const x = extOf(q);
+  const tip = `${q.name} ${fmtPct(p)}${x ? ` · ${x.label} ${fmtPct(x.changePct)}` : ''}${disc ? ` · 오늘 주요 공시: ${disc.title}` : ''}`;
   return `<button type="button" class="tile ${dirClass(p)}" style="--a:${a}" data-code="${esc(q.code)}" title="${esc(tip)}">
-    <span class="t-nm">${esc(q.name)}</span><span class="t-pct">${fmtPct(p)}</span>${disc ? '<span class="t-dot" aria-label="오늘 주요 공시">📋</span>' : ''}</button>`;
+    <span class="t-nm">${esc(q.name)}</span><span class="t-pct">${fmtPct(p)}</span>${x ? `<span class="t-ext">${x.short} ${fmtPct(x.changePct)}</span>` : ''}${disc ? '<span class="t-dot" aria-label="오늘 주요 공시">📋</span>' : ''}</button>`;
+}
+
+// ---------- 미국 시간외(프리·애프터마켓) 가격 ----------
+// 정규장 밖에서는 증권 앱이 시간외 가격을 보여줘 대시보드(정규장 종가)와 달라 보인다 — 봇이 붙인 시간외 가격(q.ext)을 함께 보여준다.
+// 등락은 정규장 종가 대비, 시각은 마지막 체결이 있었던 5분봉 시각.
+function extOf(q) {
+  const x = q && q.ok && q.marketStatus !== 'OPEN' ? q.ext : null;
+  if (!x || !Number.isFinite(x.price) || !Number.isFinite(x.changePct)) return null;
+  const pre = x.session === 'pre';
+  return { ...x, label: pre ? '🌅 프리마켓' : '🌙 애프터마켓', short: pre ? '프리' : '애프터' };
+}
+function extRow(q) {
+  const x = extOf(q);
+  if (!x) return '';
+  const arrow = x.changePct > 0 ? '▲' : x.changePct < 0 ? '▼' : '–';
+  const at = fmtAiTime(x.at);
+  return `<div class="ext-row" title="정규장 밖(시간외) 거래 가격 — 등락은 정규장 종가 대비">
+      <span class="ext-label">${x.label}</span> <b>${fmtPrice({ price: x.price, currency: q.currency })}</b>
+      <span class="${dirClass(x.changePct)}-c">${arrow} ${fmtChange({ change: x.change, currency: q.currency })} (${fmtPct(x.changePct)})</span>${at ? ` <span class="muted">· ${esc(at)}</span>` : ''}</div>`;
 }
 function renderBoard(groups, closed) {
   const el = $('#board');
@@ -765,6 +785,7 @@ function renderCard(q, hist, inv) {
       <span class="price">${fmtPrice(q)}</span>
       <span class="chg ${c}-c">${arrow} ${fmtChange({ change: q.change, currency: q.currency })} (${fmtPct(q.changePct)})</span>
     </div>
+    ${extRow(q)}
     <div class="analysis" id="analysis-${id}"></div>
     ${retRow}
     <div class="chart"><canvas id="chart-${id}"></canvas></div>

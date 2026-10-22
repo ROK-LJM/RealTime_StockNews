@@ -26,6 +26,22 @@ export function isKrSession(ms) { const k = parts(KST, ms); const m = +k.hour * 
 export function isUsSession(ms) { const e = parts(ET, ms); const m = +e.hour * 60 + +e.minute; return isWeekday(e) && m >= 9 * 60 + 30 && m < 16 * 60; }
 export const inSession = (market, ms) => (market === 'KR' ? isKrSession(ms) : isUsSession(ms));
 
+// 미국 시간외 거래 시간대(평일, 뉴욕 시각) — 프리마켓 04:00~09:29 'pre', 애프터마켓 16:00~19:59 'post', 그 밖 null
+export function usExtWindow(ms) {
+  const e = parts(ET, ms);
+  if (!isWeekday(e)) return null;
+  const m = +e.hour * 60 + +e.minute;
+  if (m >= 4 * 60 && m < 9 * 60 + 30) return 'pre';
+  if (m >= 16 * 60 && m < 20 * 60) return 'post';
+  return null;
+}
+
+// 애프터마켓이 끝난 같은 날 밤(평일 20:00~23:59 ET, 한국 오전) — 그날 시간외 봉이 아직 남아 마지막 시간외 가격을 받을 수 있다
+export function usAfterPostSameDay(ms) {
+  const e = parts(ET, ms);
+  return isWeekday(e) && +e.hour >= 20;
+}
+
 // 휴장 확인 시간대 — 정규장 개장 10분 뒤 ~ 마감 10분 전(국내 09:10~15:19 KST, 미국 09:40~15:49 ET)이면 그 시장의 날짜, 아니면 null.
 // 이 시간에 시세가 '장중'이 아니면 그날은 휴장(또는 조기 폐장)이다 — 화면의 '갱신 없음' 경고가 휴장일에 뜨지 않게 기록한다.
 export function closedCheckDay(market, ms) {

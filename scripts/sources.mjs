@@ -136,6 +136,27 @@ export async function getQuote(item) {
 const QUOTE_CONCURRENCY = 5;
 export async function getQuotes(items) { return mapLimit(items, QUOTE_CONCURRENCY, getQuote); }
 
+// ---------- 미국 시간외(프리·애프터마켓) 가격 ----------
+// 정규장 밖에서 증권 앱은 시간외 가격을 보여주는데 대시보드는 정규장 종가뿐이라 '가격이 다르다'고 보이기 쉽다
+// (예: 실적 발표 직후 애프터마켓 급변). 야후 차트 5분봉(includePrePost)의 마지막 체결을 시간외 가격으로 쓴다.
+// 그 봉이 정규장 시간 안이면 시간외 거래가 아직 없는 것 → null.
+export function extFromChart(j) {
+  const r = j?.chart?.result?.[0];
+  const reg = r?.meta?.currentTradingPeriod?.regular;
+  const ts = r?.timestamp || [], close = r?.indicators?.quote?.[0]?.close || [];
+  if (!reg || !Number.isFinite(reg.start) || !Number.isFinite(reg.end)) return null;
+  for (let i = ts.length - 1; i >= 0; i--) {
+    if (close[i] == null || !Number.isFinite(close[i]) || !Number.isFinite(ts[i])) continue;
+    const session = ts[i] >= reg.end ? 'post' : ts[i] < reg.start ? 'pre' : null;
+    return session ? { session, price: Math.round(close[i] * 10000) / 10000, at: ts[i] * 1000 } : null;
+  }
+  return null;
+}
+export async function getUsExt(symbol) {
+  const j = await http(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=5m&range=1d&includePrePost=true`, { as: 'json' });
+  return extFromChart(j);
+}
+
 // ---------- 과거 시세(일봉) ----------
 // 야후 차트(무료, 키 불필요)로 약 6개월 일봉 종가를 받아온다 → 과거 등락 차트 + 예측의 입력.
 export async function getHistory(item, range = '6mo') {
