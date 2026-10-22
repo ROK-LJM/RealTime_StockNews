@@ -1,4 +1,4 @@
-// pages/docs/editor.js — '✏️ 종목 편집': 종목 검색 → 추가·삭제 → 저장
+// pages/docs/editor.js — '종목 편집': 종목 검색 → 추가·삭제 → 저장
 // 정적 사이트(GitHub Pages)라 브라우저가 저장소 파일을 직접 고칠 수 없다. 그래서 '저장'은 깃허브 이슈로
 // 변경 요청을 보내고, 봇(.github/workflows/watchlist.yml)이 1~2분 안에 config/watchlist.json에 반영한 뒤
 // 시세 갱신까지 실행한다. 이 화면은 반영될 때까지 시세 파일을 지켜보다가 자동으로 새로고침한다.
@@ -122,7 +122,7 @@
     return out;
   }
   const changes = () => adds.size + removes.size;
-  const flag = (m) => (m === 'KR' ? '🇰🇷' : '🇺🇸');
+  const flag = (m) => (m === 'KR' ? '국내' : '미국');
   const shortName = (it) => String(it.name || it.en || '').trim().slice(0, 30);
 
   function msg(text, kind = '') { msgEl.textContent = text; msgEl.className = 'ed-msg' + (kind ? ' ' + kind : ''); }
@@ -180,13 +180,13 @@
   function renderList() {
     const items = effective();
     count.textContent = `${items.length}/${MAX}`;
-    const chip = (x) => `<span class="ed-chip${x.tag ? ' ' + x.tag : ''}" title="${esc(x.code)}">${flag(x.market)} ${esc(x.name || x.code)}`
+    const chip = (x) => `<span class="ed-chip${x.tag ? ' ' + x.tag : ''}" title="${esc(x.code)}">${esc(x.name || x.code)}`
       + `${x.tag === 'new' ? ' <i>새로</i>' : x.tag === 'wait' ? ' <i>반영 중</i>' : ''}`
-      + `${x.tag === 'wait' ? '' : `<button type="button" data-rm="${esc(x.code)}" aria-label="${esc((x.name || x.code) + ' 삭제')}">✕</button>`}</span>`;
+      + `${x.tag === 'wait' ? '' : `<button type="button" data-rm="${esc(x.code)}" aria-label="${esc((x.name || x.code) + ' 삭제')}"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>`}</span>`;
     const kr = items.filter((x) => x.market === 'KR'), us = items.filter((x) => x.market !== 'KR');
     let html = '';
-    if (kr.length) html += `<div class="ed-group"><div class="ed-gl">🇰🇷 국내 ${kr.length}</div>${kr.map(chip).join('')}</div>`;
-    if (us.length) html += `<div class="ed-group"><div class="ed-gl">🇺🇸 해외 ${us.length}</div>${us.map(chip).join('')}</div>`;
+    if (kr.length) html += `<div class="ed-group"><div class="ed-gl">국내 ${kr.length}</div>${kr.map(chip).join('')}</div>`;
+    if (us.length) html += `<div class="ed-group"><div class="ed-gl">해외 ${us.length}</div>${us.map(chip).join('')}</div>`;
     const rm = base.filter((b) => removes.has(b.code));
     if (rm.length) html += `<div class="ed-removed">삭제 예정: ${rm.map((x) => `<span>${esc(x.name || x.code)} <button type="button" data-undo="${esc(x.code)}">되돌리기</button></span>`).join(' ')}</div>`;
     list.innerHTML = html || `<div class="ed-hint">${baseOk ? '종목이 없어요. 위에서 검색해 추가하세요.' : '현재 목록을 불러오는 중…'}</div>`;
@@ -199,7 +199,7 @@
 
   function renderToken() {
     const has = !!getToken();
-    tokenMsg.textContent = has ? '✅ 이 기기에 토큰이 저장돼 있어요 — 저장 버튼 한 번으로 반영돼요.' : '토큰 없음 — 저장 때 깃허브 창에서 Create를 눌러 마무리해요.';
+    tokenMsg.textContent = has ? '이 기기에 토큰이 저장돼 있어요 — 저장 버튼 한 번으로 반영돼요.' : '토큰 없음 — 저장 때 깃허브 창에서 Create를 눌러 마무리해요.';
     tokenMsg.className = 'ed-msg' + (has ? ' ok' : '');
     tokenDel.disabled = !has;
   }
@@ -228,7 +228,7 @@
     let title = `watchlist: ${parts.join(' ')}`;
     if (title.length > 180) title = title.slice(0, 177) + '…';
     const body = [
-      '대시보드 ‘✏️ 종목 편집’에서 보낸 변경 요청입니다. 봇이 자동으로 반영한 뒤 결과를 댓글로 남기고 이 이슈를 닫습니다.',
+      '대시보드 ‘종목 편집’에서 보낸 변경 요청입니다. 봇이 자동으로 반영한 뒤 결과를 댓글로 남기고 이 이슈를 닫습니다.',
       '',
       '```json',
       JSON.stringify(req),
@@ -238,7 +238,7 @@
     return { title, body };
   }
   function errorText(status) {
-    if (status === 401) return '토큰이 맞지 않거나 만료됐어요 — 아래 ⚡에서 새 토큰을 넣어 주세요.';
+    if (status === 401) return '토큰이 맞지 않거나 만료됐어요 — 아래 ‘이 기기에서 버튼 한 번으로 저장하기’에서 새 토큰을 넣어 주세요.';
     if (status === 403) return '토큰 권한이 부족해요 — 저장소 선택(RealTime_StockNews)과 Issues: Read and write 권한을 확인하세요.';
     if (status === 404) return '저장소에 접근하지 못했어요 — 토큰의 Repository access에서 이 저장소를 골랐는지 확인하세요.';
     if (status === 410) return '저장소의 이슈 기능이 꺼져 있어요 — 저장소 Settings → General → Features → Issues를 켜 주세요.';
@@ -258,7 +258,7 @@
         });
         if (r.status === 201) {
           sent(req, true);
-          msg('✅ 저장 요청 완료 — 1~2분 뒤 반영돼요. 이 창을 닫아도 반영되면 화면이 자동으로 새로고침돼요.', 'ok');
+          msg('저장 요청 완료 — 1~2분 뒤 반영돼요. 이 창을 닫아도 반영되면 화면이 자동으로 새로고침돼요.', 'ok');
         } else msg(errorText(r.status), 'err');
       } catch { msg('네트워크 오류로 저장하지 못했어요 — 잠시 후 다시 시도하세요.', 'err'); }
       finally { busy = false; render(); }
@@ -277,7 +277,7 @@
     if (inflight) clearInterval(inflight.timer);
     adds.clear(); removes.clear();
     inflight = { add: req.add, remove: req.remove, deadline: Date.now() + (viaToken ? 6 : 15) * 60e3, timer: 0 };
-    setStatus('⏳ 종목 변경 반영 대기 중…');
+    setStatus('종목 변경 반영 대기 중…');
     const job = inflight;
     job.timer = setInterval(async () => {
       if (inflight !== job) { clearInterval(job.timer); return; }
@@ -289,7 +289,7 @@
       if (done) {
         clearInterval(job.timer); inflight = null;
         const bad = job.add.filter((a) => qs.some((x) => String(x.code) === a.code && !x.ok));
-        setStatus(bad.length ? `⚠️ 반영됨 — 시세를 못 찾은 종목: ${bad.map(label).join(', ')} (코드 확인)` : '✅ 종목 변경이 반영됐어요');
+        setStatus(bad.length ? `반영됨 — 시세를 못 찾은 종목: ${bad.map(label).join(', ')} (코드 확인)` : '종목 변경이 반영됐어요');
         if (dlg.open) msg(statusEl ? statusEl.textContent : '반영 완료', bad.length ? 'err' : 'ok');
         await refreshBase();
         render();
@@ -297,7 +297,7 @@
         setTimeout(() => { if (!inflight && statusEl && /반영됐어요/.test(statusEl.textContent)) setStatus(''); }, 15000);
       } else if (Date.now() > job.deadline) {
         clearInterval(job.timer); inflight = null;
-        setStatus('⏱ 종목 변경이 아직 반영되지 않았어요');
+        setStatus('종목 변경이 아직 반영되지 않았어요');
         if (dlg.open) { msgEl.className = 'ed-msg err'; msgEl.innerHTML = `아직 반영되지 않았어요. ${viaToken ? '' : '깃허브 창에서 Create를 눌렀는지, '}<a href="${esc(ISSUE_LIST)}" target="_blank" rel="noopener noreferrer">깃허브 이슈의 봇 댓글</a>을 확인한 뒤 다시 저장해 주세요.`; }
         render();
       }

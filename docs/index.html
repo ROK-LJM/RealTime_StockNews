@@ -3,105 +3,131 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- 이 페이지의 스크립트·통신 범위를 제한 — 종목 편집용 깃허브 토큰이 다른 곳으로 새지 않게(외부 통신은 api.github.com만) -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.github.com; object-src 'none'; base-uri 'self'" />
-  <title>📈 실시간 주식시장 파악</title>
+  <!-- 이 페이지의 스크립트·통신 범위를 제한 — 종목 편집용 깃허브 토큰이 다른 곳으로 새지 않게(외부 통신은 api.github.com만).
+       글꼴(Pretendard, 무료 OFL)만 jsDelivr에서 받는다 — 스타일·글꼴 파일이라 실행되는 스크립트는 여전히 이 사이트 것뿐이다. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; img-src 'self' data:; connect-src 'self' https://api.github.com; object-src 'none'; base-uri 'self'" />
+  <meta name="color-scheme" content="light dark" />
+  <title>실시간 주식시장 파악</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+  <!-- 버전 고정 + 무결성 확인(파일이 바뀌면 쓰지 않고 기본 글꼴로) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css" integrity="sha384-2nNKoOPayicGa+aRguOQuiZP+RqQ4G3jalfDeOgftkKD7zBM2gJXTwcFqCZltdv0" crossorigin="anonymous" />
   <link rel="stylesheet" href="./style.css" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>📈</text></svg>" />
+  <script src="./theme.js"></script>
 </head>
 <body>
+  <!-- 선 아이콘 모음 — <svg class="ic"><use href="#i-…"/></svg>로 쓴다(글자색을 따름) -->
+  <svg class="sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.3-5.4"/><path d="M19.6 4.6v4.1h-4.1"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6"/><path d="M9.7 9.6a2.4 2.4 0 0 1 4.7.7c0 1.6-2.4 2-2.4 3.5"/><path d="M12 16.9h.01"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4.5 19.5l.9-4 10-10a1.6 1.6 0 0 1 2.3 0l.8.8a1.6 1.6 0 0 1 0 2.3l-10 10z"/><path d="M13.8 7.2l3 3"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M19.4 14.6A7.6 7.6 0 0 1 9.4 4.6a7.7 7.7 0 1 0 10 10z"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.6"/><path d="M12 3.5v1.7M12 18.8v1.7M3.5 12h1.7M18.8 12h1.7M6 6l1.2 1.2M16.8 16.8 18 18M6 18l1.2-1.2M16.8 7.2 18 6"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5.5M6.5 11 12 5.5l5.5 5.5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+  </svg>
+
   <header class="topbar">
-    <div class="brand"><span class="logo">📈</span> <span class="brand-long">실시간 </span>주식시장 파악</div>
-    <div class="controls">
-      <label class="refresh"><span class="refresh-l">새로고침</span>
-        <select id="interval" aria-label="자동 새로고침 주기">
-          <option value="30">30초</option>
-          <option value="60" selected>1분</option>
-          <option value="300">5분</option>
-          <option value="0">수동</option>
-        </select>
-      </label>
-      <button id="refreshBtn" title="지금 새로고침" aria-label="지금 새로고침">🔄</button>
-      <span id="clock" class="clock" title="화면이 마지막으로 데이터를 확인한 시각">—</span>
-      <a class="help-link" href="./help.html" title="사용설명서 (새 탭)" aria-label="사용설명서" target="_blank" rel="noopener">📖<span class="help-l"> 설명서</span></a>
+    <div class="topbar-in">
+      <div class="brand">
+        <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect class="logo-bg" x=".5" y=".5" width="31" height="31" rx="8"/><path class="logo-up" d="M4.5 20.5 11 8.5l6.5 12z"/><path class="logo-down" d="M14.5 11.5h13L21 23.5z"/></svg>
+        <span><span class="brand-long">실시간 </span>주식시장 파악</span>
+      </div>
+      <div class="controls">
+        <span id="clock" class="clock" title="화면이 마지막으로 데이터를 확인한 시각">—</span>
+        <label class="refresh"><span class="refresh-l">새로고침</span>
+          <select id="interval" aria-label="자동 새로고침 주기">
+            <option value="30">30초</option>
+            <option value="60" selected>1분</option>
+            <option value="300">5분</option>
+            <option value="0">수동</option>
+          </select>
+        </label>
+        <button id="refreshBtn" class="icon-btn" type="button" title="지금 새로고침" aria-label="지금 새로고침"><svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg></button>
+        <button id="themeBtn" class="icon-btn" type="button" title="어두운 화면으로" aria-label="어두운 화면으로"><svg class="ic" aria-hidden="true"><use href="#i-moon"/></svg></button>
+        <a class="icon-btn help-link" href="./help.html" title="사용설명서 (새 탭)" aria-label="사용설명서" target="_blank" rel="noopener"><svg class="ic" aria-hidden="true"><use href="#i-help"/></svg><span class="help-l">설명서</span></a>
+      </div>
     </div>
   </header>
 
-  <section class="market">
-    <div class="mood card">
-      <div class="mood-gauge">
-        <canvas id="moodCanvas" width="220" height="130"></canvas>
-        <div class="mood-score"><span id="moodScore">--</span></div>
+  <main class="page">
+    <!-- 시장 — 공포·탐욕 막대 + 지수·환율. 내용은 app.js loadMarket -->
+    <section class="market panel" aria-label="시장 분위기와 주요 지수">
+      <div class="mood">
+        <div class="sec-label">시장 분위기</div>
+        <div class="mood-main"><span class="mood-score" id="moodScore">--</span><span class="mood-label" id="moodLabel">불러오는 중…</span></div>
+        <div class="meter" id="moodMeter" role="img" aria-label="공포·탐욕 점수">
+          <div class="meter-track"><i class="z1"></i><i class="z2"></i><i class="z3"></i><i class="z4"></i><i class="z5"></i></div>
+          <span class="meter-pin" id="moodPin" hidden></span>
+        </div>
+        <div class="meter-scale" aria-hidden="true"><span>공포</span><span>중립</span><span>탐욕</span></div>
+        <p class="mood-summary" id="moodSummary"></p>
       </div>
-      <div class="mood-info">
-        <div class="mood-label" id="moodLabel">시장 분위기 로딩…</div>
-        <div class="mood-summary" id="moodSummary"></div>
+      <div class="indices" id="indices"><div class="muted">지수 불러오는 중…</div></div>
+    </section>
+
+    <!-- 내 종목 한눈에 — 등락 지도(누르면 해당 카드로) + 급등락 종목의 '왜' 한 줄. 내용은 app.js renderBoard -->
+    <section class="board panel" id="board" aria-labelledby="boardTitle" hidden></section>
+
+    <section class="briefs" id="briefs"></section>
+
+    <section class="holdings-head">
+      <div class="hh-left">
+        <h2>내 보유 종목</h2>
+        <span id="updated" class="hh-count">—</span>
+        <button id="editBtn" class="btn edit-btn" type="button" aria-haspopup="dialog"><svg class="ic" aria-hidden="true"><use href="#i-edit"/></svg>종목 편집</button>
+        <span id="editStatus" class="edit-status" role="status"></span>
       </div>
-    </div>
-    <div class="indices" id="indices"><div class="muted">지수 로딩…</div></div>
-  </section>
-
-  <!-- 내 종목 한눈에 — 등락률 색 타일(누르면 해당 카드로) + 급등락 종목의 '왜' 한 줄. 내용은 app.js renderBoard -->
-  <section class="board" id="board" aria-labelledby="boardTitle" hidden></section>
-
-  <section class="briefs" id="briefs"></section>
-
-  <section class="holdings-head">
-    <div class="hh-left">
-      <h2>내 보유 종목</h2>
-      <button id="editBtn" class="edit-btn" type="button" aria-haspopup="dialog">✏️ 종목 편집</button>
-      <span id="editStatus" class="edit-status" role="status"></span>
-    </div>
-    <div class="hh-right">
-      <div class="seg" role="group" aria-label="카드 순서">
-        <button type="button" data-sort="mine" aria-pressed="true">내 순서</button>
-        <button type="button" data-sort="move" aria-pressed="false">등락 큰 순</button>
+      <div class="hh-right">
+        <div class="seg" role="group" aria-label="카드 순서">
+          <button type="button" data-sort="mine" aria-pressed="true">내 순서</button>
+          <button type="button" data-sort="move" aria-pressed="false">등락 큰 순</button>
+        </div>
+        <div class="seg" role="group" aria-label="카드 보기">
+          <button type="button" data-view="full" aria-pressed="true">자세히</button>
+          <button type="button" data-view="compact" aria-pressed="false">간단히</button>
+        </div>
       </div>
-      <div class="seg" role="group" aria-label="카드 보기">
-        <button type="button" data-view="full" aria-pressed="true">자세히</button>
-        <button type="button" data-view="compact" aria-pressed="false">간단히</button>
-      </div>
-      <span id="updated" class="muted hh-count">—</span>
-    </div>
-  </section>
+    </section>
 
-  <section id="grid"><div class="muted">종목 로딩…</div></section>
+    <section id="grid"><div class="muted">종목 불러오는 중…</div></section>
 
-  <details class="help">
-    <summary>➕ 추적 종목 추가/삭제하는 법</summary>
-    <div>
-      위의 <b>✏️ 종목 편집</b> 버튼 → 종목명·코드·티커로 검색해 추가하거나 ✕로 삭제 → <b>저장</b>. 1~2분 뒤 자동 반영됩니다(최대 40개).
-      직접 고치려면 저장소의 <code>config/watchlist.json</code> 파일을 깃허브에서 편집해도 됩니다. 예:
-      <pre>{
+    <details class="help">
+      <summary>종목 추가·삭제하는 법</summary>
+      <div>
+        위의 <b>종목 편집</b> 버튼 → 종목명·코드·티커로 검색해 추가하거나 ✕로 삭제 → <b>저장</b>. 1~2분 뒤 자동 반영됩니다(최대 40개).
+        직접 고치려면 저장소의 <code>config/watchlist.json</code> 파일을 깃허브에서 편집해도 됩니다. 예:
+        <pre>{
   "items": [
     { "code": "005930", "market": "KR", "name": "삼성전자" },
     { "code": "AAPL",   "market": "US", "name": "Apple" }
   ]
 }</pre>
-      한국 종목은 6자리 코드(<code>005930</code>), 미국은 티커(<code>AAPL</code>). 저장하면 5분 안에 자동 반영됩니다.
-    </div>
-  </details>
+        한국 종목은 6자리 코드(<code>005930</code>), 미국은 티커(<code>AAPL</code>). 저장하면 5분 안에 자동 반영됩니다.
+      </div>
+    </details>
+  </main>
 
   <footer class="foot">
     <div id="aiStatus" class="ai-status" hidden></div>
     <div id="dartStatus" class="ai-status" hidden></div>
-    시세: 네이버 금융·Yahoo Finance(비공식) · 뉴스: Google 뉴스 · AI 요약: Google Gemini · GitHub Actions가 약 5분마다 갱신 · 매매/주문 기능 없음<br>
-    ℹ️ 시세·뉴스는 비공식 공개 데이터로, <b>개인 모니터링 용도</b>로만 사용합니다.<br>
-    ⚠️ 예측선(점선·밴드)은 과거 60거래일 추세·변동성으로 계산한 <b>단순 통계 추정</b>, AI 분석은 <b>추정</b>일 뿐이며 실제와 다를 수 있고 <b>투자 조언이 아닙니다</b>.
+    <p>시세 네이버 금융·Yahoo Finance(비공식) · 뉴스 Google 뉴스 · 공시 전자공시(DART) · AI 요약 Google Gemini · GitHub Actions가 약 5분마다 갱신 · 매매·주문 기능 없음</p>
+    <p>시세·뉴스는 비공식 공개 데이터로 <b>개인 모니터링 용도</b>로만 사용합니다.</p>
+    <p>예측선(점선·밴드)은 과거 60거래일 추세·변동성으로 계산한 <b>단순 통계 추정</b>, AI 분석은 <b>추정</b>일 뿐이며 실제와 다를 수 있고 <b>투자 조언이 아닙니다</b>.</p>
   </footer>
 
   <!-- 시장 간 이동·맨 위로. #grid 바깥에 둔다 — 갱신 때 #grid가 통째로 교체되기 때문. -->
   <div id="jump" class="jump" hidden>
     <button id="jumpMkt" type="button"></button>
-    <button id="jumpTop" type="button" aria-label="맨 위로">↑</button>
+    <button id="jumpTop" type="button" aria-label="맨 위로"><svg class="ic" aria-hidden="true"><use href="#i-up"/></svg></button>
   </div>
 
   <!-- 종목 편집 창 — 검색 → 추가·삭제 → 저장(깃허브 이슈로 변경 요청 → 봇이 1~2분 안에 반영). 동작은 editor.js -->
   <dialog id="editor" class="editor" aria-labelledby="edTitle">
     <div class="ed-wrap">
       <div class="ed-head">
-        <h3 id="edTitle">✏️ 종목 편집</h3>
-        <button id="edClose" class="ed-x" type="button" aria-label="닫기">✕</button>
+        <h3 id="edTitle">종목 편집</h3>
+        <button id="edClose" class="ed-x" type="button" aria-label="닫기"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
       </div>
       <input id="edSearch" type="search" autocomplete="off" spellcheck="false" enterkeyhint="search"
         placeholder="종목명·코드·티커 검색 (예: 엔비디아, 삼성전기, 005930, NVDA)" aria-label="종목 검색" />
@@ -114,7 +140,7 @@
         <button id="edSave" class="primary" type="button">저장</button>
       </div>
       <details id="edTokenBox" class="ed-token">
-        <summary>⚡ 이 기기에서 버튼 한 번으로 저장하기 (선택)</summary>
+        <summary>이 기기에서 버튼 한 번으로 저장하기 (선택)</summary>
         <p>토큰이 없으면 저장할 때 깃허브 창이 열리고, 거기서 <b>Create</b>를 한 번 더 눌러야 해요(깃허브 로그인 필요).
           아래처럼 <b>이슈 쓰기 권한만 있는</b> 토큰을 이 기기에 넣어 두면 저장 버튼 한 번으로 끝납니다.</p>
         <ol>

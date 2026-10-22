@@ -3,204 +3,225 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>📖 사용설명서 — 실시간 주식시장 파악</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>📖</text></svg>" />
+<meta name="color-scheme" content="light dark" />
+<title>사용설명서 — 실시간 주식시장 파악</title>
+<link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css" integrity="sha384-2nNKoOPayicGa+aRguOQuiZP+RqQ4G3jalfDeOgftkKD7zBM2gJXTwcFqCZltdv0" crossorigin="anonymous" />
+<script src="./theme.js"></script>
 <style>
+  /* 대시보드(style.css)와 같은 색 토큰 — 밝은 화면 기본, 어두운 화면은 [data-theme="dark"](theme.js) */
   :root{
-    --bg:#0b0e14; --panel:#141a24; --panel-2:#1b2230; --border:#243044;
-    --text:#e6edf3; --muted:#8b98a9;
-    --up:#ff5b5b; --down:#4aa3ff; --flat:#8b98a9;
-    --accent:#5b8cff; --ai:#7fc7ff; --good:#2ec27e; --bad:#ff6b6b; --warn:#ffb454;
-    --radius:14px; --shadow:0 6px 22px rgba(0,0,0,.28);
+    color-scheme:light;
+    --bg:#f2f3f5; --surface:#ffffff; --surface-2:#f4f5f7; --surface-3:#e8eaee;
+    --line:#e6e8ec; --line-2:#d3d7dd; --text:#15171c; --text-2:#4a505b; --muted:#6e7380;
+    --up:#e3263d; --down:#1f66e5; --warn:#b26400; --live:#14a44d; --bad:#d1342a;
+    --ink:#15171c; --on-ink:#ffffff;
+    --shadow-pop:0 8px 28px rgba(15,17,22,.14), 0 1px 3px rgba(15,17,22,.08);
+    --font:"Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", system-ui, sans-serif;
+  }
+  :root[data-theme="dark"]{
+    color-scheme:dark;
+    --bg:#0e0f12; --surface:#17181c; --surface-2:#1f2025; --surface-3:#2a2c32;
+    --line:#25272d; --line-2:#363940; --text:#edeff2; --text-2:#b3b8c2; --muted:#7f8591;
+    --up:#ff4b5f; --down:#4a90ff; --warn:#f2a93b; --live:#2fd170; --bad:#ff6a5f;
+    --ink:#edeff2; --on-ink:#111215;
+    --shadow-pop:0 10px 32px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.04);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme]){
+      color-scheme:dark;
+      --bg:#0e0f12; --surface:#17181c; --surface-2:#1f2025; --surface-3:#2a2c32;
+      --line:#25272d; --line-2:#363940; --text:#edeff2; --text-2:#b3b8c2; --muted:#7f8591;
+      --up:#ff4b5f; --down:#4a90ff; --warn:#f2a93b; --live:#2fd170; --bad:#ff6a5f; --ink:#edeff2; --on-ink:#111215;
+    }
   }
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
-  body{
-    margin:0; background:var(--bg); color:var(--text);
-    font-family:"Pretendard","Apple SD Gothic Neo","Malgun Gothic","Segoe UI",system-ui,sans-serif;
-    line-height:1.65; -webkit-font-smoothing:antialiased;
-  }
-  a{color:var(--accent)}
-  code{background:var(--panel-2); border:1px solid var(--border); border-radius:6px; padding:1px 6px; font-size:.9em; font-family:"Consolas",ui-monospace,monospace}
-  b{color:#fff}
+  body{margin:0; background:var(--bg); color:var(--text); font-family:var(--font); line-height:1.7; -webkit-font-smoothing:antialiased}
+  a{color:var(--text); text-underline-offset:2px}
+  code{background:var(--surface-3); border-radius:5px; padding:1px 6px; font-size:.9em; font-family:"Consolas",ui-monospace,monospace}
+  b{color:var(--text); font-weight:700}
+  .sdot{display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--muted); margin:0 4px 0 2px; vertical-align:1px}
+  .sdot.live{background:var(--live)} .sdot.warn{background:var(--warn)} .sdot.bad{background:var(--bad)}
+  .ttag{display:inline-block; padding:0 5px; border-radius:4px; background:var(--surface-3); color:var(--text-2); font-size:11.5px; font-weight:700; line-height:18px; vertical-align:1px}
 
-  /* ---------- Hero ---------- */
-  .hero{
-    padding:44px 20px 34px; text-align:center;
-    background:radial-gradient(1100px 340px at 50% -60px, rgba(91,140,255,.20), transparent 70%);
-    border-bottom:1px solid var(--border);
-  }
-  .hero .kicker{display:inline-block; font-size:12.5px; font-weight:700; letter-spacing:.04em; color:var(--ai);
-    background:rgba(91,140,255,.14); border:1px solid rgba(91,140,255,.28); padding:4px 12px; border-radius:999px}
-  .hero h1{margin:14px 0 8px; font-size:clamp(26px,5vw,40px); letter-spacing:-.02em}
-  .hero p.tag{max-width:720px; margin:0 auto; color:var(--muted); font-size:clamp(14px,2.4vw,17px)}
-  .hero .cta{margin-top:20px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap}
-  .btn{display:inline-flex; align-items:center; gap:7px; text-decoration:none; font-weight:700; font-size:14px;
-    padding:10px 18px; border-radius:10px; border:1px solid var(--border)}
-  .btn.primary{background:var(--accent); color:#fff; border-color:var(--accent)}
-  .btn.ghost{background:var(--panel); color:var(--text)}
+  /* ---------- 머리 ---------- */
+  .head{background:var(--surface); border-bottom:1px solid var(--line)}
+  .head-in{max-width:1120px; margin:0 auto; padding:34px 18px 28px}
+  .crumb{display:flex; align-items:center; gap:10px; font-size:14px; font-weight:700; color:var(--text-2)}
+  .crumb svg{width:26px; height:26px; flex-shrink:0}
+  .logo-bg{fill:#16181d; stroke:#16181d}
+  :root[data-theme="dark"] .logo-bg{stroke:#363940}
+  .logo-up{fill:var(--up); stroke:var(--up); stroke-width:1.4; stroke-linejoin:round}
+  .logo-down{fill:var(--down); stroke:var(--down); stroke-width:1.4; stroke-linejoin:round}
+  .head h1{margin:16px 0 6px; font-size:clamp(26px,4.4vw,36px); line-height:1.25; letter-spacing:-.03em}
+  .head p.tag{max-width:720px; margin:0; color:var(--text-2); font-size:clamp(14px,2.2vw,16.5px)}
+  .head .cta{margin-top:20px; display:flex; gap:8px; flex-wrap:wrap}
+  .head .ver{margin-top:12px; font-size:12.5px; color:var(--muted)}
+  .btn{display:inline-flex; align-items:center; gap:6px; height:38px; padding:0 14px; border-radius:10px; border:1px solid var(--line-2);
+    background:var(--surface); color:var(--text); font-size:14px; font-weight:600; text-decoration:none}
+  .btn:hover{background:var(--surface-2)}
+  .btn.primary{background:var(--ink); border-color:var(--ink); color:var(--on-ink)}
+  .btn.primary:hover{opacity:.9}
 
-  /* ---------- Layout ---------- */
-  .wrap{max-width:1120px; margin:0 auto; padding:26px 18px 80px; display:grid; grid-template-columns:236px 1fr; gap:30px}
-  nav.toc{position:sticky; top:16px; align-self:start; max-height:calc(100vh - 32px); overflow:auto}
-  nav.toc .t{font-size:11px; font-weight:800; letter-spacing:.08em; color:var(--muted); text-transform:uppercase; margin:0 0 8px 10px}
-  nav.toc a{display:block; text-decoration:none; color:var(--muted); font-size:13.5px; padding:7px 10px; border-radius:8px; border-left:2px solid transparent}
-  nav.toc a:hover{color:var(--text); background:var(--panel)}
-  nav.toc a.active{color:#fff; background:var(--panel); border-left-color:var(--accent)}
+  /* ---------- 본문 배치 ---------- */
+  .wrap{max-width:1120px; margin:0 auto; padding:28px 18px 80px; display:grid; grid-template-columns:220px 1fr; gap:36px}
+  nav.toc{position:sticky; top:20px; align-self:start; max-height:calc(100vh - 40px); overflow:auto}
+  nav.toc .t{margin:0 0 8px 12px; font-size:12px; font-weight:700; color:var(--muted)}
+  nav.toc a{display:block; padding:6px 12px; border-radius:8px; color:var(--text-2); font-size:13.5px; line-height:1.45; text-decoration:none}
+  nav.toc a:hover{background:var(--surface-3); color:var(--text)}
+  nav.toc a.active{background:var(--surface); color:var(--text); font-weight:700; box-shadow:inset 2px 0 0 var(--text)}
   main{min-width:0}
 
-  /* ---------- Quick facts ---------- */
-  .quick{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:26px}
-  .quick .q{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:14px 15px}
-  .quick .q .e{font-size:22px}
-  .quick .q h4{margin:6px 0 3px; font-size:14.5px}
-  .quick .q p{margin:0; font-size:12.5px; color:var(--muted); line-height:1.5}
+  /* ---------- 3줄 요약 ---------- */
+  .quick{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:30px}
+  .quick .q{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:16px 18px}
+  .quick .q .n{font-size:12px; font-weight:700; color:var(--muted); font-variant-numeric:tabular-nums}
+  .quick .q h4{margin:4px 0 4px; font-size:15px}
+  .quick .q p{margin:0; font-size:13px; color:var(--text-2); line-height:1.6}
 
-  /* ---------- Screen map ---------- */
-  .map{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:30px}
-  .map .cap{font-size:12px; color:var(--muted); margin-bottom:12px}
-  .mock{display:flex; flex-direction:column; gap:8px; font-size:12px}
+  /* ---------- 화면 구조 ---------- */
+  .map{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:18px 16px 16px; margin-bottom:34px}
+  .map .cap{font-size:12px; color:var(--muted); margin-bottom:14px}
+  .mock{display:flex; flex-direction:column; gap:12px; font-size:12.5px}
   .mock .row{display:flex; gap:8px}
-  .mbox{background:var(--panel-2); border:1px dashed var(--border); border-radius:9px; padding:10px; flex:1; position:relative}
-  .mbox .n{position:absolute; top:-9px; left:10px; background:var(--accent); color:#fff; font-size:10px; font-weight:800; border-radius:999px; padding:1px 7px}
-  .mbox .h{font-weight:700; margin-bottom:2px}
-  .mbox .s{color:var(--muted)}
+  .mbox{position:relative; flex:1; padding:12px 12px 10px; border-radius:10px; background:var(--surface-2); border:1px dashed var(--line-2)}
+  .mbox .n{position:absolute; top:-9px; left:10px; padding:0 7px; border-radius:6px; background:var(--ink); color:var(--on-ink); font-size:10.5px; font-weight:700; line-height:18px}
+  .mbox .h{font-weight:700; margin-bottom:2px; line-height:1.5}
+  .mbox .s{color:var(--muted); line-height:1.5}
 
-  /* ---------- Section ---------- */
-  section.doc{scroll-margin-top:16px; margin-bottom:34px}
-  section.doc > .sh{display:flex; align-items:center; gap:11px; margin-bottom:6px}
-  section.doc > .sh .ic{font-size:24px; line-height:1; width:44px; height:44px; display:grid; place-items:center;
-    background:var(--panel); border:1px solid var(--border); border-radius:12px; flex-shrink:0}
-  section.doc > .sh h2{margin:0; font-size:19px; letter-spacing:-.01em}
-  section.doc > .lead{color:var(--muted); font-size:14px; margin:2px 0 15px}
-  .items{background:var(--panel); border:1px solid var(--border); border-radius:12px; overflow:hidden}
-  .item{display:grid; grid-template-columns:210px 1fr; gap:16px; padding:13px 16px; border-top:1px solid var(--border)}
+  /* ---------- 절 ---------- */
+  section.doc{scroll-margin-top:16px; margin-bottom:40px}
+  section.doc > h2, .sec-title{margin:0 0 4px; font-size:21px; line-height:1.35; letter-spacing:-.02em}
+  section.doc > .lead, .sec-sub{margin:4px 0 16px; color:var(--text-2); font-size:14px}
+  .items{background:var(--surface); border:1px solid var(--line); border-radius:14px; overflow:hidden}
+  .item{display:grid; grid-template-columns:200px 1fr; gap:16px; padding:14px 18px; border-top:1px solid var(--line)}
   .item:first-child{border-top:0}
-  .item .lab{font-weight:700; font-size:13.5px; color:#fff}
-  .item .d{font-size:13.5px; color:#c4cdd8}
-  .item .d b{color:#fff}
+  .item .lab{font-weight:700; font-size:13.5px; line-height:1.55}
+  .item .d{font-size:13.5px; color:var(--text-2)}
 
-  /* ---------- Color legend ---------- */
+  /* ---------- 색 규칙 ---------- */
   .legend{display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:12px}
-  .sw{display:flex; gap:12px; background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:13px 14px}
-  .sw .chip{width:34px; height:34px; border-radius:9px; flex-shrink:0; border:1px solid rgba(255,255,255,.18)}
-  .sw .lab{font-weight:800; font-size:14px}
-  .sw .mean{font-size:12.5px; color:var(--muted); margin-top:2px}
-  .callout{display:flex; gap:12px; background:rgba(255,180,84,.08); border:1px solid rgba(255,180,84,.3);
-    border-radius:12px; padding:14px 16px; margin:14px 0; font-size:13.5px}
-  .callout .e{font-size:20px}
+  .sw{display:flex; gap:12px; background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px}
+  .sw .chip{width:30px; height:30px; border-radius:8px; flex-shrink:0}
+  .sw .chip.round{width:12px; height:12px; margin:9px; border-radius:50%}
+  .sw .lab{font-weight:700; font-size:14px}
+  .sw .mean{margin-top:2px; font-size:12.5px; color:var(--text-2); line-height:1.6}
+  .callout{margin:14px 0; padding:14px 16px; border-radius:12px; background:var(--surface-3); font-size:13.5px; color:var(--text-2)}
 
-  /* ---------- Glossary ---------- */
+  /* ---------- 용어 ---------- */
   .gloss{display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px}
-  .gc{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:13px 15px}
-  .gc .term{font-weight:800; font-size:14px; color:var(--ai)}
-  .gc .def{font-size:13px; color:#c4cdd8; margin-top:4px}
+  .gc{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px 16px}
+  .gc .term{font-weight:700; font-size:14px}
+  .gc .def{margin-top:4px; font-size:13px; color:var(--text-2); line-height:1.6}
 
   /* ---------- FAQ ---------- */
-  details.faq{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:2px 16px; margin-bottom:10px}
-  details.faq summary{cursor:pointer; list-style:none; padding:13px 0; font-weight:700; font-size:14.5px; display:flex; gap:10px; align-items:flex-start}
+  details.faq{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:0 18px; margin-bottom:8px}
+  details.faq summary{display:flex; gap:10px; align-items:flex-start; padding:14px 0; cursor:pointer; list-style:none; font-weight:700; font-size:14.5px}
   details.faq summary::-webkit-details-marker{display:none}
-  details.faq summary .qm{color:var(--accent); font-weight:800; flex-shrink:0}
-  details.faq summary .arw{margin-left:auto; color:var(--muted); transition:transform .18s; flex-shrink:0}
-  details.faq[open] summary .arw{transform:rotate(180deg)}
-  details.faq .ans{padding:0 0 15px 26px; color:#c4cdd8; font-size:13.5px}
+  details.faq summary .qm{flex-shrink:0; color:var(--muted)}
+  details.faq summary .arw{flex-shrink:0; width:7px; height:7px; margin:8px 2px 0 auto; border-right:1.7px solid var(--muted); border-bottom:1.7px solid var(--muted); transform:rotate(45deg); transition:transform .18s}
+  details.faq[open] summary .arw{margin-top:11px; transform:rotate(-135deg)}
+  details.faq .ans{padding:0 0 16px 24px; color:var(--text-2); font-size:13.5px}
 
-  /* ---------- Disclaimer ---------- */
-  .disc{background:linear-gradient(180deg, rgba(255,91,91,.06), rgba(255,91,91,.02)); border:1px solid rgba(255,107,107,.32); border-radius:14px; padding:20px 22px}
-  .disc h2{margin:0 0 12px; font-size:18px; display:flex; align-items:center; gap:9px}
+  /* ---------- 면책 ---------- */
+  .disc{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:20px 22px}
+  .disc h2{margin:0 0 10px; font-size:18px}
   .disc ul{margin:0; padding-left:20px}
-  .disc li{margin:9px 0; font-size:13.5px; color:#d6dee7}
+  .disc li{margin:8px 0; font-size:13.5px; color:var(--text-2)}
 
-  footer{border-top:1px solid var(--border); padding:26px 18px 60px; text-align:center; color:var(--muted); font-size:12.5px}
-  footer a{color:var(--accent)}
+  footer{border-top:1px solid var(--line); padding:26px 18px 60px; text-align:center; color:var(--muted); font-size:12.5px}
 
-  .sec-title{font-size:22px; margin:0 0 4px; letter-spacing:-.01em}
-  .sec-sub{color:var(--muted); font-size:13.5px; margin:0 0 16px}
-
-  #top{position:fixed; right:18px; bottom:18px; background:var(--panel); border:1px solid var(--border); color:var(--text);
-    width:44px; height:44px; border-radius:50%; font-size:18px; cursor:pointer; box-shadow:var(--shadow); opacity:0; pointer-events:none; transition:opacity .2s}
+  #top{position:fixed; right:18px; bottom:18px; width:42px; height:42px; display:grid; place-items:center; border-radius:12px; border:1px solid var(--line-2);
+    background:var(--surface); color:var(--text); box-shadow:var(--shadow-pop); cursor:pointer; opacity:0; pointer-events:none; transition:opacity .2s}
   #top.show{opacity:1; pointer-events:auto}
+  #top svg{width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round}
 
   @media (max-width:860px){
+    .head-in{padding:24px 14px 22px}
     .wrap{grid-template-columns:1fr; gap:18px; padding:20px 14px 70px}
-    nav.toc{position:static; max-height:none; order:-1; display:flex; gap:8px; overflow-x:auto; padding-bottom:6px; -webkit-overflow-scrolling:touch}
+    nav.toc{position:static; max-height:none; order:-1; display:flex; gap:6px; overflow-x:auto; padding-bottom:6px; -webkit-overflow-scrolling:touch}
     nav.toc .t{display:none}
-    nav.toc a{white-space:nowrap; border-left:0; border:1px solid var(--border)}
-    nav.toc a.active{border-color:var(--accent)}
+    nav.toc a{white-space:nowrap; background:var(--surface); border:1px solid var(--line)}
+    nav.toc a.active{box-shadow:none; border-color:var(--text)}
     .quick{grid-template-columns:1fr}
     .item{grid-template-columns:1fr; gap:4px}
-    .item .lab{color:var(--accent)}
   }
 </style>
 </head>
 <body>
 
-<div class="hero">
-  <span class="kicker">📖 사용설명서 · 현재 배포된 버전 기준</span>
-  <h1>📈 실시간 주식시장 파악</h1>
-  <p class="tag">무료 데이터로 “오늘 내 시장·내 종목이 <b>왜 이렇게 움직였는지</b>”를 한 화면에서 읽어주는 모니터링 대시보드입니다. 직접 사고파는 기능은 없고, 오직 ‘상황 파악’ 용도예요.</p>
-  <div class="cta">
-    <a class="btn primary" href="https://ROK-LJM.github.io/RealTime_StockNews/" target="_blank" rel="noopener">🔗 대시보드 열기</a>
-    <a class="btn ghost" href="#faq">❓ 자주 묻는 질문</a>
+<header class="head">
+  <div class="head-in">
+    <div class="crumb">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect class="logo-bg" x=".5" y=".5" width="31" height="31" rx="8"/><path class="logo-up" d="M4.5 20.5 11 8.5l6.5 12z"/><path class="logo-down" d="M14.5 11.5h13L21 23.5z"/></svg>
+      실시간 주식시장 파악
+    </div>
+    <h1>사용설명서</h1>
+    <p class="tag">무료 데이터로 “오늘 내 시장·내 종목이 <b>왜 이렇게 움직였는지</b>”를 한 화면에서 읽어주는 모니터링 대시보드입니다. 직접 사고파는 기능은 없고, 오직 ‘상황 파악’ 용도예요.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://ROK-LJM.github.io/RealTime_StockNews/" target="_blank" rel="noopener">대시보드 열기</a>
+      <a class="btn" href="#faq">자주 묻는 질문</a>
+    </div>
+    <div class="ver">현재 배포된 버전 기준</div>
   </div>
-</div>
+</header>
 
 <div class="wrap">
   <nav class="toc" id="toc">
     <p class="t">목차</p>
-    <a href="#start">🚀 3줄 요약</a>
-    <a href="#map">🗺️ 화면 한눈에</a>
-    <a href="#s1">🌡️ 시장 분위기</a>
-    <a href="#s2">📊 지수·환율</a>
-    <a href="#s9">🧭 내 종목 한눈에</a>
-    <a href="#s3">📰 지수 브리핑</a>
-    <a href="#s4">💳 종목 카드</a>
-    <a href="#s5">🧠 AI 종합분석</a>
-    <a href="#s6">🗞️ 종목 뉴스</a>
-    <a href="#s7">🔄 새로고침·설정</a>
-    <a href="#s8">➕ 종목 추가·삭제</a>
-    <a href="#color">🎨 색상 규칙</a>
-    <a href="#gloss">📚 용어 사전</a>
-    <a href="#faq">❓ FAQ</a>
-    <a href="#disc">⚠️ 주의사항</a>
+    <a href="#start">3줄 요약</a>
+    <a href="#map">화면 한눈에</a>
+    <a href="#s1">시장 분위기</a>
+    <a href="#s2">지수·환율</a>
+    <a href="#s9">내 종목 한눈에</a>
+    <a href="#s3">지수 브리핑</a>
+    <a href="#s4">종목 카드</a>
+    <a href="#s5">AI 종합분석</a>
+    <a href="#s6">종목 뉴스·공시</a>
+    <a href="#s7">새로고침·설정</a>
+    <a href="#s8">종목 추가·삭제</a>
+    <a href="#color">색상 규칙</a>
+    <a href="#gloss">용어 사전</a>
+    <a href="#faq">자주 묻는 질문</a>
+    <a href="#disc">주의사항</a>
   </nav>
 
   <main>
     <!-- 3줄 요약 -->
-    <section class="doc" id="start" style="scroll-margin-top:16px">
-      <h2 class="sec-title">🚀 3줄 요약 (여기만 봐도 됩니다)</h2>
+    <section class="doc" id="start">
+      <h2 class="sec-title">3줄 요약 (여기만 봐도 됩니다)</h2>
       <p class="sec-sub">처음이라면 이 세 가지만 기억하세요.</p>
       <div class="quick">
-        <div class="q"><div class="e">🖥️</div><h4>보기 전용이에요</h4><p>시장 분위기와 내 종목이 왜 오르내렸는지 보여줍니다. <b>주식을 사고파는 기능은 없어요.</b></p></div>
-        <div class="q"><div class="e">⏱️</div><h4>약 5분마다 갱신</h4><p>초 단위 실시간이 아니라 약 5분 간격입니다. 장 마감·주말엔 값이 그대로일 수 있어요.</p></div>
-        <div class="q"><div class="e">🇰🇷</div><h4>색이 반대예요</h4><p>한국 증시식으로 <b style="color:var(--up)">오르면 빨강</b>, <b style="color:var(--down)">내리면 파랑</b>. 미국식(초록=상승)과 반대!</p></div>
+        <div class="q"><div class="n">01</div><h4>보기 전용이에요</h4><p>시장 분위기와 내 종목이 왜 오르내렸는지 보여줍니다. <b>주식을 사고파는 기능은 없어요.</b></p></div>
+        <div class="q"><div class="n">02</div><h4>약 5분마다 갱신</h4><p>초 단위 실시간이 아니라 약 5분 간격입니다. 장 마감·주말엔 값이 그대로일 수 있어요.</p></div>
+        <div class="q"><div class="n">03</div><h4>색이 반대예요</h4><p>한국 증시식으로 <b style="color:var(--up)">오르면 빨강</b>, <b style="color:var(--down)">내리면 파랑</b>. 미국식(초록=상승)과 반대!</p></div>
       </div>
     </section>
 
     <!-- 화면 한눈에 -->
     <section class="doc" id="map">
-      <div class="sh"><div class="ic">🗺️</div><h2>화면 한눈에 보기</h2></div>
+      <h2>화면 한눈에 보기</h2>
       <p class="lead">페이지는 위에서 아래로 이렇게 흐릅니다. 번호는 아래 설명 순서와 같아요.</p>
       <div class="map">
-        <div class="cap">▼ 실제 화면 구조 (단순화)</div>
+        <div class="cap">실제 화면 구조 (단순화)</div>
         <div class="mock">
-          <div class="row"><div class="mbox"><div class="h">📈 제목 · 새로고침 주기 ▼ · 🔄 · 확인시각 · 📖 설명서</div><div class="s">상단바 — 항상 위에 고정(휴대폰은 한 줄)</div></div></div>
+          <div class="row"><div class="mbox"><div class="h">로고·제목 · 확인 시각 · 새로고침 주기 · 새로고침 · 밝게/어둡게 · 설명서</div><div class="s">상단바 — 항상 위에 고정(휴대폰은 한 줄, 아이콘만)</div></div></div>
           <div class="row">
-            <div class="mbox"><span class="n">1</span><div class="h">🌡️ 공포·탐욕 게이지</div><div class="s">시장 전체 분위기</div></div>
-            <div class="mbox"><span class="n">2</span><div class="h">📊 지수·환율</div><div class="s">국내 · 미국 · 환율 세 묶음</div></div>
+            <div class="mbox"><span class="n">1</span><div class="h">시장 분위기 (공포·탐욕 막대)</div><div class="s">시장 전체 분위기</div></div>
+            <div class="mbox"><span class="n">2</span><div class="h">지수·환율</div><div class="s">국내 지수 · 미국 지수 · 환율 세 묶음</div></div>
           </div>
-          <div class="row"><div class="mbox"><span class="n">3</span><div class="h">📊 오늘 내 종목 한눈에</div><div class="s">등락 색 타일 + 🔎 왜 움직였나(±2%) — 누르면 카드로</div></div></div>
+          <div class="row"><div class="mbox"><span class="n">3</span><div class="h">오늘 내 종목 한눈에</div><div class="s">등락 색 타일 + 왜 움직였나(±2%) — 누르면 카드로</div></div></div>
           <div class="row">
-            <div class="mbox"><span class="n">4</span><div class="h">📰 코스피 브리핑</div><div class="s">왜 올랐나/내렸나 + 수급</div></div>
-            <div class="mbox"><span class="n">4</span><div class="h">📰 코스닥 브리핑</div><div class="s">왜 올랐나/내렸나 + 수급</div></div>
+            <div class="mbox"><span class="n">4</span><div class="h">코스피 브리핑</div><div class="s">왜 올랐나/내렸나 + 수급</div></div>
+            <div class="mbox"><span class="n">4</span><div class="h">코스닥 브리핑</div><div class="s">왜 올랐나/내렸나 + 수급</div></div>
           </div>
-          <div class="row"><div class="mbox"><span class="n">5</span><div class="h">🇰🇷 국내 증시 · 🇺🇸 해외 증시 그룹</div><div class="s">그룹 이름표는 스크롤해도 화면 위에 붙어 있어요</div></div></div>
+          <div class="row"><div class="mbox"><span class="n">5</span><div class="h">국내 증시 · 해외 증시 묶음</div><div class="s">묶음 이름표는 스크롤해도 화면 위에 붙어 있어요</div></div></div>
           <div class="row">
-            <div class="mbox"><span class="n">5·6·7</span><div class="h">💳 종목 카드</div><div class="s">시세·차트·🧠AI분석·뉴스</div></div>
-            <div class="mbox"><span class="n">5·6·7</span><div class="h">💳 종목 카드</div><div class="s">시세·차트·🧠AI분석·뉴스</div></div>
-            <div class="mbox"><span class="n">5·6·7</span><div class="h">💳 종목 카드</div><div class="s">…</div></div>
+            <div class="mbox"><span class="n">5·6·7</span><div class="h">종목 카드</div><div class="s">시세·AI 분석·차트·수급·공시·뉴스</div></div>
+            <div class="mbox"><span class="n">5·6·7</span><div class="h">종목 카드</div><div class="s">…</div></div>
           </div>
-          <div class="row"><div class="mbox"><span class="n">8</span><div class="h">↘ 우측 하단 이동 버튼</div><div class="s">반대 시장으로 · 맨 위로 (스크롤하면 나타남)</div></div></div>
+          <div class="row"><div class="mbox"><span class="n">8</span><div class="h">우측 하단 이동 버튼</div><div class="s">반대 시장으로 · 맨 위로 (스크롤하면 나타남)</div></div></div>
         </div>
       </div>
     </section>
@@ -210,25 +231,22 @@
 
     <!-- 색상 규칙 -->
     <section class="doc" id="color">
-      <h2 class="sec-title">🎨 색상 규칙 (가장 헷갈리는 부분)</h2>
-      <p class="sec-sub">이 대시보드에서 색은 큰 의미를 담습니다. 특히 <b style="color:var(--up)">빨강=상승</b>, <b style="color:var(--down)">파랑=하락</b>은 한국 증시 관례라 미국식과 반대예요.</p>
+      <h2 class="sec-title">색상 규칙 (가장 헷갈리는 부분)</h2>
+      <p class="sec-sub">이 대시보드에서 색은 큰 의미를 담습니다. 특히 <b style="color:var(--up)">빨강=상승</b>, <b style="color:var(--down)">파랑=하락</b>은 한국 증시 관례라 미국식과 반대예요. 그 밖의 화면은 무채색(흰색·회색·검정)이라, 색이 보이면 의미가 있는 곳이에요.</p>
       <div class="legend" id="legend"></div>
-      <div class="callout">
-        <span class="e">💡</span>
-        <div><b>주의:</b> 같은 <b style="color:var(--up)">빨강</b>이라도 <b>가격</b>에서는 ‘상승’, <b>뉴스 태그</b>에서는 ‘악재’를 뜻합니다. 반대로 <b style="color:var(--good)">초록</b>은 ‘호재(좋은 뉴스)’일 뿐 가격 상승색이 아니에요. 색이 놓인 <b>위치</b>로 의미를 구분하세요.</div>
-      </div>
+      <div class="callout"><b>한 가지 규칙으로 읽으세요:</b> 뉴스의 호재·악재 태그도 가격과 같은 규칙(호재 빨강 · 악재 파랑)이라, 화면 어디서든 <b style="color:var(--up)">빨강</b>은 ‘주가에 좋은 쪽’, <b style="color:var(--down)">파랑</b>은 ‘나쁜 쪽’이에요. <b style="color:var(--warn)">주황</b>은 방향이 아니라 ‘눈여겨볼 것’(예측·전날 수급·주요 공시·갱신 지연) 표시입니다.</div>
     </section>
 
     <!-- 용어 사전 -->
     <section class="doc" id="gloss">
-      <h2 class="sec-title">📚 용어 사전</h2>
+      <h2 class="sec-title">용어 사전</h2>
       <p class="sec-sub">낯선 단어가 나오면 여기서 찾아보세요.</p>
-      <div class="gloss" id="gloss"></div>
+      <div class="gloss" id="glosslist"></div>
     </section>
 
     <!-- FAQ -->
     <section class="doc" id="faq">
-      <h2 class="sec-title">❓ 자주 묻는 질문</h2>
+      <h2 class="sec-title">자주 묻는 질문</h2>
       <p class="sec-sub">궁금한 항목을 눌러 펼쳐 보세요.</p>
       <div id="faqbox"></div>
     </section>
@@ -236,123 +254,126 @@
     <!-- 주의사항 -->
     <section class="doc" id="disc">
       <div class="disc">
-        <h2>⚠️ 꼭 알아두세요 (면책)</h2>
+        <h2>꼭 알아두세요 (면책)</h2>
         <ul id="disclist"></ul>
       </div>
     </section>
   </main>
 </div>
 
-<button id="top" title="맨 위로" aria-label="맨 위로">↑</button>
+<button id="top" title="맨 위로" aria-label="맨 위로"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5.5M6.5 11 12 5.5l5.5 5.5"/></svg></button>
 
 <footer>
-  📈 실시간 주식시장 파악 · 무료 공개 데이터(네이버·야후 금융, 구글 뉴스) + 구글 Gemini AI 기반 · GitHub Pages 서빙<br>
+  실시간 주식시장 파악 · 무료 공개 데이터(네이버·야후 금융, 구글 뉴스, 전자공시 OpenDART) + 구글 Gemini AI 기반 · GitHub Pages 서빙<br>
   이 설명서는 현재 배포된 버전 기준입니다 · <a href="https://ROK-LJM.github.io/RealTime_StockNews/" target="_blank" rel="noopener">대시보드 바로가기</a>
 </footer>
 
 <script>
 // 설명서 콘텐츠(검증된 스펙) — 화면은 이 데이터로 그려집니다.
+const LIVE = '<span class="sdot live"></span>', GRAY = '<span class="sdot"></span>', AMBER = '<span class="sdot warn"></span>', RED = '<span class="sdot bad"></span>';
+const T = (s) => `<span class="ttag">${s}</span>`;
 const SECTIONS = [
-  {icon:"🌡️", id:"s1", title:"① 시장 전체 분위기 (공포·탐욕 게이지)",
-   plain:"화면 맨 위의 반원 계기판은 오늘 시장 심리가 ‘공포’에 가까운지 ‘탐욕’에 가까운지를 0~100점으로 보여줍니다. 자동차 속도계처럼 왼쪽(공포)↔오른쪽(탐욕)으로 채워지고, 옆에 점수·분위기 이름·한 줄 요약이 붙습니다. 여러 지수의 평균 등락과 변동성 지수(VIX)를 섞어 계산합니다.",
+  {id:"s1", title:"① 시장 전체 분위기 (공포·탐욕 막대)",
+   plain:"화면 맨 위 왼쪽의 막대는 오늘 시장 심리가 ‘공포’에 가까운지 ‘탐욕’에 가까운지를 0~100점으로 보여줍니다. 막대는 왼쪽(공포, 파랑)부터 오른쪽(탐욕, 빨강)까지 다섯 구간으로 나뉘고, 세로 표시가 오늘 점수 자리예요. 위에 점수·분위기 이름, 아래에 한 줄 요약이 붙습니다. 여러 지수의 평균 등락과 변동성 지수(VIX)를 섞어 계산합니다.",
    items:[
-    {lab:"공포 … 탐욕 반원 게이지", d:"채움 색이 공포일 때 <b>파랑</b>, 탐욕일 때 <b>빨강</b>, 중립일 때 회색. 점수는 0~100."},
-    {lab:"점수 · 분위기 라벨 · 한 줄 요약", d:"게이지 옆에 점수 숫자, 분위기 이름, 요약 한 줄. 점수가 없으면 ‘--’, 라벨이 없으면 ‘—’로 표시."},
-    {lab:"극도의 공포 ~ 극도의 탐욕", d:"25점 미만=극도의 공포, 45점 미만=공포, 55점 이하=중립, 75점 이하=탐욕, 그 이상=극도의 탐욕."},
+    {lab:"공포·탐욕 막대", d:"다섯 구간 — 진한 파랑(극도의 공포) · 옅은 파랑(공포) · 회색(중립) · 옅은 빨강(탐욕) · 진한 빨강(극도의 탐욕). 세로 표시가 점수 위치(0~100). 점수 숫자는 공포일 때 <b style='color:var(--down)'>파랑</b>, 탐욕일 때 <b style='color:var(--up)'>빨강</b>, 중립이면 기본 글자색."},
+    {lab:"점수 · 분위기 라벨 · 한 줄 요약", d:"막대 위에 점수와 분위기 이름, 아래에 요약 한 줄. 점수가 없으면 ‘--’, 라벨이 없으면 ‘—’로 표시하고 세로 표시는 숨겨요."},
+    {lab:"극도의 공포 ~ 극도의 탐욕", d:"25점 미만=극도의 공포, 45점 미만=공포, 55점 이하=중립, 75점 이하=탐욕, 그 이상=극도의 탐욕. 막대 구간 너비도 이 기준과 같아요."},
     {lab:"위험선호 / 위험회피 / 관망", d:"55점 이상=위험선호(리스크온), 45점 이하=위험회피(리스크오프), 그 사이=관망. 심리를 말로 풀어준 요약."},
     {lab:"VIX 급등 / 다소 높음 / 안정", d:"변동성 지수(VIX)가 25 이상=급등, 20 이상=다소 높음, 그 미만=안정."},
-    {lab:"로딩·대기 표시", d:"데이터를 받기 전엔 ‘시장 분위기 로딩…’, 못 받으면 ‘시장 데이터 대기 중 (첫 갱신 대기)’."},
+    {lab:"로딩·대기 표시", d:"데이터를 받기 전엔 ‘불러오는 중…’, 못 받으면 ‘시장 데이터 대기 중 (첫 갱신 대기)’."},
    ]},
-  {icon:"📊", id:"s2", title:"② 주요 지수 · 환율",
-   plain:"게이지 옆(휴대폰은 아래)에 <b>🇰🇷 국내</b>(코스피·코스닥) · <b>🇺🇸 미국</b>(S&amp;P 500·나스닥·변동성 지수 VIX) · <b>💱 환율</b>(원/달러·원/100엔) 세 묶음이 한 줄씩 나와요. 줄마다 이름·현재가·등락폭·등락률. 칸이 좁으면 등락폭은 빼고 등락률(%)만 보여줍니다.",
+  {id:"s2", title:"② 주요 지수 · 환율",
+   plain:"분위기 막대 옆(좁은 화면은 아래)에 <b>국내 지수</b>(코스피·코스닥) · <b>미국 지수</b>(S&amp;P 500·나스닥·변동성 지수 VIX) · <b>환율</b>(원/달러·원/100엔) 세 묶음이 한 줄씩 나와요. 줄마다 이름·현재가·등락폭·등락률. 칸이 좁으면 등락폭은 빼고 등락률(%)만 보여줍니다.",
    items:[
-    {lab:"지수 줄 (이름·가격·▲▼–·%)", d:"상승 ▲, 하락 ▼, 보합 –. 지수 등락폭은 ‘포인트’라 통화 기호를 붙이지 않아요. 색은 한국식(상승 <b style='color:var(--up)'>빨강</b>/하락 <b style='color:var(--down)'>파랑</b>/보합 회색)."},
+    {lab:"지수 줄 (이름·가격·▲▼–·%)", d:"가격은 기본 글자색, 등락폭·등락률만 한국식 색(상승 <b style='color:var(--up)'>빨강</b>/하락 <b style='color:var(--down)'>파랑</b>/보합 회색). 상승 ▲, 하락 ▼, 보합 –. 지수 등락폭은 ‘포인트’라 통화 기호를 붙이지 않아요."},
     {lab:"코스피·코스닥·S&amp;P 500·나스닥·VIX", d:"한국 지수는 <b>네이버 실시간</b> 우선, 미국 지수와 VIX는 <b>야후</b>."},
-    {lab:"💱 환율 (원/달러·원/100엔)", d:"가격 뒤 ‘원’ 단위(소수 둘째 자리). 원/100엔은 100엔 기준 환산값."},
+    {lab:"환율 (원/달러·원/100엔)", d:"가격 뒤 ‘원’ 단위(소수 둘째 자리). 원/100엔은 100엔 기준 환산값."},
     {lab:"강세 / 약세", d:"가장 크게 움직인 지수를 골라 ‘코스피 강세(1.23%)’처럼 표기(0 이상=강세, 미만=약세)."},
    ]},
-  {icon:"🧭", id:"s9", title:"③ 📊 오늘 내 종목 한눈에 (등락 타일 · 왜 움직였나)",
+  {id:"s9", title:"③ 오늘 내 종목 한눈에 (등락 타일 · 왜 움직였나)",
    plain:"지수 바로 아래에서 <b>내 종목 전체가 오늘 얼마나·왜 움직였는지</b>를 한 화면에 보여줘요. 종목 카드를 하나하나 내려 보지 않아도 됩니다(휴대폰에서 카드 23개는 화면 20장이 넘어요).",
    items:[
-    {lab:"등락 타일", d:"시장별(🇰🇷 국내 / 🇺🇸 해외)로 종목마다 타일 하나 — 이름과 등락률. <b>색이 진할수록 크게 움직인 것</b>(상승 빨강·하락 파랑, 5% 이상이면 가장 진함), 많이 오른 종목부터 내린 종목 순. 📋 표시는 그 종목에 <b>오늘 주요 공시</b>가 있다는 뜻."},
-    {lab:"🔎 왜 움직였나", d:"오늘 <b>±2% 넘게</b> 움직인 종목만, 많이 움직인 순서로 이유 한 줄: <b>🧠 AI 진단</b>(있으면) → <b>📋 오늘 주요 공시</b> → <b>📰 첫 뉴스 제목</b>. PC는 6줄, 휴대폰은 4줄까지 보이고 나머지는 ‘N종목 더 보기’."},
-    {lab:"누르면 카드로", d:"타일이나 이유 줄을 누르면 그 종목 카드로 바로 이동하고 테두리가 잠깐 빛나요."},
-    {lab:"시장 상태", d:"시장마다 ‘🟢 장중 · 19:01’처럼 장 상태와 마지막 시세 시각. 갱신이 멈추면 아래 그룹 이름표와 같은 ‘⚠️ 갱신 없음’ 경고가 여기에도 떠요."},
+    {lab:"등락 타일", d:"시장별(국내 / 해외)로 종목마다 타일 하나 — 이름과 등락률. <b>색이 진할수록 크게 움직인 것</b>(상승 빨강·하락 파랑)으로, 0.5%·1.5%·3%·5%를 경계로 다섯 단계예요. <b>3% 이상</b>은 진한 색에 흰 글자, 5% 이상이 가장 진해요. 많이 오른 종목부터 내린 종목 순. 오른쪽 위 <b style='color:var(--warn)'>주황 점</b>은 그 종목에 <b>오늘 주요 공시</b>가 있다는 뜻."},
+    {lab:"왜 움직였나", d:"오늘 <b>±2% 넘게</b> 움직인 종목만, 많이 움직인 순서로 이유 한 줄. 이유 앞의 작은 표시가 출처예요: "+T('AI')+" AI 진단(있으면) → "+T('공시')+" 오늘 주요 공시 → "+T('뉴스')+" 첫 뉴스 제목. PC는 6줄, 휴대폰은 4줄까지 보이고 나머지는 ‘N종목 더 보기’."},
+    {lab:"누르면 카드로", d:"타일이나 이유 줄을 누르면 그 종목 카드로 바로 이동하고 테두리가 잠깐 진하게 표시돼요."},
+    {lab:"시장 상태", d:"시장마다 ‘"+LIVE+"장중 · 19:01’(초록 점)이나 ‘"+GRAY+"마감 · 05:00’(회색 점)처럼 장 상태와 마지막 시세 시각. 갱신이 멈추면 아래 묶음 이름표와 같은 주황색 ‘"+AMBER+"N분째 갱신 없음’ 경고가 여기에도 떠요."},
    ]},
-  {icon:"📰", id:"s3", title:"④ 코스피·코스닥 브리핑 (왜 올랐나/내렸나)",
-   plain:"큰 배너 카드 두 개가 코스피·코스닥이 오늘 왜 움직였는지 이유를 요약합니다. 위쪽에 지수명·등락률·상황 태그, 왼쪽 굵은 세로 막대 색으로 방향(상승 빨강/하락 파랑)을 표시하고, 안에는 AI 요약과 관련 뉴스, 맨 아래엔 수급(외국인·기관·개인)이 나옵니다.",
+  {id:"s3", title:"④ 코스피·코스닥 브리핑 (왜 올랐나/내렸나)",
+   plain:"카드 두 개가 코스피·코스닥이 오늘 왜 움직였는지 이유를 요약합니다. 맨 위에 지수명·등락률과 오른쪽 상황 태그(상승 빨강/하락 파랑), 그 아래 AI 요약과 관련 뉴스, 맨 아래 가는 선 밑에 수급(외국인·기관·개인)이 나옵니다.",
    items:[
-    {lab:"급등·급락 핵심 이유 태그", d:"등락률이 −1% 이하면 ‘📉 급락 핵심 이유’, +1% 이상이면 ‘📈 급등 핵심 이유’, 그 사이면 ‘📊 오늘의 핵심’."},
-    {lab:"🤖 AI 핵심", d:"<b>지수 브리핑에만</b> 나오는 AI 요약 배지. 요약문 + ‘근거 뉴스 N건’(제목 링크와 ‘— 왜 중요한지’, 눌러서 접고 펼침 — 휴대폰에선 처음에 접혀 있어요). 요약 끝의 ‘14:05 분석’은 AI가 판단한 시각이에요. AI 결과가 없으면 대표 헤드라인으로, 뉴스가 없으면 ‘관련 뉴스를 찾지 못했습니다.’"},
+    {lab:"급등·급락 핵심 이유 태그", d:"등락률이 −1% 이하면 ‘급락 핵심 이유’(파랑), +1% 이상이면 ‘급등 핵심 이유’(빨강), 그 사이면 ‘오늘의 핵심’(회색)."},
+    {lab:"AI 핵심", d:"<b>지수 브리핑에만</b> 나오는 AI 요약("+T('AI 핵심')+" 표시). 요약문 + ‘근거 뉴스 N건’(제목 링크와 ‘— 왜 중요한지’, 눌러서 접고 펼침 — 휴대폰에선 처음에 접혀 있어요). 요약 끝의 ‘14:05 분석’은 AI가 판단한 시각이에요. AI 결과가 없으면 대표 헤드라인으로, 뉴스가 없으면 ‘관련 뉴스를 찾지 못했습니다.’"},
     {lab:"AI 판단이 바뀌는 때", d:"무료 AI 한도를 아끼려고 뉴스 제목이 바뀌어도 <b>90분에 한 번</b>까지만 새로 판단하고, <b>장 마감 후·주말</b>엔 등락 폭이 그대로면 마지막 판단을 유지해요. 대신 급락↔급등처럼 <b>방향이 바뀌면 바로</b> 새로 판단합니다. 새 판단에 실패해도 같은 방향이면 직전 판단을 계속 보여줘요."},
     {lab:"수급 (억원) — 외국인·기관·개인", d:"지수 순매매를 세 주체로 나눠 <b>억원</b> 단위로(괄호 안 ‘· 오늘’ = 오늘 장중 집계). 순매수(+) <b style='color:var(--up)'>빨강</b>, 순매도(−) <b style='color:var(--down)'>파랑</b>. 없으면 ‘수급 데이터 없음’."},
    ]},
-  {icon:"💳", id:"s4", title:"⑤ 내 보유 종목 카드 — 각 요소",
-   plain:"‘내 보유 종목’은 🇰🇷 국내 증시 / 🇺🇸 해외 증시 두 그룹으로 나뉘고, 등록한 종목마다 카드가 하나씩 뜹니다. 카드 하나에 시세 → 🧠 AI 분석(크게 움직인 종목) → 기간 수익률·6개월 차트+예측 → 수급·고저·거래량 → 공시 → 뉴스 순으로 담겨요. ‘왜’가 먼저 보이도록 AI 분석을 시세 바로 아래에 둡니다.",
+  {id:"s4", title:"⑤ 내 보유 종목 카드 — 각 요소",
+   plain:"‘내 보유 종목’은 국내 증시 / 해외 증시 두 묶음으로 나뉘고, 등록한 종목마다 카드가 하나씩 뜹니다. 카드 하나에 시세 → AI 종합분석(크게 움직인 종목) → 기간 수익률·6개월 차트+예측 → 수급·고저·거래량 → 공시 → 뉴스 순으로 담겨요. ‘왜’가 먼저 보이도록 AI 분석을 시세 바로 아래에 둡니다.",
    items:[
-    {lab:"카드 보기 (자세히 / 간단히)", d:"종목이 많을 때 <b>간단히</b>를 누르면 카드마다 시세·🧠 AI 분석·수급만 남아 스크롤이 약 1/3로 줄어요(차트·예측·기간 수익률·고저·공시·뉴스는 숨김 — 공시·이유는 위 ‘한눈에’에서). <b>자세히</b>로 돌아가면 전부 다시 보여요. 고른 보기는 이 기기에 기억돼요."},
-    {lab:"‘시세 없음’ 카드", d:"시세를 계속 못 받는 종목은 점선 카드에 이유와 함께 ‘✏️ 종목 편집 열기’ 버튼이 나와요. 국내 6자리 코드·미국 상장 티커만 지원하므로, 티커가 틀렸거나 상장폐지·다른 나라 종목이면 종목 편집에서 고치거나 빼 주세요."},
+    {lab:"카드 보기 (자세히 / 간단히)", d:"종목이 많을 때 <b>간단히</b>를 누르면 카드마다 시세·AI 종합분석·수급만 남아 스크롤이 약 1/3로 줄어요(차트·예측·기간 수익률·고저·공시·뉴스는 숨김 — 공시·이유는 위 ‘한눈에’에서). <b>자세히</b>로 돌아가면 전부 다시 보여요. 고른 보기는 이 기기에 기억돼요."},
+    {lab:"‘시세 없음’ 카드", d:"시세를 계속 못 받는 종목은 점선 카드에 이유와 함께 ‘종목 편집 열기’ 버튼이 나와요. 국내 6자리 코드·미국 상장 티커만 지원하므로, 티커가 틀렸거나 상장폐지·다른 나라 종목이면 종목 편집에서 고치거나 빼 주세요."},
     {lab:"카드 순서 (내 순서 / 등락 큰 순)", d:"‘내 보유 종목’ 오른쪽 버튼으로 바꿔요. <b>내 순서</b>는 등록한 순서, <b>등락 큰 순</b>은 시장별로 많이 움직인 종목(오른 것·내린 것 모두)부터. 고른 순서는 이 기기에 기억돼요."},
-    {lab:"🇰🇷 국내 / 🇺🇸 해외 그룹", d:"그룹 이름표에 종목 수, 오른·내린 종목 수(▲▼), <b>그 시장의</b> 장상태(🟢 장중/⚪ 마감)와 갱신 시각이 나와요. 국내와 미국은 장 시간이 달라 따로 표시합니다. 스크롤해도 이름표가 화면 위에 붙어 있어 지금 어느 시장을 보는지 알 수 있어요. 한 시장 데이터를 전부 못 받으면 ‘⚠️ 수집 실패’, 장중인데 갱신이 멈추면 ‘⚠️ 갱신 없음’(아래 FAQ)."},
-    {lab:"🌙 시간외 가격 (미국 종목)", d:"정규장이 끝난 뒤엔 정규장 가격 아래에 <b>🌙 애프터마켓</b>(뉴욕 16:00~20:00, 한국 새벽~오전)이나 <b>🌅 프리마켓</b>(뉴욕 04:00~09:30, 한국 저녁)의 마지막 체결 가격이 함께 나와요. 등락은 <b>정규장 종가 대비</b>, 끝의 시각은 마지막 체결 시각. 시간외 거래가 끝나도 다음 정규장이 열릴 때까지 마지막 시간외 가격을 보여주고, ‘한눈에’ 타일에도 ‘애프터 +2.2%’처럼 표시돼요. 증권 앱의 시간외 가격과 같은 기준이에요."},
-    {lab:"현재가 · ▲▼– 등락", d:"종목명 옆에 종목코드, 아래에 현재가와 화살표+변동액+%. 한국식 색상. 원화는 정수, 달러는 소수 둘째 자리."},
-    {lab:"🔺 급등 / 🔻 급락 배지", d:"등락률 절대값이 <b>3% 이상</b>일 때만 우상단에 배지+강조 테두리. 상승 ‘🔺 급등 +X%’, 하락 ‘🔻 급락 -X%’. 3% 미만이면 배지 없음."},
+    {lab:"국내 / 해외 묶음 이름표", d:"이름표에 종목 수, 오른·내린 종목 수(▲▼), <b>그 시장의</b> 장상태("+LIVE+"장중 / "+GRAY+"마감)와 갱신 시각이 나와요. 국내와 미국은 장 시간이 달라 따로 표시합니다. 스크롤해도 이름표가 화면 위에 붙어 있어 지금 어느 시장을 보는지 알 수 있어요. 한 시장 데이터를 전부 못 받으면 ‘"+AMBER+"수집 실패’, 장중인데 갱신이 멈추면 주황색 ‘"+AMBER+"N분째 갱신 없음’(아래 FAQ)."},
+    {lab:"시간외 가격 (미국 종목)", d:"정규장이 끝난 뒤엔 정규장 가격 아래에 <b>애프터마켓</b>(뉴욕 16:00~20:00, 한국 새벽~오전)이나 <b>프리마켓</b>(뉴욕 04:00~09:30, 한국 저녁)의 마지막 체결 가격이 함께 나와요. 등락은 <b>정규장 종가 대비</b>, 끝의 시각은 마지막 체결 시각. 시간외 거래가 끝나도 다음 정규장이 열릴 때까지 마지막 시간외 가격을 보여주고, ‘한눈에’ 타일에도 ‘애프터 +2.2%’처럼 표시돼요. 증권 앱의 시간외 가격과 같은 기준이에요."},
+    {lab:"현재가 · ▲▼– 등락", d:"종목명 옆에 종목코드, 아래에 큰 현재가와 화살표+변동액+%. 한국식 색상. 원화는 정수, 달러는 소수 둘째 자리."},
+    {lab:"급등 / 급락 배지", d:"등락률 절대값이 <b>3% 이상</b>일 때만 오른쪽 위에 ‘급등 +X%’(빨강) / ‘급락 -X%’(파랑) 배지. 3% 미만이면 배지 없음."},
     {lab:"1주 · 1개월 · 3개월 등락", d:"거래일 기준 5·21·63일 전 대비 수익률(%). 상승 빨강/하락 파랑. 데이터가 모자라면 ‘—’."},
-    {lab:"6개월 차트 + 🔮 예측선/밴드", d:"과거 시세 선그래프 + 오른쪽으로 이어지는 <b style='color:var(--warn)'>주황 점선</b> 예측선과 반투명 예측 범위(밴드). ‘오늘’ 세로 구분선, 왼쪽 위·아래에 <b>6개월 실제 최고가·최저가</b>, ‘예측 →’ 라벨. 선 색은 6개월 전보다 올랐으면 빨강, 내렸으면 파랑."},
-    {lab:"차트 마우스 호버 툴팁", d:"차트에 마우스를 올리면 세로선+점과 말풍선. 과거 구간은 ‘날짜+가격’, 예측 구간은 ‘🔮 예측 +N거래일 + 가격 + 범위’."},
-    {lab:"🔮 약 20거래일 예측 요약", d:"‘🔮 약 20거래일 예측: [예상가] (중앙값 ±X%) · 변동범위 ±Y%’. ‘ⓘ 참고용’에 마우스를 올리면 근거 설명. <b>어디까지나 참고용</b>이에요."},
-    {lab:"수급 — 외국인·기관·개인 (종목)", d:"이 종목의 순매매를 <b>주식 수(만주/주)</b> 단위로(지수는 억원과 다름!). 있으면 외국인 보유비율도. 순매수(+) 빨강, 순매도(−) 파랑. <b>한국 종목만</b>. 종목 수급은 <b>장 마감 후 저녁(20시 이후)</b>에 그날 확정치가 나와서 <b>장중엔 전 거래일 값</b>이에요 — ‘수급 · 10/20 기준’처럼 날짜가 주황으로 붙으면 오늘이 아닌 그날 값(‘· 오늘’이면 오늘 값). 외국인·기관·개인이 모두 같은 방향이면 반대편 <b>기타</b>(기타법인 등)도 함께 보여줘요(순매수는 모두 더하면 0)."},
-    {lab:"고 · 저 · 거래량 · 장상태", d:"당일 고가·저가·거래량(억/만 축약)·장상태(개장 중 ‘🟢 장중’, 마감 ‘⚪ 마감’). 값이 없으면 ‘—’."},
+    {lab:"6개월 차트 + 예측선/밴드", d:"과거 시세 선그래프 + 오른쪽으로 이어지는 <b style='color:var(--warn)'>주황 점선</b> 예측선과 반투명 예측 범위(밴드). ‘오늘’ 세로 구분선, 왼쪽 위·아래에 <b>6개월 실제 최고가·최저가</b>, ‘예측 →’ 라벨. 선 색은 6개월 전보다 올랐으면 빨강, 내렸으면 파랑."},
+    {lab:"차트 마우스 호버 툴팁", d:"차트에 마우스를 올리면 세로선+점과 말풍선. 과거 구간은 ‘날짜+가격’, 예측 구간은 ‘예측 +N거래일 + 가격 + 범위’."},
+    {lab:"약 20거래일 예측 요약", d:"차트 아래 ‘<b style='color:var(--warn)'>예측</b> 약 20거래일 뒤 [예상가] (중앙값 ±X%) · 변동범위 ±Y%’. 점선 밑줄 ‘참고용’에 마우스를 올리면 근거 설명. <b>어디까지나 참고용</b>이에요."},
+    {lab:"수급 — 외국인·기관·개인 (종목)", d:"이 종목의 순매매를 <b>주식 수(만주/주)</b> 단위로(지수는 억원과 다름!). 있으면 외국인 보유비율도. 순매수(+) 빨강, 순매도(−) 파랑. <b>한국 종목만</b>. 종목 수급은 <b>장 마감 후 저녁(20시 이후)</b>에 그날 확정치가 나와서 <b>장중엔 전 거래일 값</b>이에요 — 앞의 표시가 ‘수급 · 10/20 기준’처럼 <b style='color:var(--warn)'>주황</b>이면 오늘이 아닌 그날 값(‘수급 · 오늘’이면 오늘 값). 외국인·기관·개인이 모두 같은 방향이면 반대편 <b>기타</b>(기타법인 등)도 함께 보여줘요(순매수는 모두 더하면 0)."},
+    {lab:"고 · 저 · 거래량 · 장상태", d:"당일 고가·저가·거래량(억/만 축약)·장상태(개장 중 "+LIVE+"장중, 마감 "+GRAY+"마감). 값이 없으면 ‘—’."},
    ]},
-  {icon:"🧠", id:"s5", title:"⑥ 🧠 AI 종합분석 (종목 카드 안, 펼침)",
-   plain:"크게 움직인 종목 카드에만 나타나는 접이식 분석입니다. 평소엔 배지와 ‘한 줄 진단’, 펼침 화살표(▾)만 보이고, 클릭하면 종합요약·핵심요인·📌 관전포인트가 펼쳐집니다. AI가 뉴스·수급·추세를 종합해 ‘왜 이렇게 움직였는지’를 추정한 것으로, 조심스럽게 서술되고 투자권유는 하지 않아요.",
+  {id:"s5", title:"⑥ AI 종합분석 (종목 카드 안, 펼침)",
+   plain:"크게 움직인 종목 카드에만 나타나는 접이식 분석입니다. 평소엔 회색 상자에 "+T('AI 종합분석')+" 표시와 ‘한 줄 진단’, 펼침 화살표만 보이고, 누르면 종합요약·핵심요인·관전 포인트가 펼쳐집니다. AI가 뉴스·수급·추세를 종합해 ‘왜 이렇게 움직였는지’를 추정한 것으로, 조심스럽게 서술되고 투자권유는 하지 않아요.",
    items:[
-    {lab:"🧠 AI 종합분석 배지 + 한 줄 진단", d:"진단 문구 색은 등락 방향(상승 빨강/하락 파랑)에 맞춤. 분석이 없으면 이 영역은 아예 비어 있음."},
-    {lab:"펼침 토글 (▾)", d:"버튼을 클릭하면 상세가 열리고 화살표가 180도 회전. 다시 누르면 접힘."},
-    {lab:"종합요약 · 핵심요인 · 📌 관전포인트", d:"2~3문장 요약, 핵심 요인 2~4개, 단기 관전 포인트(단정·투자권유 없이 조심스럽게)."},
+    {lab:"AI 종합분석 + 한 줄 진단", d:"카드의 시세 바로 아래 회색 상자. 분석이 없으면 이 영역은 아예 비어 있음."},
+    {lab:"펼침 화살표", d:"상자를 누르면 상세가 열리고 화살표가 위로 뒤집혀요. 다시 누르면 접힘. 자동 새로고침이 돼도 펼친 상태는 유지돼요."},
+    {lab:"종합요약 · 핵심요인 · 관전 포인트", d:"2~3문장 요약, 핵심 요인 2~4개, 단기 관전 포인트(단정·투자권유 없이 조심스럽게)."},
     {lab:"언제 생성되나", d:"등락률이 <b>±2% 이상</b>일 때만 생성(그보다 잔잔하면 안 만듭니다). 무료 AI 한도가 하루 수십 회뿐이라 <b>국내 장 시간에 우선 배분</b>하고, 그 종목의 시장이 마감한 뒤엔 등락 폭이 그대로면 마지막 분석을 유지해요. 그래서 새 분석이 차례를 기다리는 동안엔 직전 분석이 보일 수 있고, AI 호출이 실패하면 직전 분석이 남거나 표시되지 않습니다."},
     {lab:"고정 면책 문구 · 분석 시각", d:"상세 맨 아래에 항상 ‘AI가 뉴스·수급·추세를 종합한 추정입니다(14:05 분석). 투자조언이 아닙니다.’ 괄호 안은 분석한 시각(오늘이 아니면 날짜도 함께). 공시를 함께 참고했으면 ‘뉴스·공시·수급·추세’, 해외 종목은 ‘뉴스·추세’로 표시돼요."},
    ]},
-  {icon:"🗞️", id:"s6", title:"⑦ 종목 뉴스 목록 (호재·악재 태깅)",
-   plain:"각 종목 카드 아래에 관련 뉴스가 목록으로 붙습니다. 뉴스마다 호재/악재/중립 태그·제목 링크·출처·시각·키워드가 있고, 목록 위엔 호재·악재 몇 건인지 요약 배지가 나옵니다. 태그는 제목의 긍정/부정 단어로 자동 판정합니다.",
+  {id:"s6", title:"⑦ 종목 뉴스 · 공시 목록",
+   plain:"각 종목 카드 아래에 관련 뉴스(국내 종목은 그 위에 최근 공시)가 목록으로 붙습니다. 뉴스마다 호재/악재/중립 태그·제목 링크·출처·시각·키워드가 있고, 목록 위 오른쪽엔 호재·악재 몇 건인지 요약이 나옵니다. 태그는 제목의 긍정/부정 단어로 자동 판정합니다.",
    items:[
-    {lab:"목록 제목 (📰 / 📈 / 📉)", d:"등락률 절대값 3% 이상이면 상승 ‘📈 급등 관련 뉴스’·하락 ‘📉 급락 관련 뉴스’, 그 미만이면 ‘📰 최근 뉴스’."},
-    {lab:"호재 / 악재 / 중립 태그", d:"제목의 긍정 단어가 많으면 <b style='color:var(--good)'>호재(초록)</b>, 부정이 많으면 <b style='color:var(--bad)'>악재(빨강)</b>, 같으면 중립(회색)."},
-    {lab:"요약 배지", d:"‘호재 우세 (호재 N·악재 N)’ 형태로 전체 분위기를 요약. 최근 2일 위주."},
+    {lab:"목록 제목", d:"등락률 절대값 3% 이상이면 상승 ‘급등 관련 뉴스’·하락 ‘급락 관련 뉴스’, 그 미만이면 ‘최근 뉴스’."},
+    {lab:"호재 / 악재 / 중립 태그", d:"가격과 같은 한국식 색 — 제목의 긍정 단어가 많으면 <b style='color:var(--up)'>호재(빨강)</b>, 부정이 많으면 <b style='color:var(--down)'>악재(파랑)</b>, 같으면 중립(회색)."},
+    {lab:"요약", d:"‘호재 우세 (호재 N·악재 N)’ 형태로 전체 분위기를 요약(호재 우세 빨강·악재 우세 파랑). 최근 2일 위주."},
     {lab:"노출 개수", d:"급등·급락 종목은 5건, 평범한 종목은 3건. 뉴스가 없으면 ‘관련 뉴스를 찾지 못했습니다.’"},
-    {lab:"관련 기사만", d:"뉴스 검색 결과에서 <b>제목에 그 종목 이름</b>(또는 흔히 쓰는 다른 이름·영문 회사명·미국 티커)이 있는 기사만 보여줘요. 도박·광고성 글과 다른 회사가 주인공인 시황·상장 공지 기사는 뺍니다. 우선주(예: LG전자우)는 보통주 회사 이름으로 찾아요. 그래서 그날 관련 기사가 없으면 ‘관련 뉴스를 찾지 못했습니다’가 나올 수 있어요. 🧠 AI 분석도 이렇게 거른 기사만 참고합니다."},
-    {lab:"📋 최근 공시 (국내 종목, 선택 기능)", d:"전자공시(DART)에 올라온 최근 2주 공시를 뉴스 위에 최신순으로 보여줘요(평범한 종목 3건·급등락 5건). 실적·공급계약·증자·자사주·배당·M&amp;A·조회공시 답변처럼 주가에 영향이 큰 종류는 <b style='color:#ffb454'>주황 태그</b>, 횡령·거래정지 같은 위험 공시는 빨강, 오늘 올라온 건 ‘오늘’. 제목을 누르면 DART 원문이 열려요. <b>무료 OpenDART 인증키를 등록해야</b> 켜지고(아래 FAQ), ETF처럼 공시 대상이 아닌 종목엔 나오지 않아요. 🧠 AI 종합분석도 이 공시를 함께 참고합니다."},
+    {lab:"관련 기사만", d:"뉴스 검색 결과에서 <b>제목에 그 종목 이름</b>(또는 흔히 쓰는 다른 이름·영문 회사명·미국 티커)이 있는 기사만 보여줘요. 도박·광고성 글과 다른 회사가 주인공인 시황·상장 공지 기사는 뺍니다. 우선주(예: LG전자우)는 보통주 회사 이름으로 찾아요. 그래서 그날 관련 기사가 없으면 ‘관련 뉴스를 찾지 못했습니다’가 나올 수 있어요. AI 분석도 이렇게 거른 기사만 참고합니다."},
+    {lab:"최근 공시 (국내 종목)", d:"전자공시(DART)에 올라온 최근 2주 공시를 뉴스 위에 최신순으로 보여줘요(평범한 종목 3건·급등락 5건). 실적·공급계약·증자·자사주·배당·M&amp;A·조회공시 답변처럼 주가에 영향이 큰 종류는 <b style='color:var(--warn)'>주황 태그</b>, 횡령·거래정지 같은 위험 공시는 <b style='color:var(--bad)'>빨간 바탕 태그</b>, 오늘 올라온 건 ‘오늘’. 제목을 누르면 DART 원문이 열려요. <b>무료 OpenDART 인증키가 등록돼 있어야</b> 나오고(아래 FAQ), ETF처럼 공시 대상이 아닌 종목엔 나오지 않아요. AI 종합분석도 이 공시를 함께 참고합니다."},
    ]},
-  {icon:"🔄", id:"s7", title:"⑧ 새로고침 · 갱신 · 사용 팁",
-   plain:"화면 우상단에 자동 갱신 주기 드롭다운, 새로고침 버튼(🔄), 확인 시각, 📖 설명서 링크가 있습니다(휴대폰에선 한 줄에 들어가도록 글자 없이 아이콘·시각만). 대시보드는 정해진 주기로 스스로 갱신되고, 한 종류의 데이터가 실패해도 전체가 멈추지 않고 계속 동작해요.",
+  {id:"s7", title:"⑧ 새로고침 · 화면 밝기 · 사용 팁",
+   plain:"화면 오른쪽 위에 확인 시각, 자동 갱신 주기, 새로고침 버튼(둥근 화살표), 화면 밝기 버튼(달·해), 설명서 링크(물음표)가 있습니다(휴대폰에선 한 줄에 들어가도록 글자 없이 시각·아이콘만). 대시보드는 정해진 주기로 스스로 갱신되고, 한 종류의 데이터가 실패해도 전체가 멈추지 않고 계속 동작해요.",
    items:[
-    {lab:"새로고침 주기 드롭다운", d:"옵션 4가지: <b>30초 / 1분 / 5분 / 수동</b>. 기본은 ‘1분’. ‘수동’을 고르면 자동 갱신을 끄고 🔄로만 갱신. 다른 탭·앱을 보는 동안엔 자동 갱신을 쉬었다가(데이터·배터리 절약) 돌아오면 바로 최신으로 바꿔요."},
-    {lab:"🔄 즉시 새로고침 버튼", d:"지금 바로 화면을 갱신(마우스를 올리면 ‘지금 새로고침’ 툴팁)."},
-    {lab:"↘ 우측 하단 이동 버튼", d:"스크롤을 내리면 나타나요. 위 버튼은 <b>반대 시장으로</b> 이동(국내를 보는 중이면 ‘🇺🇸 해외 증시 ↓’, 해외면 ‘🇰🇷 국내 증시 ↑’), 아래 ↑는 <b>맨 위로</b>. 첫 화면에서는 숨어 있어요."},
-    {lab:"갱신 시각 · 장 상태", d:"장 상태와 데이터 갱신 시각은 시장마다 달라 <b>국내·해외 그룹 이름표</b>에 각각 나와요. 우상단 ‘확인 [시각]’은 화면이 마지막으로 데이터를 확인한 시각입니다. 확인에 실패하면 ‘⚠ 갱신 실패 · 마지막 시세’로 바뀌고 직전 화면을 그대로 보여줘요."},
+    {lab:"새로고침 주기", d:"옵션 4가지: <b>30초 / 1분 / 5분 / 수동</b>. 기본은 ‘1분’. ‘수동’을 고르면 자동 갱신을 끄고 새로고침 버튼으로만 갱신. 다른 탭·앱을 보는 동안엔 자동 갱신을 쉬었다가(데이터·배터리 절약) 돌아오면 바로 최신으로 바꿔요."},
+    {lab:"새로고침 버튼 (둥근 화살표)", d:"지금 바로 화면을 갱신(마우스를 올리면 ‘지금 새로고침’)."},
+    {lab:"화면 밝기 (달 · 해 버튼)", d:"처음엔 <b>기기 설정</b>(밝은 모드/다크 모드)을 따라요. 달 버튼을 누르면 어두운 화면, 해 버튼을 누르면 밝은 화면으로 바뀌고 이 기기에 기억돼요. 고른 밝기가 기기 설정과 같아지면 다시 기기 설정을 따라갑니다. 설명서 페이지도 같은 밝기로 보여요."},
+    {lab:"우측 하단 이동 버튼", d:"스크롤을 내리면 나타나요. 위 버튼은 <b>반대 시장으로</b> 이동(국내를 보는 중이면 ‘해외 증시 ↓’, 해외면 ‘국내 증시 ↑’), 아래 화살표는 <b>맨 위로</b>. 첫 화면에서는 숨어 있어요."},
+    {lab:"갱신 시각 · 장 상태", d:"장 상태와 데이터 갱신 시각은 시장마다 달라 <b>국내·해외 묶음 이름표</b>에 각각 나와요. 오른쪽 위 ‘확인 [시각]’은 화면이 마지막으로 데이터를 확인한 시각입니다. 확인에 실패하면 주황색 ‘갱신 실패’로 바뀌고 직전 화면을 그대로 보여줘요."},
     {lab:"장애에 강한 동작", d:"갱신이 한 번 실패해도 전체가 멈추지 않아요. 창 크기를 바꾸면 차트가 다시 그려지고, 빈 결과로 기존 정상 데이터를 덮어쓰지 않습니다."},
    ]},
-  {icon:"➕", id:"s8", title:"⑨ 추적 종목 추가 · 삭제하는 법 (✏️ 종목 편집)",
-   plain:"‘내 보유 종목’ 제목 옆의 ✏️ 종목 편집 버튼으로 종목을 검색해 추가하거나 빼고 저장하면, 1~2분 뒤 대시보드에 자동 반영됩니다. 이 사이트는 서버가 없는 정적 페이지라, 저장은 깃허브에 ‘변경 요청(이슈)’을 남기는 방식이고 봇이 받아서 반영해요.",
+  {id:"s8", title:"⑨ 추적 종목 추가 · 삭제하는 법 (종목 편집)",
+   plain:"‘내 보유 종목’ 제목 옆의 <b>종목 편집</b>(연필) 버튼으로 종목을 검색해 추가하거나 빼고 저장하면, 1~2분 뒤 대시보드에 자동 반영됩니다. 이 사이트는 서버가 없는 정적 페이지라, 저장은 깃허브에 ‘변경 요청(이슈)’을 남기는 방식이고 봇이 받아서 반영해요.",
    items:[
     {lab:"1. 검색해서 추가", d:"검색창에 종목명·코드·티커를 입력하세요(예: <code>엔비디아</code>, <code>삼성전기</code>, <code>005930</code>, <code>NVDA</code>). 결과에서 <b>+ 추가</b>를 누르거나 Enter. 앞부분이 맞는 종목은 <b>시가총액이 큰 종목부터</b> 보여줘요(예: ‘삼성’ → 삼성전자, ‘SK’ → SK하이닉스, ‘두산’ → 두산에너빌리티). 코드·티커를 정확히 입력하면 그 종목이 맨 위에 와요. 국내·미국 전 종목 목록은 봇이 매일 아침 새로 만들어요."},
     {lab:"목록에 없는 종목", d:"검색에 안 나오면 국내 <b>6자리 코드</b>나 미국 <b>티커</b>를 그대로 입력해 ‘코드 그대로 추가’할 수 있어요. 저장 뒤 카드에 시세가 나오는지 확인하세요(잘못된 코드면 안내가 떠요)."},
     {lab:"2. 삭제", d:"‘내 종목’ 칩의 ✕를 누르면 <b>삭제 예정</b>으로 바뀌고, ‘되돌리기’로 취소할 수 있어요. ‘변경 취소’는 고른 변경을 모두 되돌려요. 최대 40개까지."},
     {lab:"3. 저장 — 토큰 없이", d:"<b>저장</b>을 누르면 내용이 채워진 깃허브 이슈 작성 창이 열려요. 거기서 <b>Create</b>(이슈 만들기)만 누르면 끝. 깃허브에 로그인돼 있어야 해요."},
-    {lab:"3. 저장 — 버튼 한 번(선택)", d:"편집 창 아래 ‘⚡ 이 기기에서 버튼 한 번으로 저장하기’에서 <b>이슈 쓰기 권한만 있는</b> 깃허브 토큰을 한 번 넣어 두면, 저장 버튼만 누르면 됩니다. 토큰 만드는 법은 그 안에 단계별로 있어요. 토큰은 그 브라우저에만 저장되고, 이 권한으로는 이슈만 만들 수 있어 코드나 비밀키는 바꿀 수 없어요. 공용 PC에는 저장하지 마세요."},
-    {lab:"반영 확인", d:"저장 뒤 제목 옆에 ‘⏳ 종목 변경 반영 대기 중…’이 보이고, 반영되면 화면이 자동으로 새로고침되며 ‘✅ 반영됐어요’로 바뀝니다. 봇은 깃허브 이슈에 결과 댓글을 남기고 이슈를 닫아요."},
+    {lab:"3. 저장 — 버튼 한 번(선택)", d:"편집 창 아래 ‘이 기기에서 버튼 한 번으로 저장하기’에서 <b>이슈 쓰기 권한만 있는</b> 깃허브 토큰을 한 번 넣어 두면, 저장 버튼만 누르면 됩니다. 토큰 만드는 법은 그 안에 단계별로 있어요. 토큰은 그 브라우저에만 저장되고, 이 권한으로는 이슈만 만들 수 있어 코드나 비밀키는 바꿀 수 없어요. 공용 PC에는 저장하지 마세요."},
+    {lab:"반영 확인", d:"저장 뒤 제목 옆에 ‘종목 변경 반영 대기 중…’이 보이고, 반영되면 화면이 자동으로 새로고침되며 ‘종목 변경이 반영됐어요’로 바뀝니다. 봇은 깃허브 이슈에 결과 댓글을 남기고 이슈를 닫아요."},
     {lab:"직접 편집(예전 방식)", d:"저장소의 <code>config/watchlist.json</code>을 깃허브 웹에서 연필 아이콘으로 고쳐도 됩니다. 한국은 6자리 코드, 미국은 티커, <code>name</code>은 화면에 보일 별칭(선택). 커밋하면 약 5분 안에 반영."},
-   ], extra:'<pre style="background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:14px;overflow:auto;font-size:12.5px;margin:14px 0 0">{\n  "items": [\n    { "code": "005930", "market": "KR", "name": "삼성전자" },\n    { "code": "AAPL",   "market": "US", "name": "Apple" }\n  ]\n}</pre>'},
+   ], extra:'<pre style="background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px;overflow:auto;font-size:12.5px;margin:14px 0 0">{\n  "items": [\n    { "code": "005930", "market": "KR", "name": "삼성전자" },\n    { "code": "AAPL",   "market": "US", "name": "Apple" }\n  ]\n}</pre>'},
 ];
 
+// 색 견본은 CSS 토큰을 그대로 써서 밝은·어두운 화면 모두 실제 화면과 같은 색으로 보인다
 const LEGEND = [
-  {hex:"#ff5b5b", label:"상승 = 빨강", mean:"오른 종목·지수·환율·수익률. 한국식(미국식과 반대). 게이지 ‘탐욕’, 순매수(+), 급등 배지에도 사용."},
-  {hex:"#4aa3ff", label:"하락 = 파랑", mean:"내린 종목·지수·환율·수익률. 게이지 ‘공포’, 순매도(−), 급락 배지에도 사용."},
-  {hex:"#8b98a9", label:"보합 = 회색", mean:"변화 없음(0). 화살표 –, 시간·단위·보조 설명 텍스트에도 같은 회색."},
-  {hex:"#2ec27e", label:"호재 = 초록", mean:"뉴스 감성이 긍정일 때. ‘좋은 뉴스’라는 뜻이며 주가 상승색(빨강)과는 별개."},
-  {hex:"#ff6b6b", label:"악재 = 빨강", mean:"뉴스 감성이 부정일 때, 삭제·오류 강조에도. 상승 빨강과 색은 같지만 뜻은 ‘나쁜 뉴스’."},
-  {hex:"#7fc7ff", label:"AI = 하늘색", mean:"🤖 AI 핵심·🧠 AI 종합분석 등 AI가 만든 내용 배지."},
-  {hex:"#ffb454", label:"예측·주의 = 주황", mean:"🔮 예측선·예측 밴드(±1σ)와 예측 도움말. ‘참고해서 보라’는 신호."},
+  {c:"var(--up)", label:"상승 = 빨강", mean:"오른 종목·지수·환율·수익률. 한국식(미국식과 반대). 공포·탐욕 막대의 ‘탐욕’ 쪽, 순매수(+), 급등 배지, 뉴스 ‘호재’ 태그에도 사용."},
+  {c:"var(--down)", label:"하락 = 파랑", mean:"내린 종목·지수·환율·수익률. 막대의 ‘공포’ 쪽, 순매도(−), 급락 배지, 뉴스 ‘악재’ 태그에도 사용."},
+  {c:"var(--muted)", label:"보합·보조 = 회색", mean:"변화 없음(0), 화살표 –. 시간·단위·보조 설명, 마감 상태 점, 뉴스 ‘중립’ 태그."},
+  {c:"var(--warn)", label:"눈여겨볼 것 = 주황", mean:"예측선·예측 밴드(±1σ)와 ‘예측’ 표시, 전 거래일 수급 날짜, 오늘 주요 공시 점, 영향 큰 공시 태그, 갱신 지연·실패 경고."},
+  {c:"var(--live)", label:"장중 = 초록 점", mean:"그 시장이 지금 열려 있음. 화면 아래 ‘AI 정상’에도 초록 점. 가격 방향과는 무관해요.", round:true},
+  {c:"var(--bad)", label:"위험 = 빨간 바탕", mean:"횡령·거래정지 같은 위험 공시 태그, 화면 아래 AI 오류(키 확인 필요) 점."},
 ];
 
 const GLOSS = [
@@ -364,33 +385,35 @@ const GLOSS = [
   {t:"거래일", d:"주식시장이 열리는 날. 주말·공휴일은 빠져서 ‘20거래일’은 달력상 약 4주."},
   {t:"±1σ (1 시그마)", d:"값이 흩어지는 폭. 예측 밴드가 ±1σ면 실제 값이 그 안에 들 확률이 약 68%라는 뜻(100% 보장 아님)."},
   {t:"보합", d:"가격이 오르지도 내리지도 않고 거의 그대로인 상태."},
-  {t:"급등 / 급락", d:"하루 등락률 절대값이 3% 이상으로 크게 움직인 상태. 이때만 🔺/🔻 배지가 붙음."},
+  {t:"급등 / 급락", d:"하루 등락률 절대값이 3% 이상으로 크게 움직인 상태. 이때만 카드에 ‘급등/급락’ 배지가 붙고, ‘한눈에’ 타일이 진한 색에 흰 글자가 돼요."},
   {t:"리스크온 / 리스크오프", d:"위험선호(공격적으로 위험자산 매수 분위기) / 위험회피(몸을 사리며 안전 선호)."},
+  {t:"시간외 (프리·애프터마켓)", d:"미국 정규장(뉴욕 09:30~16:00) 앞뒤의 거래. 장 전은 프리마켓, 장 후는 애프터마켓. 실적 발표 직후엔 정규장 종가와 크게 다를 수 있어요."},
 ];
 
 const FAQ = [
-  {q:"숫자가 왜 실시간으로 안 바뀌나요?", a:"이 대시보드는 약 5분마다 갱신됩니다. 10~30초 단위 트레이딩 화면이 아니라 ‘오늘 왜 이렇게 움직였는지’를 파악하는 용도예요. 시세·지수는 매번, 종목 뉴스는 15분마다, 6개월 차트·수급은 30분마다 새로 받아요(무료 데이터 출처에 과하게 요청하지 않으려고). 장 마감·주말에는 값이 그대로 유지될 수 있습니다."},
-  {q:"그룹 이름표에 ‘⚠️ 갱신 없음’이 떠요.", a:"장중인데 새 시세가 오래 들어오지 않을 때 나타나요. <b>‘N분째 갱신 없음’</b>은 장중 시세가 45분 넘게 그대로라는 뜻, <b>‘개장 후 갱신 없음’</b>은 장이 열린 지 30분이 지났는데 오늘 시세가 아직 없다는 뜻이에요. 깃허브 저장소의 <b>Actions</b> 탭에서 ‘시세·뉴스 갱신’이 최근에 성공했는지 보세요 — 실행이 멈췄거나 실패(빨간 ✕)가 이어지면 수집 봇 문제, 성공하는데도 그대로면 시세 출처(네이버·야후) 문제일 수 있어요. 휴장일·조기 폐장일은 봇이 확인해 두어 경고하지 않습니다."},
-  {q:"증권 앱과 가격이 달라요.", a:"대부분 <b>시간외 거래</b> 때문이에요. 카드의 큰 가격은 <b>정규장 가격</b>(장이 끝났으면 정규장 종가)이고, 증권 앱은 장이 끝난 뒤 시간외 가격을 보여줘요. 미국 종목은 정규장 가격 아래 <b>🌙 애프터마켓 / 🌅 프리마켓</b> 줄이 증권 앱의 시간외 가격과 같은 기준입니다(실적 발표 직후엔 크게 다를 수 있어요). 또 이 대시보드는 약 5분마다 갱신되고, 국내 종목의 넥스트레이드 프리·애프터마켓 가격은 표시하지 않아요. 참고로 ‘평단가’(내가 산 평균 가격)는 이 대시보드에 없어요."},
-  {q:"상승인데 왜 빨간색인가요?", a:"한국 증시 관례를 따라 상승=빨강, 하락=파랑으로 표시합니다. 미국식(상승 초록)과 정반대예요. 단, 뉴스의 ‘호재’는 초록이니 색이 놓인 위치로 의미를 구분하세요."},
-  {q:"어떤 종목엔 🧠 AI 종합분석이 있고 어떤 종목엔 없어요.", a:"AI 종합분석은 등락률이 ±2% 이상 크게 움직인 종목에만 생성됩니다. 잔잔한 종목은 만들지 않아요. 또 AI 호출이 실패하면 한 줄 진단만 나오거나 아예 표시되지 않습니다."},
+  {q:"숫자가 왜 실시간으로 안 바뀌나요?", a:"이 대시보드는 약 5분마다 갱신됩니다. 10~30초 단위 트레이딩 화면이 아니라 ‘오늘 왜 이렇게 움직였는지’를 파악하는 용도예요. 시세·지수는 매번, 종목 뉴스·공시는 15분마다, 6개월 차트·수급은 30분마다 새로 받아요(무료 데이터 출처에 과하게 요청하지 않으려고). 장 마감·주말에는 값이 그대로 유지될 수 있습니다."},
+  {q:"묶음 이름표에 주황색 ‘갱신 없음’이 떠요.", a:"장중인데 새 시세가 오래 들어오지 않을 때 나타나요. <b>‘N분째 갱신 없음’</b>은 장중 시세가 45분 넘게 그대로라는 뜻, <b>‘개장 후 갱신 없음’</b>은 장이 열린 지 30분이 지났는데 오늘 시세가 아직 없다는 뜻이에요. 깃허브 저장소의 <b>Actions</b> 탭에서 ‘시세·뉴스 갱신’이 최근에 성공했는지 보세요 — 실행이 멈췄거나 실패(빨간 ✕)가 이어지면 수집 봇 문제, 성공하는데도 그대로면 시세 출처(네이버·야후) 문제일 수 있어요. 휴장일·조기 폐장일은 봇이 확인해 두어 경고하지 않습니다."},
+  {q:"증권 앱과 가격이 달라요.", a:"대부분 <b>시간외 거래</b> 때문이에요. 카드의 큰 가격은 <b>정규장 가격</b>(장이 끝났으면 정규장 종가)이고, 증권 앱은 장이 끝난 뒤 시간외 가격을 보여줘요. 미국 종목은 정규장 가격 아래 <b>애프터마켓 / 프리마켓</b> 줄이 증권 앱의 시간외 가격과 같은 기준입니다(실적 발표 직후엔 크게 다를 수 있어요). 또 이 대시보드는 약 5분마다 갱신되고, 국내 종목의 넥스트레이드 프리·애프터마켓 가격은 표시하지 않아요. 참고로 ‘평단가’(내가 산 평균 가격)는 이 대시보드에 없어요."},
+  {q:"상승인데 왜 빨간색인가요?", a:"한국 증시 관례를 따라 상승=빨강, 하락=파랑으로 표시합니다. 미국식(상승 초록)과 정반대예요. 뉴스의 호재·악재 태그도 같은 규칙(호재 빨강, 악재 파랑)이라 화면 어디서든 같은 뜻으로 읽으면 돼요."},
+  {q:"화면이 밝아졌어요(어두워졌어요). 바꿀 수 있나요?", a:"네. 화면 밝기는 처음엔 기기 설정(밝은 모드/다크 모드)을 따라가요. 오른쪽 위 <b>달·해 버튼</b>을 누르면 어두운 화면과 밝은 화면이 바뀌고, 고른 밝기는 이 기기에 기억돼요. 색의 의미(빨강 상승·파랑 하락)는 두 화면 모두 같아요."},
+  {q:"어떤 종목엔 AI 종합분석이 있고 어떤 종목엔 없어요.", a:"AI 종합분석은 등락률이 ±2% 이상 크게 움직인 종목에만 생성됩니다. 잔잔한 종목은 만들지 않아요. 또 AI 호출이 실패하면 한 줄 진단만 나오거나 아예 표시되지 않습니다."},
   {q:"급등했는데 수급은 다 팔았다고(−) 나와요.", a:"카드의 종목 수급은 <b>장 마감 후 저녁</b>에 그날 확정치가 나오기 때문에, 장중에는 <b>전 거래일 값</b>이 보여요. ‘수급 · 10/20 기준’처럼 주황 날짜가 붙어 있으면 오늘 등락이 아니라 그날(예: 전날 급락한 날)의 매매예요. 또 순매수는 모든 주체를 더하면 0이라, 외국인·기관·개인이 모두 마이너스면 <b>기타(기타법인 등)</b>가 그만큼 산 것이에요 — 이때는 ‘기타’ 값도 함께 표시됩니다. 오늘 장중 흐름은 위쪽 코스피·코스닥 브리핑의 지수 수급(‘· 오늘’)을 참고하세요."},
   {q:"수급(외국인·기관·개인)이 안 보이는 종목이 있어요.", a:"수급은 한국 종목만 제공됩니다. 미국 종목은 원래 없고, 해외 인터넷 환경에서는 한국 종목도 차단되어 안 보일 수 있어요."},
   {q:"예측선(점선·밴드)을 믿고 매매해도 되나요?", a:"아니요. 예측선은 최근 60거래일의 추세·변동성으로 계산한 단순 통계 추정일 뿐, 실제 주가와 다를 수 있고 투자 조언이 아닙니다. 밴드(±1σ)도 약 68% 구간을 표시한 참고 범위예요."},
-  {q:"종목을 어떻게 추가하나요?", a:"‘내 보유 종목’ 옆 <b>✏️ 종목 편집</b> → 종목명·코드·티커로 검색해 <b>+ 추가</b> → <b>저장</b>. 깃허브 창이 열리면 <b>Create</b>를 누르세요(토큰을 넣어 뒀다면 저장 버튼만으로 끝). 1~2분 뒤 자동 반영되고 최대 40개까지예요."},
-  {q:"저장했는데 반영이 안 돼요.", a:"① 토큰 없이 저장했다면 깃허브 창에서 <b>Create</b>를 눌렀는지 ② 깃허브 저장소의 Issues 탭에서 ‘watchlist:’ 이슈에 봇 댓글이 달렸는지 확인하세요. 댓글에 건너뛴 이유(코드 형식 오류·이미 있음·최대 40개)가 적혀 있어요. 토큰 오류 안내가 뜨면 편집 창의 ⚡ 안내대로 토큰 권한(Issues: Read and write)과 저장소 선택을 확인하세요."},
-  {q:"AI 분석이 잘 돌아가는지 어떻게 확인해요?", a:"화면 맨 아래 <b>AI 상태</b>를 보세요. 🟢 AI 정상이면 잘 동작 중, ⏳ 순서 대기는 무료 한도를 장 시간에 맞춰 나눠 쓰느라 잠시 기다리는 중(정상 — ‘다음 분석 22:58부터’처럼 다시 분석하는 시각이 함께 보여요), 🟡 일시 중지(무료 한도 소진)는 한도가 초기화되면 자동으로 다시 켜지고, 🔴 오류는 키나 모델 설정 확인이 필요해요. 옆의 ‘무료 한도 12/60회’는 오늘 쓴 횟수/쓸 수 있는 횟수(무료 AI 모델 3개 × 하루 약 20회)이고, 마우스를 올리면 모델별 사용 횟수도 보여요. 한도를 다 써도 요금이 나가지 않고 그날 AI만 쉬어요."},
+  {q:"종목을 어떻게 추가하나요?", a:"‘내 보유 종목’ 옆 <b>종목 편집</b>(연필) → 종목명·코드·티커로 검색해 <b>+ 추가</b> → <b>저장</b>. 깃허브 창이 열리면 <b>Create</b>를 누르세요(토큰을 넣어 뒀다면 저장 버튼만으로 끝). 1~2분 뒤 자동 반영되고 최대 40개까지예요."},
+  {q:"저장했는데 반영이 안 돼요.", a:"① 토큰 없이 저장했다면 깃허브 창에서 <b>Create</b>를 눌렀는지 ② 깃허브 저장소의 Issues 탭에서 ‘watchlist:’ 이슈에 봇 댓글이 달렸는지 확인하세요. 댓글에 건너뛴 이유(코드 형식 오류·이미 있음·최대 40개)가 적혀 있어요. 토큰 오류 안내가 뜨면 편집 창 아래 ‘이 기기에서 버튼 한 번으로 저장하기’ 안내대로 토큰 권한(Issues: Read and write)과 저장소 선택을 확인하세요."},
+  {q:"AI 분석이 잘 돌아가는지 어떻게 확인해요?", a:"화면 맨 아래 <b>AI 상태</b> 줄의 점 색을 보세요. "+LIVE+"초록 ‘AI 정상’이면 잘 동작 중, "+GRAY+"회색 ‘순서 대기’는 무료 한도를 장 시간에 맞춰 나눠 쓰느라 잠시 기다리는 중(정상 — ‘다음 분석 22:58부터’처럼 다시 분석하는 시각이 함께 보여요), "+AMBER+"주황 ‘일시 중지(무료 한도 소진)’는 한도가 초기화되면 자동으로 다시 켜지고, "+RED+"빨강 ‘오류’는 키나 모델 설정 확인이 필요해요. 옆의 ‘무료 한도 12/60회’는 오늘 쓴 횟수/쓸 수 있는 횟수(무료 AI 모델 3개 × 하루 약 20회)이고, 마우스를 올리면 모델별 사용 횟수도 보여요. 한도를 다 써도 요금이 나가지 않고 그날 AI만 쉬어요."},
   {q:"저녁·주말엔 AI 분석이 새로 안 바뀌어요.", a:"정상이에요. 무료 AI 한도는 <b>매일 오후 4시(겨울철 5시)</b>에 초기화되고 하루 수십 회뿐이라, <b>국내 장 시간(09:00~16:00)에 가장 많이</b>, 미국 장 시간(밤 10시 반~새벽)에 일부를 나눠 씁니다. 장이 끝난 시장은 등락 폭이 그대로인 한 마지막 분석을 유지해 한도를 아껴요. 남은 한도는 초기화 1시간 전에 몰아서 씁니다."},
-  {q:"국내와 해외 종목 사이를 빨리 오가려면?", a:"스크롤을 조금 내리면 화면 우측 하단에 이동 버튼이 나타나요. 위 버튼은 반대 시장(국내↔해외)으로, ↑ 버튼은 맨 위(시장 분위기)로 이동합니다."},
-  {q:"📋 최근 공시가 안 보여요.", a:"공시는 <b>OpenDART 무료 인증키</b>를 등록해야 나타나요. ① <b>opendart.fss.or.kr</b> 회원가입 → 인증키 신청(무료) ② 깃허브 저장소 <b>Settings → Secrets and variables → Actions → New repository secret</b>에서 이름 <code>DART_API_KEY</code>, 값에 발급받은 키(40자리)를 넣으면 다음 갱신부터 5~15분 안에 표시됩니다. 키에 문제가 있으면 화면 맨 아래에 ‘📋 공시 수집 멈춤 — 이유’가 떠요. 국내 종목만 해당되고, ETF처럼 공시 대상이 아닌 종목엔 나오지 않아요."},
+  {q:"국내와 해외 종목 사이를 빨리 오가려면?", a:"스크롤을 조금 내리면 화면 우측 하단에 이동 버튼이 나타나요. 위 버튼은 반대 시장(국내↔해외)으로, 아래 화살표 버튼은 맨 위(시장 분위기)로 이동합니다."},
+  {q:"최근 공시가 안 보여요.", a:"공시는 <b>OpenDART 무료 인증키</b>가 등록돼 있어야 나타나요. ① <b>opendart.fss.or.kr</b> 회원가입 → 인증키 신청(무료) ② 깃허브 저장소 <b>Settings → Secrets and variables → Actions → New repository secret</b>에서 이름 <code>DART_API_KEY</code>, 값에 발급받은 키(40자리)를 넣으면 다음 갱신부터 5~15분 안에 표시됩니다. 키에 문제가 있으면 화면 맨 아래에 주황 점과 함께 ‘공시 수집 멈춤 — 이유’가 떠요. 국내 종목만 해당되고, ETF처럼 공시 대상이 아닌 종목엔 나오지 않아요."},
   {q:"여기서 주식을 사고팔 수 있나요?", a:"아니요. 이 대시보드는 모니터링(현황 파악) 전용으로, 매매·주문 기능이 전혀 없습니다."},
 ];
 
 const DISC = [
   "모든 지표·분석·전망·예측은 <b>참고용</b>이며 매수·매도 권유나 투자 자문이 아닙니다. 이 대시보드에는 매매·주문 기능이 전혀 없습니다(모니터링 전용).",
-  "🔮 예측선·밴드·요약은 최근 60거래일의 추세·변동성으로 계산한 <b>단순 통계 추정</b>일 뿐, 실제 주가와 다를 수 있습니다. 밴드는 ±1σ(약 68% 구간)이며 추세는 보수적으로 감쇠 적용됩니다.",
-  "🧠 AI 종합분석·🤖 AI 핵심은 구글 Gemini(무료 한도)가 뉴스·수급·추세를 종합한 추정으로, 근거가 약하면 단정하지 않도록 설계돼 있습니다. 한도를 장 시간에 나눠 쓰기 때문에 표시된 분석은 최신이 아닐 수 있으니 분석 시각을 함께 확인하세요.",
-  "네이버·야후 파이낸스·구글뉴스의 무료·공개 데이터(공시는 키 등록 시 금융감독원 전자공시 OpenDART)를 그대로 쓰는 <b>개인 프로젝트</b>로, 공식 시세 서비스가 아닙니다. 이 데이터는 <b>개인 모니터링 용도</b>로만 사용합니다.",
+  "예측선·밴드·요약은 최근 60거래일의 추세·변동성으로 계산한 <b>단순 통계 추정</b>일 뿐, 실제 주가와 다를 수 있습니다. 밴드는 ±1σ(약 68% 구간)이며 추세는 보수적으로 감쇠 적용됩니다.",
+  "AI 종합분석·AI 핵심은 구글 Gemini(무료 한도)가 뉴스·공시·수급·추세를 종합한 추정으로, 근거가 약하면 단정하지 않도록 설계돼 있습니다. 한도를 장 시간에 나눠 쓰기 때문에 표시된 분석은 최신이 아닐 수 있으니 분석 시각을 함께 확인하세요.",
+  "네이버·야후 파이낸스·구글뉴스의 무료·공개 데이터와 금융감독원 전자공시 OpenDART를 그대로 쓰는 <b>개인 프로젝트</b>로, 공식 시세 서비스가 아닙니다. 이 데이터는 <b>개인 모니터링 용도</b>로만 사용합니다.",
   "값은 <b>약 5분 주기</b>로 갱신됩니다(초 단위 실시간 아님). 한국 종목은 네이버 실시간(지연 0분)이 기본이나, 실패 시 야후로 대체되면 약 20분 지연된 값이 표시될 수 있습니다.",
   "수급(투자자별 순매매)은 한국 종목만 제공되며 해외 IP 환경에서는 표시되지 않을 수 있습니다. 데이터는 값이 실제로 바뀔 때만 갱신되어 장 마감·주말에는 그대로 유지될 수 있습니다.",
 ];
@@ -403,7 +426,7 @@ for(const s of SECTIONS){
   const items = s.items.map(it=>`<div class="item"><div class="lab">${it.lab}</div><div class="d">${it.d}</div></div>`).join('');
   secWrap.appendChild(el(
     `<section class="doc" id="${s.id}">
-       <div class="sh"><div class="ic">${s.icon}</div><h2>${s.title}</h2></div>
+       <h2>${s.title}</h2>
        <p class="lead">${s.plain}</p>
        <div class="items">${items}</div>
        ${s.extra||''}
@@ -411,13 +434,13 @@ for(const s of SECTIONS){
 }
 
 document.getElementById('legend').innerHTML = LEGEND.map(c=>
-  `<div class="sw"><div class="chip" style="background:${c.hex}"></div><div><div class="lab">${c.label}</div><div class="mean">${c.mean}</div></div></div>`).join('');
+  `<div class="sw"><div class="chip${c.round ? ' round' : ''}" style="background:${c.c}"></div><div><div class="lab">${c.label}</div><div class="mean">${c.mean}</div></div></div>`).join('');
 
-document.getElementById('gloss').innerHTML = GLOSS.map(g=>
+document.getElementById('glosslist').innerHTML = GLOSS.map(g=>
   `<div class="gc"><div class="term">${g.t}</div><div class="def">${g.d}</div></div>`).join('');
 
 document.getElementById('faqbox').innerHTML = FAQ.map(f=>
-  `<details class="faq"><summary><span class="qm">Q.</span><span>${f.q}</span><span class="arw">▾</span></summary><div class="ans">${f.a}</div></details>`).join('');
+  `<details class="faq"><summary><span class="qm">Q.</span><span>${f.q}</span><span class="arw" aria-hidden="true"></span></summary><div class="ans">${f.a}</div></details>`).join('');
 
 document.getElementById('disclist').innerHTML = DISC.map(d=>`<li>${d}</li>`).join('');
 
