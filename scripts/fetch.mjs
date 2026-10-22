@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis,
-  aiStatus, aiGate, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, priceOnly, pickReasonNews,
+  aiStatus, aiGate, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, pickReasonNews, tagSentiment,
 } from './sources.mjs';
 import { startBudget, toStored, totalUsed, capacity, inSession, isKrSession, nextAllowanceAt, closedCheckDay, usExtWindow, usAfterPostSameDay } from './aibudget.mjs';
 import { validateWatchlist, writeJsonAtomic, analysisSig, sigMove } from './util.mjs';
@@ -310,8 +310,10 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
           const why = a && a.headline && Number.isFinite(a.at) && ymdIn(a.at, tz) >= day ? { r: a.headline, s: 'ai' }
             : d ? { r: `[${d.tag || '공시'}] ${d.title}`, s: 'disc' } : n ? { r: n.title, s: 'news' } : { r: '', s: '' };
           const old = i >= 0 ? list[i] : null;
-          // 예전에 시세 안내 기사로 남긴 이유(N6 전 기록)는 지킬 만한 이유가 아니다 — 더 나은 게 없으면 비운다
-          const oldRank = old && !(old.s === 'news' && priceOnly(old.r)) ? rank[old.s] || 0 : 0;
+          // 예전에 남긴 뉴스 이유도 지금 규칙으로 다시 본다 — 시세 안내·방향이 반대인 기사(내린 날의 호재 기사 등)면
+          // 지킬 만한 이유가 아니다(더 나은 게 없으면 비운다). 호재·악재 태그는 제목만으로 정해져 다시 계산해도 같다
+          const oldNewsOk = old && old.s === 'news' && !!pickReasonNews([{ title: old.r, sentiment: tagSentiment(old.r) }], q.changePct, day, (ms) => ymdIn(ms, tz), [q.name]);
+          const oldRank = old && !(old.s === 'news' && !oldNewsOk) ? rank[old.s] || 0 : 0;
           const keep = old && oldRank > (rank[why.s] || 0);
           const entry = { d: day, p: Math.round(q.changePct * 100) / 100, r: cut(String(keep ? old.r : why.r)), s: keep ? old.s : why.s };
           if (i >= 0) list[i] = entry; else list.push(entry);

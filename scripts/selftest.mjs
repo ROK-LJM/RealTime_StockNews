@@ -893,6 +893,34 @@ await test('뉴스 관련도(파이프라인): 무관 기사·스팸은 빼고 �
   assert.ok(qs.some((q) => q.startsWith('LG전자 주가')) && !qs.some((q) => q.startsWith('LG전자우')), qs.join(' / '));
   assert.equal(d['005930'].summary.total, 1, '호재·악재 집계도 관련 기사만');
 });
+await test('뉴스 목록(18차): 같은 기사(제목 꼬리만 다름)는 최신 하나만 · 시세 안내 기사는 뒤로 · 날짜만 다른 시세 안내·매체만 다른 다른 제목은 다른 기사', async () => {
+  // 실제 제목(2026-10-22 news.json)
+  assert.equal(src.sameStory('HD현대중공업, 세계 최대 암모니아 추진선 건조…11월 초 인도', 'HD현대중공업, 세계 최대 암모니아 추진선 건조'), true);
+  assert.equal(src.sameStory('HD현대중공업, 세계 최대 암모니아 추진선 건조…11월 초 인도', 'HD현대중공업, 세계 최대 암모니아 추진선 건조…11월 초 인도'), true);
+  assert.equal(src.sameStory("LG전자, AI 시스템 에어컨 '멀티 브이 7' 첫 공개", 'LG전자, 듀얼 AI 탑재한 시스템 에어컨 ‘멀티 브이 7’ 공개'), false, '표현이 다르면 다른 기사로(잘못 합치지 않게 보수적으로)');
+  assert.equal(src.sameStory('심텍 주가, 10월 22일 장중 128,300원 1.83% 상승', '심텍 주가, 10월 21일 장중 125,100원 0.89% 상승'), false);
+  assert.equal(src.sameStory('삼성전자 주가 상승 중', '삼성전자 주가 하락 중'), false);
+  assert.equal(src.sameStory('[특징주] 삼성E&A, 자사주 소각', '삼성E&A, 자사주 소각'), true, '머리 꼬리표는 빼고 비교');
+  assert.equal(src.sameStory('AB', 'AB'), true);
+  assert.equal(src.sameStory('AB', 'CD'), false);
+  const root = workspace();
+  const news = (m, u) => {
+    const name = queryName(u).split(' ')[0], now = Date.now();
+    const item = (t, min) => `<item><title>${t} - 테스트일보</title><link>https://news.example.com/${min}</link><pubDate>${new Date(now - min * 60e3).toUTCString()}</pubDate></item>`;
+    return text(`<?xml version="1.0"?><rss><channel>${[
+      item(`${name} 주가, 10월 15일 장중 70,000원 4.20% 상승`, 10),
+      item(`${name}, 세계 최대 암모니아 추진선 건조…11월 초 인도`, 20),
+      item(`${name}, 세계 최대 암모니아 추진선 건조`, 30),
+      item(`${name}, 세계 최대 암모니아 추진선 건조…11월 초 인도`, 40),
+      item(`${name}, 대규모 수주 소식에 급등`, 50),
+    ].join('')}</channel></rss>`);
+  };
+  await pipeline(root, { news });
+  const d = read(root, 'news.json')['005930'];
+  assert.deepEqual(d.items.map((x) => x.title), ['삼성전자, 세계 최대 암모니아 추진선 건조…11월 초 인도', '삼성전자, 대규모 수주 소식에 급등', '삼성전자 주가, 10월 15일 장중 70,000원 4.20% 상승'],
+    '같은 기사 3건 → 최신 1건, 가장 최근이어도 시세 안내는 맨 뒤');
+  assert.equal(d.items.at(-1).sentiment.label, '시세');
+});
 await test('수급 날짜: AI 입력에 오늘 값인지 전 거래일 확정치인지 밝힘(장중엔 전날 값 — 오늘 원인으로 오해 방지)', async () => {
   const bodyOf = () => NET.bodies.find((b, i) => isGemini(NET.calls[i]) && b.includes("'삼성전자'")) || '';
   await pipeline(workspace());                // 10/15 장중, 수급 날짜 20261015 → 오늘
@@ -1057,11 +1085,11 @@ const PRICE_ONLY_YES = ['SK하이닉스 주가, 10월 22일 장중 1,281,000원 
   'SK텔레콤 주가, 10월 21일 애프터마켓 77,300원 0.00% 보합', 'LG에너지솔루션 주가, 10월 21일 411,500원 0.60% 하락', '현대중공업 주가 하락 중',
   '슈퍼 마이크로 컴퓨터 주가 상승 중', 'HD건설기계 장중 3%대 상승', '현대중공업 주가 2,000원 상승 후 장마감', '한화솔루션 주가 50원 하락 후 장마감',
   '[특징주] 한화솔루션 장중 2%대 강세 3만1450원 기록 : 기업주식정보', 'SK텔레콤 거래량 13.6% 감소…20일 65만2578주',
-  '[특징주] 한미반도체, 장중 1%대 상승하며 20만2000원 기록 : 기업주식정보'];
+  '[특징주] 한미반도체, 장중 1%대 상승하며 20만2000원 기록 : 기업주식정보', '두산에너빌리티 장중 1.57% 하락해 6만2500원'];
 const PRICE_ONLY_NO = ['영업이익 추정치 웃돈 파두…주가는 장중 6.75% 하락', '삼성전기 주가 3.08% 상승…엔비디아 기판 생산능력 확대에 공급 수혜 기대',
   '호실적에 자사주 소각까지…삼성E&A 15% 상승세 [특징주]', '[장중수급포착] 대덕전자, 기관 8일 연속 순매수행진... 주가 +4.24%',
   '[개장시황] 삼성전기 5.05% 급등…코스피 차익매물에 하락 출발', 'Why Super Micro Computer Stock Popped Today', '수주 기대감에 장중 3%대 상승',
-  '대덕전자, 장중 2.51% 하락…iM증권은 이익 전망 상향', '9개국 이상 거점 둔 한화에어로스페이스…주가 89만9000원으로 상승', '[특징주] SK텔레콤, 뚜렷한 공시 없이 장중 소폭 하락세 : 기업주식정보'];
+  '대덕전자, 장중 2.51% 하락…iM증권은 이익 전망 상향', '9개국 이상 거점 둔 한화에어로스페이스…주가 89만9000원으로 상승', '[특징주] SK텔레콤, 뚜렷한 공시 없이 장중 소폭 하락세 : 기업주식정보', '두산에너빌리티 장중 1.57% 하락해 6만2500원…원전 수주 지연 영향'];
 await test('시세 안내 기사: 날짜·가격만 있는 자동 기사·"주가 상승 중"·"장중 3%대 상승"은 이유에서 제외 · 이유가 붙은 제목은 유지 · 봇과 화면 판정이 같음', async () => {
   for (const t of PRICE_ONLY_YES) assert.equal(src.priceOnly(t), true, t);
   for (const t of PRICE_ONLY_NO) assert.equal(src.priceOnly(t), false, t);
@@ -1084,7 +1112,7 @@ await test('급등락 기록: 이유로 쓸 뉴스는 시세 안내 기사를 �
     return text(`<?xml version="1.0"?><rss><channel>${item(`${name} 주가, 10월 15일 장중 70,000원 4.20% 상승`, 600e3)}${item(`${name} 주가 상승 중`, 900e3)}${item(`${name}, 대규모 수주 소식에 급등`, 3600e3)}</channel></rss>`);
   };
   await pipeline(root, { gemini: () => text('upstream error', 500), krAt: NOW_KR, news });
-  assert.equal(read(root, 'news.json')['005930'].items[0].title, '삼성전자 주가, 10월 15일 장중 70,000원 4.20% 상승', '뉴스 목록엔 그대로(최신순)');
+  assert.deepEqual(read(root, 'news.json')['005930'].items.map((x) => x.title), ['삼성전자, 대규모 수주 소식에 급등', '삼성전자 주가, 10월 15일 장중 70,000원 4.20% 상승', '삼성전자 주가 상승 중'], '뉴스 목록엔 모두 남고 시세 안내는 끝으로(18차)');
   assert.deepEqual(read(root, 'moves.json')['005930'][0], { d: '20261015', p: 4.2, r: '삼성전자, 대규모 수주 소식에 급등', s: 'news' });
   // 예전 기록에 시세 안내 기사가 이유로 남아 있고 지금도 그런 기사뿐이면 그 이유를 지키지 않고 비운다
   const r2 = workspace();
@@ -1092,6 +1120,15 @@ await test('급등락 기록: 이유로 쓸 뉴스는 시세 안내 기사를 �
   const onlyPrice = (m, u) => { const name = queryName(u); return text(`<?xml version="1.0"?><rss><channel><item><title>${name} 주가 상승 중 - 테스트일보</title><link>https://news.example.com/p</link><pubDate>${new Date(Date.now() - 600e3).toUTCString()}</pubDate><source url="https://news.example.com">테스트일보</source></item></channel></rss>`); };
   await pipeline(r2, { gemini: () => text('upstream error', 500), krAt: NOW_KR, news: onlyPrice });
   assert.deepEqual(read(r2, 'moves.json')['005930'][0], { d: '20261015', p: 4.2, r: '', s: '' });
+  // 18차: 예전 뉴스 이유가 오늘 움직임과 반대 성격(오른 날의 악재 기사)이면 지키지 않고, 같은 성격이면 지킨다
+  const r3 = workspace();
+  writeData(r3, 'moves.json', { '005930': [{ d: '20261015', p: 4, r: '삼성전자, 실적 부진 우려 커져', s: 'news' }] });
+  await pipeline(r3, { gemini: () => text('upstream error', 500), krAt: NOW_KR, news: onlyPrice });
+  assert.deepEqual(read(r3, 'moves.json')['005930'][0], { d: '20261015', p: 4.2, r: '', s: '' });
+  const r4 = workspace();
+  writeData(r4, 'moves.json', { '005930': [{ d: '20261015', p: 4, r: '삼성전자, 대규모 수주 계약', s: 'news' }] });
+  await pipeline(r4, { gemini: () => text('upstream error', 500), krAt: NOW_KR, news: onlyPrice });
+  assert.deepEqual(read(r4, 'moves.json')['005930'][0], { d: '20261015', p: 4.2, r: '삼성전자, 대규모 수주 계약', s: 'news' });
 });
 await test('이유 고르기: 상품 상장 공지·방향이 반대인 기사 제외 · 그날 같은 방향 [특징주] 먼저 · 나열 기사는 뒤로 · 같은 등급은 최신순 · 봇과 화면 같음', async () => {
   const vm = await import('node:vm');
@@ -1127,6 +1164,45 @@ await test('이유 고르기: 상품 상장 공지·방향이 반대인 기사 �
   assert.equal(pick(mixed, -3.25, ['SK하이닉스']), mixed[0].title, "SK하이닉스는 이름 뒤 '하락' — 같은 방향 [특징주]");
   assert.equal(pick([{ title: '[특징주] 반도체 대형주 약세 전환…삼성전자, 외국인 매도 확대', pubMs: at(13) }, mixed[1]], -2.9, ['삼성전자']),
     '[특징주] 반도체 대형주 약세 전환…삼성전자, 외국인 매도 확대', '이름 바로 뒤에 방향 말이 없으면 제목 전체(약세)로');
+});
+await test('이유 고르기(18차): 방향 말이 없으면 호재·악재 태그로 — 내린 날 호재 기사 제외 · "~에도"는 태그로 짐작 안 함 · 같은 방향 기사 먼저 · 리포트 요약은 맨 뒤(내린 날엔 나쁜 말 없으면 제외) · 봇과 화면 같음', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(`${block}; ({ pickReasonNews })`, {});
+  const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const at = (h) => T(`2026-10-22T${String(h).padStart(2, '0')}:00:00+09:00`);
+  const it = (title, h, tone = 'neutral') => ({ title, pubMs: at(h), sentiment: { label: { pos: '호재', neg: '악재', neutral: '중립' }[tone], tone } });
+  const pick = (list, pct, names = []) => {
+    const a = src.pickReasonNews(list, pct, '20261022', kst, names), b = f.pickReasonNews(list, pct, '20261022', kst, names);
+    assert.equal(b ? b.title : null, a ? a.title : null, '봇·화면 같은 선택');
+    return a ? a.title : null;
+  };
+  // 실제 제목(2026-10-22) — LG전자우 -3.62%
+  const good = it('LG전자, 스마트팩토리 사업 공공 인프라로 확대…2년 만에 수주 1조 돌파', 14, 'pos');
+  const plain = it("LG전자, 수자원공사와 맞손…시화조력발전소에 'AI' 심는다", 12);
+  assert.equal(pick([good, plain], -3.62, ['LG전자']), plain.title, '내린 날: 방향 말 없는 호재 기사는 이유 아님');
+  assert.equal(pick([good], -3.62, ['LG전자']), null, '그것뿐이면 이유 없음');
+  assert.equal(pick([plain, good], 3.62, ['LG전자']), good.title, '오른 날: 같은 방향(호재) 기사를 더 최근의 중립 기사보다 먼저');
+  // 현대차 -3.55% — 더 최근의 중립 기사보다 '추락' 기사
+  const ai = it('현대차그룹, AI 인프라 확충…2029년 새만금서 GPU 1만장 운영 추진', 14);
+  const fall = it('78만원 갔던 현대차, 28만원까지 추락…피지컬 AI ETF도 최대 59%↓', 9);
+  assert.equal(pick([ai, fall], -3.55, ['현대차']), fall.title, '같은 방향 기사 먼저');
+  // '~에도'가 있으면 호재 태그로 방향을 짐작하지 않는다
+  const despite = it('SK하이닉스, 사상 최대 실적에도 차익실현 매물', 13, 'pos');
+  assert.equal(pick([despite], -3.2, ['SK하이닉스']), despite.title, "'실적에도' — 호재 태그여도 내린 날 이유로 남김");
+  // 리포트 요약 — 심텍 -5.32%
+  const rep = it("[리포트 브리핑]심텍, '순항 중인 성과 속 제한적인 외부 영향' 목표가 180,000원 - 교보증권", 14);
+  const pcb = it('AI 시대 핵심 부품 PCB… 대덕전자·심텍·이수페타시스 노려라', 10);
+  assert.equal(pick([rep], -5.32, ['심텍']), null, '내린 날: 나쁜 말 없는 리포트 요약은 이유 아님');
+  assert.equal(pick([rep, pcb], -5.32, ['심텍']), pcb.title);
+  assert.equal(pick([rep, pcb], 5.32, ['심텍']), pcb.title, '오른 날에도 리포트 요약은 맨 뒤');
+  assert.equal(pick([rep], 5.32, ['심텍']), rep.title, '오른 날 리포트 요약밖에 없으면 그것');
+  const cut = it("[리포트 브리핑]심텍, '수요 둔화' 목표가 150,000원으로 하향 - 교보증권", 13, 'neg');
+  assert.equal(pick([cut], -5.32, ['심텍']), cut.title, '나쁜 말(하향) 리포트는 내린 날 이유로');
+  // 제목의 오름·내림 말이 태그보다 먼저 — 호재 태그인 '…소식에도 하락' [특징주]는 내린 날 맨 앞
+  const feat = it("[특징주] 삼성전기, 엔비디아와 파트너십 구축 소식에도 '하락'", 11, 'pos');
+  assert.equal(pick([plain, feat], -2.83, ['삼성전기']), feat.title);
 });
 await test('시장 대비(app.js): 국내 코스피·코스닥 · 미국 나스닥 상장은 나스닥 · 그 밖은 S&P 500 · 시장 따라(같은 방향·1%p 안쪽·지수 1% 이상) · 모르면 비교 안 함', async () => {
   const vm = await import('node:vm');
@@ -1198,8 +1274,8 @@ await test('상장 시장(quotes.json exch): 검색 목록의 국내 KOSPI·KOSD
   const q = Object.fromEntries(read(root, 'quotes.json').quotes.map((x) => [x.code, x]));
   assert.deepEqual([q['005930'].exch, q.AAPL.exch, q['000660'].exch], ['KOSPI', 'NASDAQ', undefined]);
   const n = read(root, 'news.json')['005930'];
-  assert.deepEqual([n.items[0].sentiment.label, n.items[0].sentiment.tone], ['시세', 'neutral'], "'상승'이 들어 있어도 시세 안내 기사는 호재가 아님");
-  assert.equal(n.items[1].sentiment.label, '호재');
+  assert.deepEqual([n.items[1].sentiment.label, n.items[1].sentiment.tone], ['시세', 'neutral'], "'상승'이 들어 있어도 시세 안내 기사는 호재가 아님(목록 끝으로)");
+  assert.equal(n.items[0].sentiment.label, '호재');
   assert.deepEqual([n.summary.pos, n.summary.neg, n.summary.label], [1, 0, '호재 우세']);
 });
 await test('공시 도구: ZIP(압축·무압축·데이터 설명자) 속 XML · 상장사만 표로 · 우선주는 보통주 회사 · 종류 판정 · 한국 날짜', () => {

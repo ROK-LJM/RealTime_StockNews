@@ -536,12 +536,14 @@ const PRICE_ONLY = [
   /^[^\s,…·]+\s(?:장중|장\s?초반|오전|오후)\s*[\d.]+%대?\s*(?:상승|하락|강세|약세|급등|급락)(?:\s*중|세)?$/,
   /^\S+(?:\s\S+){0,3}\s주가\s*[\d,]+원\s*(?:상승|하락|보합)\s*(?:후\s*)?장\s?마감$/,
   /^(?:\[특징주\]\s*)?[^\s,…·]+(?:\s[^\s,…·]+)?,?\s장중\s*[\d.]+%대?\s*(?:상승|하락|강세|약세)(?:하며)?\s*[\d만,.]+원\s*기록/,
+  /^[^\s,…·]+(?:\s[^\s,…·]+)?,?\s장중\s*[\d.]+%대?\s*(?:상승|하락)해\s*[\d만,.]+원$/,
   /^\S+(?:\s\S+){0,3}\s거래량\s*[\d.]+%\s*(?:증가|감소)/,
 ];
 const priceOnly = (title) => PRICE_ONLY.some((re) => re.test(String(title ?? '').trim()));
 // 이유로 쓸 뉴스 고르기 — scripts/sources.mjs의 pickReasonNews와 같게 유지(자체 테스트가 비교).
 // 시세 안내·상품 상장 공지('…ELW 224종 상장')·방향이 반대인 기사('15% 급등' 기사인데 오늘은 하락 — 이유일 수 없음)는 빼고
-// ① 그날 나온 같은 방향의 [특징주] → ② 그 밖의 기사 → ③ 여러 종목 나열·'[오늘의 …]' 모음 순. 같은 등급 안에서는 최신순.
+// ① 그날 나온 같은 방향의 [특징주] → ② 같은 방향 기사 → ③ 방향을 알 수 없는 기사 → ④ 여러 종목 나열·'[오늘의 …]' 모음·리포트 요약 순.
+// 같은 등급 안에서는 최신순. 방향은 제목의 오름·내림 말, 없으면 호재·악재 태그(내린 날의 '수주 1조 돌파' 같은 호재 기사는 이유 아님).
 const LISTING_RE = /(ELW|ETN|ETF|리츠|스팩)[^…]{0,30}상장|신규\s*상장/;
 const UP_RE = /상승|강세|급등|반등|↑|오름|올라|치솟|폭등|상한가|신고가/;
 const DOWN_RE = /하락|약세|급락|↓|내림|내려|떨어|폭락|하한가|신저가|주춤|추락/;
@@ -559,13 +561,25 @@ function nameDir(t, names) {
   }
   return titleDir(t);
 }
+// 증권사 리포트 요약('[리포트 브리핑]심텍, … 목표가 180,000원 - 교보증권') — 목표가와 함께 나와 대개 좋은 쪽이라 나쁜 말이 없으면 오름으로 본다
+const REPORT_RE = /^\[리포트\s?브리핑\]|목표가\s*[\d,]+\s*원/;
+// '소식에도'·'불구'처럼 거스르는 말이 있으면 호재·악재 낱말로 방향을 짐작하지 않는다
+const CONTRA_RE = /에도[\s,.…'"‘’“”]|에도$|불구|무색/;
+// 기사가 가리키는 그 종목의 방향 — ① 이름 뒤·제목의 오름·내림 말 ② 없으면 호재·악재 태그 ③ 리포트 요약은 좋은 쪽
+function newsDir(it, names) {
+  const d = nameDir(it.title, names);
+  if (d) return d;
+  if (CONTRA_RE.test(it.title)) return 0;
+  const tone = it.sentiment && it.sentiment.tone;
+  return tone === 'pos' ? 1 : tone === 'neg' ? -1 : REPORT_RE.test(it.title) ? 1 : 0;
+}
 // items: 최신순 뉴스, pct: 그날 등락률, day: 그 시장 현지 날짜(YYYYMMDD), ymd(ms): 같은 기준의 날짜 함수, names: 종목 이름들
 function pickReasonNews(items, pct, day, ymd, names = []) {
   const s = Math.sign(Number(pct) || 0);
-  const dir = (t) => nameDir(t, names);
-  const tier = (it) => (/\[특징주\]/.test(it.title) && s && dir(it.title) === s && Number.isFinite(it.pubMs) && ymd(it.pubMs) === day ? 0
-    : roundupTitle(it.title) ? 2 : 1);
-  return (Array.isArray(items) ? items : []).filter((it) => it && it.title && !priceOnly(it.title) && !LISTING_RE.test(it.title) && !(s && dir(it.title) === -s))
+  const dir = (it) => newsDir(it, names);
+  const tier = (it) => (/\[특징주\]/.test(it.title) && s && dir(it) === s && Number.isFinite(it.pubMs) && ymd(it.pubMs) === day ? 0
+    : roundupTitle(it.title) || REPORT_RE.test(it.title) ? 3 : s && dir(it) === s ? 1 : 2);
+  return (Array.isArray(items) ? items : []).filter((it) => it && it.title && !priceOnly(it.title) && !LISTING_RE.test(it.title) && !(s && dir(it) === -s))
     .map((it, i) => [tier(it), i, it]).sort((a, b) => a[0] - b[0] || a[1] - b[1])[0]?.[2] || null;
 }
 // O1 시장 대비 — 종목마다 같은 시장 지수와 비교(국내 상장 시장별 코스피·코스닥, 미국 나스닥 상장은 나스닥 · 그 밖은 S&P 500).
@@ -748,11 +762,14 @@ function renderBoard(groups, closed) {
     .sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct)));
   const show = isNarrow() ? 4 : WHY_SHOW; // 휴대폰은 처음에 4줄
   const rows = movers.map((q, i) => {
-    const w = whyOf(q), p = q.changePct, vs = vsMarket(q, state.market?.indices);
+    const p = q.changePct, vs = vsMarket(q, state.market?.indices), w0 = whyOf(q);
+    // 시장 따라 종목은 여러 종목 나열·리포트 요약 기사보다 시장 흐름이 더 나은 설명
+    const w = vs && vs.follows && w0 && w0.src === '뉴스' && (roundupTitle(w0.text) || REPORT_RE.test(w0.text)) ? null : w0;
     return `<button type="button" class="why-row${i >= show && !state.whyAll ? ' more' : ''}" data-code="${esc(q.code)}">
       <span class="w-pct ${dirClass(p)}-c">${p > 0 ? '▲' : '▼'} ${Math.abs(p).toFixed(2)}%</span>
       <span class="w-nm">${esc(q.name)}</span>
-      <span class="w-txt">${vs && vs.follows ? `<span class="src mkt" title="같은 날 ${esc(vs.name)} ${fmtPct(vs.pct)} — 시장 전체와 비슷하게 움직임(차이 ${fmtPctP(vs.diff)})">시장 따라</span>` : ''}${w ? `<span class="src" title="${esc(w.label)}">${w.src}</span>${esc(w.text)}` : '<span class="muted">아직 이유 정보가 없어요(뉴스·공시·AI 대기)</span>'}</span>
+      <span class="w-txt">${vs && vs.follows ? `<span class="src mkt" title="같은 날 ${esc(vs.name)} ${fmtPct(vs.pct)} — 시장 전체와 비슷하게 움직임(차이 ${fmtPctP(vs.diff)})">시장 따라</span>` : ''}${w ? `<span class="src" title="${esc(w.label)}">${w.src}</span>${esc(w.text)}`
+        : vs && vs.follows ? `<span class="muted">${esc(vs.name)} ${fmtPct(vs.pct)} 흐름 — 종목만의 이유 기사 없음</span>` : '<span class="muted">아직 이유 정보가 없어요(뉴스·공시·AI 대기)</span>'}</span>
     </button>`;
   }).join('');
   const more = movers.length > show && !state.whyAll ? `<button type="button" class="why-more" data-why="all">${movers.length - show}종목 더 보기<svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></button>` : '';

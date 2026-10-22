@@ -260,7 +260,24 @@ export function tagSentiment(text) {
   return { label, tone, score, keywords: [...new Set([...hits.pos, ...hits.neg])].slice(0, 4) };
 }
 
+// 같은 기사가 매체·제목 꼬리만 바꿔 거듭 실린 것('…추진선 건조…11월 초 인도' / '…추진선 건조') — 괄호 꼬리표·문장부호를 뺀
+// 글자쌍이 짧은 쪽 기준 90% 넘게 겹치면 같은 기사(실측 10/22: 같은 기사 1.0, 날짜만 다른 시세 안내 0.6~0.8, 매체만 다른 같은 소식 0.7)
+const titleGrams = (t) => {
+  const s = String(t ?? '').replace(/\[[^\]]*\]|\([^)]*\)|[\s'"‘’“”…·,.!?:\-–—|]/g, '').toLowerCase();
+  const g = new Set();
+  for (let i = 0; i < s.length - 1; i++) g.add(s.slice(i, i + 2));
+  return g;
+};
+export function sameStory(a, b) {
+  const A = titleGrams(a), B = titleGrams(b);
+  if (A.size < 4 || B.size < 4) return String(a ?? '').trim() === String(b ?? '').trim();
+  let k = 0;
+  for (const x of A) if (B.has(x)) k++;
+  return k / Math.min(A.size, B.size) >= 0.9;
+}
+
 // recentDays>0 이면 최근 N일 뉴스만(구글 when: 연산자 + pubDate 필터), 최신순 정렬.
+// 같은 기사는 최신 하나만, 시세 안내 기사는 뒤로 — 8건 안에 서로 다른 실제 뉴스가 먼저 들어가게(카드·AI 입력 모두)
 // keep(title): 남길 기사 판정(종목 뉴스의 관련도 필터). 주면 후보를 넉넉히(40건) 읽고 걸러 8건까지.
 // 도박·카지노 광고 같은 스팸 제목은 어느 검색이든 뺀다.
 async function googleNews(query, ko, recentDays = 0, keep = null) {
@@ -284,6 +301,8 @@ async function googleNews(query, ko, recentDays = 0, keep = null) {
     out = out.filter((it) => it.pubMs == null || it.pubMs >= cutoff);
   }
   out.sort((a, b) => (b.pubMs || 0) - (a.pubMs || 0));
+  out = out.filter((it, i) => !out.slice(0, i).some((p) => sameStory(p.title, it.title)));
+  out = [...out.filter((it) => !priceOnly(it.title)), ...out.filter((it) => priceOnly(it.title))];
   return out.slice(0, 8);
 }
 
@@ -359,12 +378,14 @@ export const PRICE_ONLY = [
   /^[^\s,…·]+\s(?:장중|장\s?초반|오전|오후)\s*[\d.]+%대?\s*(?:상승|하락|강세|약세|급등|급락)(?:\s*중|세)?$/,
   /^\S+(?:\s\S+){0,3}\s주가\s*[\d,]+원\s*(?:상승|하락|보합)\s*(?:후\s*)?장\s?마감$/,
   /^(?:\[특징주\]\s*)?[^\s,…·]+(?:\s[^\s,…·]+)?,?\s장중\s*[\d.]+%대?\s*(?:상승|하락|강세|약세)(?:하며)?\s*[\d만,.]+원\s*기록/,
+  /^[^\s,…·]+(?:\s[^\s,…·]+)?,?\s장중\s*[\d.]+%대?\s*(?:상승|하락)해\s*[\d만,.]+원$/,
   /^\S+(?:\s\S+){0,3}\s거래량\s*[\d.]+%\s*(?:증가|감소)/,
 ];
 export const priceOnly = (title) => PRICE_ONLY.some((re) => re.test(String(title ?? '').trim()));
 // 이유로 쓸 뉴스 고르기(급등락 기록) — docs/app.js의 pickReasonNews와 같게 유지(자체 테스트가 비교).
 // 시세 안내·상품 상장 공지('…ELW 224종 상장')·방향이 반대인 기사('15% 급등' 기사인데 오늘은 하락 — 이유일 수 없음)는 빼고
-// ① 그날 나온 같은 방향의 [특징주] → ② 그 밖의 기사 → ③ 여러 종목 나열·'[오늘의 …]' 모음 순. 같은 등급 안에서는 최신순.
+// ① 그날 나온 같은 방향의 [특징주] → ② 같은 방향 기사 → ③ 방향을 알 수 없는 기사 → ④ 여러 종목 나열·'[오늘의 …]' 모음·리포트 요약 순.
+// 같은 등급 안에서는 최신순. 방향은 제목의 오름·내림 말, 없으면 호재·악재 태그(내린 날의 '수주 1조 돌파' 같은 호재 기사는 이유 아님).
 export const LISTING_RE = /(ELW|ETN|ETF|리츠|스팩)[^…]{0,30}상장|신규\s*상장/;
 const UP_RE = /상승|강세|급등|반등|↑|오름|올라|치솟|폭등|상한가|신고가/;
 const DOWN_RE = /하락|약세|급락|↓|내림|내려|떨어|폭락|하한가|신저가|주춤|추락/;
@@ -382,13 +403,25 @@ function nameDir(t, names) {
   }
   return titleDir(t);
 }
+// 증권사 리포트 요약('[리포트 브리핑]심텍, … 목표가 180,000원 - 교보증권') — 목표가와 함께 나와 대개 좋은 쪽이라 나쁜 말이 없으면 오름으로 본다
+const REPORT_RE = /^\[리포트\s?브리핑\]|목표가\s*[\d,]+\s*원/;
+// '소식에도'·'불구'처럼 거스르는 말이 있으면 호재·악재 낱말로 방향을 짐작하지 않는다
+const CONTRA_RE = /에도[\s,.…'"‘’“”]|에도$|불구|무색/;
+// 기사가 가리키는 그 종목의 방향 — ① 이름 뒤·제목의 오름·내림 말 ② 없으면 호재·악재 태그 ③ 리포트 요약은 좋은 쪽
+function newsDir(it, names) {
+  const d = nameDir(it.title, names);
+  if (d) return d;
+  if (CONTRA_RE.test(it.title)) return 0;
+  const tone = it.sentiment && it.sentiment.tone;
+  return tone === 'pos' ? 1 : tone === 'neg' ? -1 : REPORT_RE.test(it.title) ? 1 : 0;
+}
 // items: 최신순 뉴스, pct: 그날 등락률, day: 그 시장 현지 날짜(YYYYMMDD), ymd(ms): 같은 기준의 날짜 함수, names: 종목 이름들
 export function pickReasonNews(items, pct, day, ymd, names = []) {
   const s = Math.sign(Number(pct) || 0);
-  const dir = (t) => nameDir(t, names);
-  const tier = (it) => (/\[특징주\]/.test(it.title) && s && dir(it.title) === s && Number.isFinite(it.pubMs) && ymd(it.pubMs) === day ? 0
-    : roundupTitle(it.title) ? 2 : 1);
-  return (Array.isArray(items) ? items : []).filter((it) => it && it.title && !priceOnly(it.title) && !LISTING_RE.test(it.title) && !(s && dir(it.title) === -s))
+  const dir = (it) => newsDir(it, names);
+  const tier = (it) => (/\[특징주\]/.test(it.title) && s && dir(it) === s && Number.isFinite(it.pubMs) && ymd(it.pubMs) === day ? 0
+    : roundupTitle(it.title) || REPORT_RE.test(it.title) ? 3 : s && dir(it) === s ? 1 : 2);
+  return (Array.isArray(items) ? items : []).filter((it) => it && it.title && !priceOnly(it.title) && !LISTING_RE.test(it.title) && !(s && dir(it) === -s))
     .map((it, i) => [tier(it), i, it]).sort((a, b) => a[0] - b[0] || a[1] - b[1])[0]?.[2] || null;
 }
 
