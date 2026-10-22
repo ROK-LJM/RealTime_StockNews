@@ -260,27 +260,34 @@ export function tagSentiment(text) {
   return { label, tone, score, keywords: [...new Set([...hits.pos, ...hits.neg])].slice(0, 4) };
 }
 
-// 같은 기사가 매체·제목 꼬리만 바꿔 거듭 실린 것('…추진선 건조…11월 초 인도' / '…추진선 건조') — 괄호 꼬리표·문장부호를 뺀
-// 글자쌍이 짧은 쪽 기준 90% 넘게 겹치면 같은 기사(실측 10/22: 같은 기사 1.0, 날짜만 다른 시세 안내 0.6~0.8, 매체만 다른 같은 소식 0.7)
-const titleGrams = (t) => {
-  const s = String(t ?? '').replace(/\[[^\]]*\]|\([^)]*\)|[\s'"‘’“”…·,.!?:\-–—|]/g, '').toLowerCase();
+// 같은 기사·같은 소식이 매체·표현만 바꿔 거듭 실린 것 — 괄호 꼬리표·문장부호를 빼고(종목 뉴스는 종목 이름·별칭 keys도 빼고)
+// 글자쌍이 짧은 쪽 기준으로 겹치는 비율. 이름을 뺀 한글 제목은 70%, 영문(흔한 낱말이 많아 'Why … rising today'/'… falling today'도 0.84)과
+// 이름 정보가 없는 지수 뉴스는 90%. 방향 말·호재·악재가 서로 반대면 글자가 비슷해도 다른 기사.
+// 실측 10/22: 같은 소식('…추진선 건조…11월 초 인도' / '…테라 클로브호 오는 11월 인도') 0.7~0.8, 같은 재료의 다른 날 기사 0.47
+const squashTitle = (t) => String(t ?? '').replace(/\[[^\]]*\]|\([^)]*\)|[\s'"‘’“”…·,.!?:\-–—|]/g, '').toLowerCase();
+const titleGrams = (t, keys = []) => {
+  let s = squashTitle(t);
+  for (const k of keys.map(squashTitle).filter((x) => x.length >= 2).sort((x, y) => y.length - x.length)) s = s.split(k).join('|');
   const g = new Set();
   for (let i = 0; i < s.length - 1; i++) g.add(s.slice(i, i + 2));
   return g;
 };
-export function sameStory(a, b) {
-  const A = titleGrams(a), B = titleGrams(b);
+export function sameStory(a, b, keys = []) {
+  const A = titleGrams(a, keys), B = titleGrams(b, keys);
   if (A.size < 4 || B.size < 4) return String(a ?? '').trim() === String(b ?? '').trim();
+  const da = titleDir(String(a ?? '')), db = titleDir(String(b ?? '')), ta = tagSentiment(a).tone, tb = tagSentiment(b).tone;
+  if ((da && db && da !== db) || (ta !== tb && ta !== 'neutral' && tb !== 'neutral')) return false;
   let k = 0;
   for (const x of A) if (B.has(x)) k++;
-  return k / Math.min(A.size, B.size) >= 0.9;
+  const need = keys.length && !/^[\x00-\x7f]*$/.test(`${a}${b}`) ? 0.7 : 0.9;
+  return k / Math.min(A.size, B.size) >= need;
 }
 
 // recentDays>0 이면 최근 N일 뉴스만(구글 when: 연산자 + pubDate 필터), 최신순 정렬.
-// 같은 기사는 최신 하나만, 시세 안내 기사는 뒤로 — 8건 안에 서로 다른 실제 뉴스가 먼저 들어가게(카드·AI 입력 모두)
+// 같은 기사·같은 소식은 최신 하나만(keys: 종목 이름·별칭 — 빼고 비교), 시세 안내 기사는 뒤로 — 8건 안에 서로 다른 실제 뉴스가 먼저(카드·AI 입력 모두)
 // keep(title): 남길 기사 판정(종목 뉴스의 관련도 필터). 주면 후보를 넉넉히(40건) 읽고 걸러 8건까지.
 // 도박·카지노 광고 같은 스팸 제목은 어느 검색이든 뺀다.
-async function googleNews(query, ko, recentDays = 0, keep = null) {
+async function googleNews(query, ko, recentDays = 0, keep = null, keys = []) {
   const hl = ko ? 'ko' : 'en-US', gl = ko ? 'KR' : 'US', ceid = ko ? 'KR:ko' : 'US:en';
   const q = recentDays > 0 ? `${query} when:${recentDays}d` : query;
   const xml = await http(`https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=${hl}&gl=${gl}&ceid=${ceid}`, { as: 'text' });
@@ -301,7 +308,7 @@ async function googleNews(query, ko, recentDays = 0, keep = null) {
     out = out.filter((it) => it.pubMs == null || it.pubMs >= cutoff);
   }
   out.sort((a, b) => (b.pubMs || 0) - (a.pubMs || 0));
-  out = out.filter((it, i) => !out.slice(0, i).some((p) => sameStory(p.title, it.title)));
+  out = out.filter((it, i) => !out.slice(0, i).some((p) => sameStory(p.title, it.title, keys)));
   out = [...out.filter((it) => !priceOnly(it.title)), ...out.filter((it) => priceOnly(it.title))];
   return out.slice(0, 8);
 }
@@ -375,7 +382,7 @@ export function isRelevantNews(title, item, keys = newsKeys(item)) {
 export const PRICE_ONLY = [
   /주가,?\s*\d{1,2}월\s*\d{1,2}일\s*(?:장중|장\s?마감|애프터마켓|프리마켓|시간외|오전|오후)?\s*[\d,.]+원\s*[\d.]+%\s*(?:상승|하락|보합)$/,
   /^\S+(?:\s\S+){0,3}\s주가\s*(?:상승|하락|강세|약세|보합)\s*중$/,
-  /^[^\s,…·]+\s(?:장중|장\s?초반|오전|오후)\s*[\d.]+%대?\s*(?:상승|하락|강세|약세|급등|급락)(?:\s*중|세)?$/,
+  /^[^\s,…·]+,?\s(?:\d{1,2}일\s*)?(?:장중|장\s?초반|오전|오후)\s*[\d.]+%대?\s*(?:상승|하락|강세|약세|급등|급락)(?:\s*중|세)?$/,
   /^\S+(?:\s\S+){0,3}\s주가\s*[\d,]+원\s*(?:상승|하락|보합)\s*(?:후\s*)?장\s?마감$/,
   /^(?:\[특징주\]\s*)?[^\s,…·]+(?:\s[^\s,…·]+)?,?\s장중\s*[\d.]+%대?\s*(?:상승|하락|강세|약세)(?:하며)?\s*[\d만,.]+원\s*기록/,
   /^[^\s,…·]+(?:\s[^\s,…·]+)?,?\s장중\s*[\d.]+%대?\s*(?:상승|하락)해\s*[\d만,.]+원$/,
@@ -438,8 +445,8 @@ export async function getNews(item) {
     const keys = newsKeys(it);
     const keep = (title) => isRelevantNews(title, it, keys);
     const items = market === 'KR'
-      ? await googleNews(`${krBaseName(item.name || code, code)} 주가`, true, 2, keep)
-      : await googleNews(`${item.name || code} ${code} stock`, false, 2, keep);
+      ? await googleNews(`${krBaseName(item.name || code, code)} 주가`, true, 2, keep, keys)
+      : await googleNews(`${item.name || code} ${code} stock`, false, 2, keep, keys);
     // 시세 안내 기사의 '상승·하락'은 가격 설명일 뿐 호재·악재가 아니다 — '시세' 표시로 바꾸고 호재·악재 집계에서 뺀다
     for (const it of items) if (priceOnly(it.title)) it.sentiment = { label: '시세', tone: 'neutral', score: 0, keywords: [] };
     let pos = 0, neg = 0;

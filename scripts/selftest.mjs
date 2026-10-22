@@ -903,6 +903,25 @@ await test('뉴스 목록(18차): 같은 기사(제목 꼬리만 다름)는 최�
   assert.equal(src.sameStory('[특징주] 삼성E&A, 자사주 소각', '삼성E&A, 자사주 소각'), true, '머리 꼬리표는 빼고 비교');
   assert.equal(src.sameStory('AB', 'AB'), true);
   assert.equal(src.sameStory('AB', 'CD'), false);
+  // 19차: 종목 이름·별칭을 빼고 보면 표현만 다른 같은 소식도 잡힌다(한글 70%) — 실제 제목(2026-10-22)
+  const hd = src.newsKeys({ code: '329180', market: 'KR', name: 'HD현대중공업' });
+  assert.equal(src.sameStory("HD현대중공업, 세계 최대 암모니아 추진선 건조…'테라 클로브호' 오는 11월 인도", 'HD현대중공업, 세계 최대 암모니아 추진선 건조…11월 초 인도', hd), true);
+  assert.equal(src.sameStory('HD현대중공업, 세계 최대 암모니아 추진선 건조…11월 초 인도', 'HD현대중공업, 세계 최대 암모니아 추진선 건조…"탈탄소 선도"', hd), true);
+  const lg = src.newsKeys({ code: '066570', market: 'KR', name: 'LG전자' });
+  assert.equal(src.sameStory("LG전자, AI 시스템 에어컨 '멀티 브이 7' 첫 공개", 'LG전자, 듀얼 AI 탑재한 시스템 에어컨 ‘멀티 브이 7’ 공개', lg), true, '이름을 빼면 같은 소식');
+  const skt = src.newsKeys({ code: '017670', market: 'KR', name: 'SK텔레콤' });
+  assert.equal(src.sameStory('[기업 생생소식] SK텔레콤·금감원, 금융의 날 앞두고 보이스피싱 피해 예방 나서 外', 'SK텔레콤, 금감원과 보이스피싱 피해예방 활동 나서', skt), true);
+  const sem = src.newsKeys({ code: '009150', market: 'KR', name: '삼성전기' });
+  assert.equal(src.sameStory("[특징주] 삼성전기, 엔비디아와 파트너십 구축 소식에도 '하락'", '[특징주] 삼성전기, 엔비디아와 전략적 파트너십에 강세…장중 123만원대', sem), false, '같은 재료라도 다른 날·다른 방향 기사');
+  const sbl = src.newsKeys({ code: '207940', market: 'KR', name: '삼성바이오로직스' });
+  assert.equal(src.sameStory('삼성바이오로직스, 美 공장 증설', '삼성바이오로직스, 4공장 가동', sbl), false, '긴 종목 이름이 겹치는 것만으로 같은 기사가 되지 않게 이름은 빼고 비교');
+  const sec = src.newsKeys({ code: '005930', market: 'KR', name: '삼성전자' });
+  assert.equal(src.sameStory('삼성전자, 3분기 실적 발표 앞두고 외국인 순매수에 2% 상승', '삼성전자, 3분기 실적 발표 앞두고 외국인 순매도에 2% 하락', sec), false, '방향이 반대면 글자가 비슷해도 다른 기사');
+  assert.equal(src.sameStory('삼성전자 주가 상승 중', '삼성전자 주가 하락 중', sec), false);
+  const nv = src.newsKeys({ code: 'NVDA', market: 'US', name: '엔비디아', en: 'NVIDIA Corporation' });
+  assert.equal(src.sameStory('Why Nvidia stock is rising today', 'Why Nvidia stock is falling today', nv), false, '영문은 90% — 흔한 낱말이 많아 반대 뜻도 0.84');
+  const tsm = src.newsKeys({ code: 'TSM', market: 'US', name: 'TSMC', en: 'Taiwan Semiconductor Manufacturing Company Limited' });
+  assert.equal(src.sameStory('Needham raises target for TSMC stock from USD 530 to USD 560', 'Barclays raises target for TSM stock from USD 665.00 to USD 670.00', tsm), false, '다른 증권사 기사');
   const root = workspace();
   const news = (m, u) => {
     const name = queryName(u).split(' ')[0], now = Date.now();
@@ -911,6 +930,7 @@ await test('뉴스 목록(18차): 같은 기사(제목 꼬리만 다름)는 최�
       item(`${name} 주가, 10월 15일 장중 70,000원 4.20% 상승`, 10),
       item(`${name}, 세계 최대 암모니아 추진선 건조…11월 초 인도`, 20),
       item(`${name}, 세계 최대 암모니아 추진선 건조`, 30),
+      item(`${name}, 세계 최대급 암모니아 추진선 ‘테라 클로브’ 공개`, 35), // 이름을 빼야 같은 소식(이름째로는 0.81)
       item(`${name}, 세계 최대 암모니아 추진선 건조…11월 초 인도`, 40),
       item(`${name}, 대규모 수주 소식에 급등`, 50),
     ].join('')}</channel></rss>`);
@@ -918,7 +938,7 @@ await test('뉴스 목록(18차): 같은 기사(제목 꼬리만 다름)는 최�
   await pipeline(root, { news });
   const d = read(root, 'news.json')['005930'];
   assert.deepEqual(d.items.map((x) => x.title), ['삼성전자, 세계 최대 암모니아 추진선 건조…11월 초 인도', '삼성전자, 대규모 수주 소식에 급등', '삼성전자 주가, 10월 15일 장중 70,000원 4.20% 상승'],
-    '같은 기사 3건 → 최신 1건, 가장 최근이어도 시세 안내는 맨 뒤');
+    '같은 소식 4건(표현만 다른 것 포함 — 종목 이름을 빼고 비교) → 최신 1건, 가장 최근이어도 시세 안내는 맨 뒤');
   assert.equal(d.items.at(-1).sentiment.label, '시세');
 });
 await test('수급 날짜: AI 입력에 오늘 값인지 전 거래일 확정치인지 밝힘(장중엔 전날 값 — 오늘 원인으로 오해 방지)', async () => {
@@ -1085,7 +1105,7 @@ const PRICE_ONLY_YES = ['SK하이닉스 주가, 10월 22일 장중 1,281,000원 
   'SK텔레콤 주가, 10월 21일 애프터마켓 77,300원 0.00% 보합', 'LG에너지솔루션 주가, 10월 21일 411,500원 0.60% 하락', '현대중공업 주가 하락 중',
   '슈퍼 마이크로 컴퓨터 주가 상승 중', 'HD건설기계 장중 3%대 상승', '현대중공업 주가 2,000원 상승 후 장마감', '한화솔루션 주가 50원 하락 후 장마감',
   '[특징주] 한화솔루션 장중 2%대 강세 3만1450원 기록 : 기업주식정보', 'SK텔레콤 거래량 13.6% 감소…20일 65만2578주',
-  '[특징주] 한미반도체, 장중 1%대 상승하며 20만2000원 기록 : 기업주식정보', '두산에너빌리티 장중 1.57% 하락해 6만2500원'];
+  '[특징주] 한미반도체, 장중 1%대 상승하며 20만2000원 기록 : 기업주식정보', '두산에너빌리티 장중 1.57% 하락해 6만2500원', 'LG전자, 22일 장중 2%대 하락'];
 const PRICE_ONLY_NO = ['영업이익 추정치 웃돈 파두…주가는 장중 6.75% 하락', '삼성전기 주가 3.08% 상승…엔비디아 기판 생산능력 확대에 공급 수혜 기대',
   '호실적에 자사주 소각까지…삼성E&A 15% 상승세 [특징주]', '[장중수급포착] 대덕전자, 기관 8일 연속 순매수행진... 주가 +4.24%',
   '[개장시황] 삼성전기 5.05% 급등…코스피 차익매물에 하락 출발', 'Why Super Micro Computer Stock Popped Today', '수주 기대감에 장중 3%대 상승',
