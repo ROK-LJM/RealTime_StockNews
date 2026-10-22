@@ -725,6 +725,30 @@ await test('미국 시간외(파이프라인): 애프터마켓에 받아 정규�
   assert.equal(callsTo(/interval=5m/), 0);
   assert.ok(!('ext' in read(open, 'quotes.json').quotes.find((x) => x.code === 'AAPL')), '장중엔 시간외 없음');
 });
+await test('과거 시세: 최근 봉이 빠진 응답(야후 매일 밤 UTC 자정 무렵)은 직전 봉으로 보완 · 4일 넘게 모자라면 직전 것 유지 · 새 봉이 오면 새 값', async () => {
+  const day = (ms) => new Date(ms).toISOString().slice(0, 10);
+  const series = (endDay, base) => { // endDay까지 평일 130개 일봉, 종가 = base + 순번
+    const ts = []; let t = Date.parse(`${endDay}T13:30:00Z`);
+    while (ts.length < 130) { const wd = new Date(t).getUTCDay(); if (wd !== 0 && wd !== 6) ts.unshift(t / 1000); t -= 86400e3; }
+    return { chart: { result: [{ meta: { regularMarketPrice: base }, timestamp: ts, indicators: { quote: [{ close: ts.map((_, i) => base + i) }] } }] } };
+  };
+  const yahoo = (endDay, base) => (m, u) => {
+    const sym = decodeURIComponent(m[1]);
+    if (/range=6mo/.test(u)) return json(series(endDay, base));
+    if (/interval=5m/.test(u)) return json({ chart: { result: [{ meta: {}, timestamp: [], indicators: { quote: [{ close: [] }] } }] } });
+    return json(yahooChart(sym));
+  };
+  const root = workspace();
+  const tail = () => { const h = read(root, 'history.json').AAPL; return { n: h.closes.length, last: day(h.dates.at(-1)), lastClose: h.closes.at(-1), prevClose: h.closes.at(-2) }; };
+  await pipeline(root, { yahoo: yahoo('2026-10-21', 100) });
+  assert.deepEqual(tail(), { n: 130, last: '2026-10-21', lastClose: 229, prevClose: 228 });
+  await pipeline(root, { yahoo: yahoo('2026-10-20', 200) }, NOW_KR + 5 * MIN);   // 마지막 날(10/21) 봉이 빠진 응답
+  assert.deepEqual(tail(), { n: 131, last: '2026-10-21', lastClose: 229, prevClose: 329 }, '10/21 봉은 직전 값, 겹치는 10/20은 새 값');
+  await pipeline(root, { yahoo: yahoo('2026-10-15', 300) }, NOW_KR + 10 * MIN);  // 4거래일 넘게 모자란 응답 → 깨진 것으로 보고 직전 것
+  assert.deepEqual(tail(), { n: 131, last: '2026-10-21', lastClose: 229, prevClose: 329 });
+  await pipeline(root, { yahoo: yahoo('2026-10-22', 400) }, NOW_KR + 15 * MIN);  // 새 날 봉이 들어오면 새 값 그대로
+  assert.deepEqual(tail(), { n: 130, last: '2026-10-22', lastClose: 529, prevClose: 528 });
+});
 await test('뉴스 관련도: 우선주는 보통주 이름 · 영문 핵심 이름 · 별칭 · 미국 티커(대문자 단어) · 무관 기사·도박 스팸 제외', () => {
   assert.deepEqual([src.krBaseName('LG전자우', '066575'), src.krBaseName('현대차2우B', '005387'), src.krBaseName('삼성전자', '005930')], ['LG전자', '현대차', '삼성전자']);
   assert.deepEqual(['Tesla, Inc.', 'Amazon.com, Inc.', 'Super Micro Computer, Inc.', 'Taiwan Semiconductor Manufacturing Company Ltd.', 'Space Exploration Technologies Corp. Class A', 'NVIDIA Corporation']

@@ -165,7 +165,24 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
 
   // 3) 종목별 과거 시세(일봉 6개월) — 등락 차트 + 예측 입력
   try {
-    await collect('history', '과거시세', 'history.json', (v) => isObj(v) && Array.isArray(v.closes) && v.closes.length >= 2, getHistory, history);
+    const isHist = (v) => isObj(v) && Array.isArray(v.closes) && Array.isArray(v.dates) && v.closes.length >= 2 && v.dates.length === v.closes.length;
+    const prevHist = readJson('history.json') || {};
+    await collect('history', '과거시세', 'history.json', isHist, getHistory, history);
+    // 야후 일봉은 매일 밤(UTC 자정, 한국 09시 무렵) 미국 종목의 마지막 날 봉을 30분~2시간 빠뜨린다(실측 10/15~10/22 매일) —
+    // 그대로 쓰면 그 사이 기간 수익률·차트·예측이 전전날 종가 기준이 된다. 새로 받은 게 직전 것보다 최근 1~3일이 모자라면
+    // 직전의 그 봉을 이어 붙이고, 그보다 많이 모자라면 깨진 응답으로 보고 직전 것을 그대로 쓴다(겹치는 날은 새 값 우선).
+    let patched = 0;
+    for (const [code, h] of Object.entries(history)) {
+      const p = prevHist[code];
+      if (h === p || !isHist(p) || !isHist(h)) continue;
+      const last = h.dates[h.dates.length - 1];
+      const newer = p.dates.map((d, i) => [d, p.closes[i]]).filter(([d]) => d > last);
+      if (!newer.length) continue;
+      history[code] = newer.length > 3 ? p
+        : { ...h, dates: [...h.dates, ...newer.map((x) => x[0])], closes: [...h.closes, ...newer.map((x) => x[1])] };
+      patched++;
+    }
+    if (patched) console.log(`  · 과거시세: 최근 봉이 빠진 응답 ${patched}건 — 직전 값으로 보완`);
     if (Object.keys(history).length) write('history.json', history);
     else console.warn('  ! 과거시세 전부 비어 있음 — history.json 유지');
   } catch (e) { console.error('  ✗ 과거시세 실패 — history.json 유지:', e.message); }
