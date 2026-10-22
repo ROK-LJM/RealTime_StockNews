@@ -11,7 +11,7 @@ const $ = (s) => document.querySelector(s);
 // loadedOnce: 한 번이라도 시세를 그렸는지. 이후의 일시적 로드 실패로 화면을 비우지 않기 위한 표시.
 // sort: 카드 순서('mine' 내 순서 | 'move' 등락 큰 순, 이 기기에 기억). whyAll: '왜 움직였나' 전체 펼침. data: 마지막으로 받은 quotes.json
 const state = { timer: null, intervalSec: 60, hist: {}, news: {}, inv: {}, analysis: {}, disc: {}, openAnalysis: new Set(), loadedOnce: false,
-  sort: 'mine', view: 'full', whyAll: false, data: null, market: null, moves: {}, briefOpen: new Map() };
+  sort: 'mine', view: 'full', whyAll: false, data: null, market: null, moves: {}, status: null, briefOpen: new Map() };
 
 // ---------- 포맷 ----------
 function fmtPrice(q) {
@@ -584,6 +584,18 @@ function vsMarket(q, indices) {
   return { ...b, diff, follows: Math.abs(b.pct) >= 1 && Math.sign(q.changePct) === Math.sign(b.pct) && Math.abs(diff) < 1 };
 }
 
+// 급등락 카드에 AI 종합분석이 아직 없을 때 [지금 상태, 이유] — status.json의 AI 상태 기준(키가 없으면 안내 안 함).
+// next: '12:10부터'·'곧'처럼 다음 분석 시각(순서 대기일 때)
+function aiWaitText(ai, next = '') {
+  const st = ai && ai.state;
+  if (!st || st === 'off') return null;
+  if (st === 'wait') return [next ? `대기 중 — 다음 분석 ${next}` : '대기 중 — 순서 기다리는 중', '무료 한도를 장 시간에 나눠 쓰는 중'];
+  if (st === 'quota') return ['쉬는 중 — 오늘 무료 한도를 다 씀', '풀리면 자동으로 다시'];
+  if (st === 'auth' || st === 'no-model') return ['멈춤 — AI 설정 확인 필요', '화면 아래 AI 상태 참고'];
+  if (st === 'error') return ['대기 중 — AI 응답 오류', '다음 갱신 때 다시 시도'];
+  return ['곧 분석', '한 번에 몇 종목씩, 약 5분 간격'];
+}
+
 // ---------- 데이터 지연 경고 ----------
 // 수집 봇(5분 간격)이 멈추거나 시세 출처가 막혀도 화면은 마지막 값을 그대로 보여준다 — 장중인데 오래 그대로면 알린다.
 //  ① 시세가 '장중'인데 마지막 시각이 45분 넘게 지남. 국내는 15:30~16:00 체결이 없어 정상이어도 26분까지 벌어진다(실측).
@@ -856,7 +868,12 @@ function renderDisc(q, data) {
 function renderAnalysis(q, data) {
   const el = document.getElementById('analysis-' + cssId(q.code));
   if (!el) return;
-  if (!data || !data.headline) { el.innerHTML = ''; return; } // 분석은 변동 큰 종목에만 생성됨
+  if (!data || !data.headline) { // 분석은 변동 큰 종목(±2%)에만 생성됨 — 그런 종목인데 아직 없으면 왜 없는지 한 줄
+    const ai = state.status?.ai, nx = ai && ai.state === 'wait' ? fmtNextAt(ai.next) : '';
+    const w = q.ok && Math.abs(q.changePct ?? 0) >= WHY_MIN ? aiWaitText(ai, nx === '곧' ? '곧' : nx ? `${nx}부터` : '') : null;
+    el.innerHTML = w ? `<div class="an-wait"><span class="an-badge">AI 종합분석</span><span class="aw"><span>${esc(w[0])}</span> <span>(${esc(w[1])})</span></span></div>` : '';
+    return;
+  }
   const dirCls = (q.changePct ?? 0) < 0 ? 'down' : (q.changePct ?? 0) > 0 ? 'up' : 'flat';
   const factors = (data.factors || []).map((f) => `<li>${esc(f)}</li>`).join('');
   const detail = `${data.summary ? `<p class="an-summary">${esc(data.summary)}</p>` : ''}`
@@ -1029,6 +1046,7 @@ async function loadStatus() {
   if (!el) return;
   try {
     const st = await loadData('status.json');
+    state.status = st;
     // 공시 수집이 멈췄으면(키 오류·하루 한도 초과·점검) 이유를 한 줄로 — 정상('ok')이거나 키가 없으면(값 없음) 숨김
     if (dEl) {
       const d = st?.dart;
@@ -1058,8 +1076,8 @@ async function loadStatus() {
 
 async function tick() {
   await loadManifest(); // 지문 먼저(작음) — 바뀐 파일만 받는다
-  loadStatus().catch(() => {});
-  await loadMarket().catch((e) => console.warn('시장 갱신 실패:', e)); // 지수 먼저 — 카드·'한눈에'의 시장 대비가 같은 회차 지수를 쓰게
+  // AI 상태·지수를 먼저(작은 파일) — 카드의 'AI 분석 대기' 안내와 시장 대비가 같은 회차 값을 쓰게
+  await Promise.all([loadStatus().catch(() => {}), loadMarket().catch((e) => console.warn('시장 갱신 실패:', e))]);
   loadQuotes().catch((e) => console.warn('종목 갱신 실패:', e));
 }
 function restartTimer() {

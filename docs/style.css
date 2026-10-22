@@ -345,6 +345,10 @@ input::placeholder { color: var(--muted); }
 .an-caret .ic { width: 16px; height: 16px; transition: transform .15s; }
 .analysis.open .an-caret .ic { transform: rotate(180deg); }
 .an-detail { padding: 4px 12px 2px; }
+/* 급등락인데 AI 종합분석이 아직 없을 때 — 왜 없는지 한 줄(회색) */
+.an-wait { display: flex; align-items: flex-start; gap: 10px; padding: 9px 12px; border-radius: 10px; background: var(--surface-2); color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+.an-wait .an-badge { color: var(--muted); }
+.an-wait .aw > span { display: inline-block; } /* 상태·이유를 덩어리째 줄바꿈 */
 .an-summary { margin: 8px 0; font-size: 13.5px; line-height: 1.6; }
 .an-factors { margin: 8px 0; padding-left: 18px; }
 .an-factors li { margin: 3px 0; font-size: 13px; line-height: 1.55; }
@@ -389,6 +393,12 @@ input::placeholder { color: var(--muted); }
 .news-item a:hover { text-decoration: underline; }
 .news-time { flex-shrink: 0; font-size: 11.5px; color: var(--muted); }
 .kw { font-size: 11.5px; color: var(--muted); }
+/* 터치 화면 — 뉴스·공시·근거 뉴스는 제목 글자만이 아니라 그 줄 어디를 눌러도 열리게(마우스 화면은 제목만) */
+@media (pointer: coarse) {
+  .news-item, .ai-item { position: relative; }
+  .news-item a::after, .ai-item a::after { content: ''; position: absolute; inset: 0; }
+  .ai-items-d > summary { padding: 6px 0; }
+}
 /* 뉴스 태그도 한국식 — 호재 빨강 · 악재 파랑, 공시는 영향 큰 종류 주황 · 위험 빨강 */
 .tag { flex-shrink: 0; margin-top: 1px; padding: 0 5px; border-radius: 4px; font-size: 11px; font-weight: 700; line-height: 18px; white-space: nowrap; }
 .tag.pos { background: rgba(var(--up-rgb), .1); color: var(--up); }
@@ -521,13 +531,22 @@ input::placeholder { color: var(--muted); }
   .controls { gap: 2px; }
   .clock { margin-right: 4px; }
   .icon-btn { min-width: 32px; padding: 0 6px; }
-  /* 분위기는 세로로, 지수 세 묶음은 한 열로 */
-  .mood { display: flex; align-items: stretch; padding: 14px 16px; }
+  /* 첫 화면에 '한눈에'가 더 보이게 시장 영역을 줄인다(524 → 약 350px).
+     분위기는 점수 | 막대 두 칸(중간 폭과 같은 배치)에 요약만 아래 한 줄 */
+  .mood { gap: 2px 16px; padding: 12px 14px 10px; }
   .mood-score { font-size: 28px; }
-  .indices { grid-template-columns: 1fr; }
-  .idx-group { padding: 10px 16px; border-left: 0; }
-  .idx-group + .idx-group { border-top: 1px solid var(--line); }
-  .idx-row { padding: 6px 0; }
+  .mood-summary { grid-column: 1 / -1; grid-row: 4; margin-top: 4px; }
+  /* 지수·환율 일곱 개는 두 칸 바둑판 — 묶음 이름 대신 지수 이름으로 구분, 등락폭은 빼고 %만 */
+  .indices { grid-template-columns: 1fr 1fr; gap: 6px; padding: 0 14px 14px; border-top: 0; }
+  .indices > .muted { padding: 8px 0; }
+  .idx-group { display: contents; }
+  .idx-gt { display: none; }
+  .idx-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "nm pc" "pv pv"; gap: 0 6px; padding: 7px 10px;
+    border: 0; border-radius: 10px; background: var(--surface-2); }
+  .idx-row .nm { grid-area: nm; font-size: 12.5px; }
+  .idx-row .pv { grid-area: pv; text-align: left; }
+  .idx-row .pc { grid-area: pc; min-width: 0; font-size: 12.5px; }
+  .idx-row .ch { display: none; }
   .board { padding: 14px 14px 10px; }
   .board-head h2 { font-size: 17px; }
   .bm { flex-basis: 100%; }

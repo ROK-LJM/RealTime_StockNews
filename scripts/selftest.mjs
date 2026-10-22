@@ -1146,6 +1146,23 @@ await test('시장 대비(app.js): 국내 코스피·코스닥 · 미국 나스�
   assert.equal(f.vsMarket({ ok: false, market: 'KR', exch: 'KOSPI', changePct: -2 }, idx), null);
   assert.equal(f.vsMarket({ ok: true, market: 'KR', exch: 'KOSPI', changePct: -2 }, [{ symbol: '^KQ11', changePct: -1 }]), null, '그 지수가 없으면 비교 안 함');
 });
+await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(`${block}; ({ aiWaitText })`, {});
+  const t = (ai, next) => { const w = f.aiWaitText(ai, next); return w && w.join(' | '); };
+  assert.equal(t({ state: 'wait' }, '12:10부터'), '대기 중 — 다음 분석 12:10부터 | 무료 한도를 장 시간에 나눠 쓰는 중');
+  assert.equal(t({ state: 'wait' }), '대기 중 — 순서 기다리는 중 | 무료 한도를 장 시간에 나눠 쓰는 중');
+  assert.match(t({ state: 'quota' }), /무료 한도를 다 씀/);
+  assert.match(t({ state: 'auth' }), /설정 확인/);
+  assert.match(t({ state: 'no-model' }), /설정 확인/);
+  assert.match(t({ state: 'error' }), /응답 오류/);
+  assert.match(t({ state: 'ok' }), /곧 분석/);
+  assert.match(t({ state: 'idle' }), /곧 분석/);
+  assert.equal(t({ state: 'off' }), null, 'AI 키가 없으면 안내 안 함');
+  assert.equal(t(null), null, '상태를 모르면 안내 안 함');
+});
 await test('상장 시장(quotes.json exch): 검색 목록의 국내 KOSPI·KOSDAQ · 미국 거래소 · 목록에 없으면 없음 · 시세 안내 기사는 "시세" 표시·호재/악재 집계 제외', async () => {
   const root = workspace();
   writeData(root, 'stocklist.json', { v: 2, kr: [['005930', '삼성전자', 'KOSPI', 1]], us: [['AAPL', '애플', 'Apple Inc.', 'NASDAQ', 1]], meta: {} });
