@@ -11,7 +11,7 @@ const $ = (s) => document.querySelector(s);
 // loadedOnce: 한 번이라도 시세를 그렸는지. 이후의 일시적 로드 실패로 화면을 비우지 않기 위한 표시.
 // sort: 카드 순서('mine' 내 순서 | 'move' 등락 큰 순, 이 기기에 기억). whyAll: '왜 움직였나' 전체 펼침. data: 마지막으로 받은 quotes.json
 const state = { timer: null, intervalSec: 60, hist: {}, news: {}, inv: {}, analysis: {}, disc: {}, openAnalysis: new Set(), loadedOnce: false,
-  sort: 'mine', view: 'full', whyAll: false, data: null, briefOpen: new Map() };
+  sort: 'mine', view: 'full', whyAll: false, data: null, market: null, moves: {}, briefOpen: new Map() };
 
 // ---------- 포맷 ----------
 function fmtPrice(q) {
@@ -76,6 +76,38 @@ async function loadJson(name) {
   const r = await fetch(`./data/${name}?t=${Date.now()}`, { cache: 'no-store' });
   if (!r.ok) throw new Error(name + ' ' + r.status);
   return r.json();
+}
+
+// ---------- 바뀐 파일만 받기 ----------
+// 봇이 회차마다 data/manifest.json에 파일별 내용 지문(sha1 앞 10자리)을 남긴다. 화면은 지문만 먼저 받고(1KB 미만)
+// 지문이 바뀐 파일만 '?v=지문' 주소로 받는다 — 같으면 이미 받은 것을 그대로 쓴다(1분 갱신 기준 매번 약 220KB → 평소 수 KB).
+// 지문 파일이 없거나(배포 직후·옛 데이터) 받은 내용이 지문과 다르면(배포 중 엇갈림) 그 파일은 예전처럼 매번 새로 받는다.
+const _files = new Map();     // 파일 이름 → { v: 지문, data }
+const _mismatch = new Set();  // 내용이 지문과 달랐던 '이름@지문' — 그 주소는 다시 쓰지 않는다(캐시에 틀린 내용이 남아 있을 수 있어서)
+let _manifest = null;
+async function loadManifest() {
+  try {
+    const r = await fetch(`./data/manifest.json?t=${Date.now()}`, { cache: 'no-store' });
+    const m = r.ok ? await r.json() : null;
+    _manifest = m && m.files && typeof m.files === 'object' ? m.files : null;
+  } catch { _manifest = null; }
+}
+async function sha1Hex(buf) {
+  const d = await crypto.subtle.digest('SHA-1', buf);
+  return Array.from(new Uint8Array(d), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+async function loadData(name) {
+  const v = _manifest && _manifest[name];
+  if (typeof v !== 'string' || !/^[0-9a-f]{8,40}$/.test(v) || _mismatch.has(`${name}@${v}`)) return loadJson(name);
+  const hit = _files.get(name);
+  if (hit && hit.v === v) return hit.data;
+  const r = await fetch(`./data/${name}?v=${v}`); // 주소에 지문이 들어 있어 캐시에서 와도 내용이 같다
+  if (!r.ok) throw new Error(name + ' ' + r.status);
+  const buf = await r.arrayBuffer();
+  if (globalThis.crypto?.subtle && !(await sha1Hex(buf)).startsWith(v)) { _mismatch.add(`${name}@${v}`); return loadJson(name); }
+  const data = JSON.parse(new TextDecoder().decode(buf));
+  _files.set(name, { v, data });
+  return data;
 }
 
 // ---------- 통계 / 예측 ----------
@@ -270,7 +302,8 @@ function attachHover(cv) {
 // ---------- 시장 분위기 + 지수 ----------
 async function loadMarket() {
   try {
-    const m = await loadJson('market.json');
+    const m = await loadData('market.json');
+    state.market = m;
     renderMood(m.mood || {});
     // 국내 / 미국 / 환율 세 묶음의 줄 목록 — 작은 카드 7개가 줄바꿈되며 하나만 남던 배치를 없애고, 휴대폰에서 높이를 절반으로.
     // 지수 변동폭은 '포인트'라 통화 기호를 붙이지 않는다(예전엔 미국 지수에 $가 붙었다).
@@ -293,6 +326,7 @@ async function loadMarket() {
     $('#indices').innerHTML = groups.map(([title, rows]) => `<div class="idx-group"><div class="idx-gt">${title}</div>${rows.join('')}</div>`).join('')
       || '<div class="muted">지수 데이터를 불러오지 못했습니다.</div>';
     try { renderBriefs(m.briefs); } catch (e) { console.warn('브리핑 렌더 실패:', e); } // 브리핑이 깨져도 게이지·지수는 유지
+    if (state.data) { try { renderBoard(orderedGroups(state.data.quotes || []), state.data.closed); } catch (e) { console.warn('한눈에 렌더 실패:', e); } } // 지수 비교 반영
   } catch (e) {
     $('#moodLabel').textContent = '시장 데이터 대기 중'; $('#moodSummary').textContent = '아직 데이터가 생성되지 않았을 수 있어요(첫 갱신 대기).';
   }
@@ -354,15 +388,16 @@ const isNarrow = () => window.matchMedia('(max-width: 720px)').matches;
 
 // ---------- 보유 종목 ----------
 async function loadQuotes() {
-  let data, news, hist, inv, analysis, disc;
+  let data, news, hist, inv, analysis, disc, moves;
   try {
-    [data, news, hist, inv, analysis, disc] = await Promise.all([
-      loadJson('quotes.json'),
-      loadJson('news.json').catch(() => ({})),
-      loadJson('history.json').catch(() => ({})),
-      loadJson('investors.json').catch(() => ({})),
-      loadJson('analysis.json').catch(() => ({})),
-      loadJson('disclosures.json').catch(() => ({})),
+    [data, news, hist, inv, analysis, disc, moves] = await Promise.all([
+      loadData('quotes.json'),
+      loadData('news.json').catch(() => ({})),
+      loadData('history.json').catch(() => ({})),
+      loadData('investors.json').catch(() => ({})),
+      loadData('analysis.json').catch(() => ({})),
+      loadData('disclosures.json').catch(() => ({})),
+      loadData('moves.json').catch(() => ({})),
     ]);
   } catch (e) {
     // 자동 새로고침 중 일시적 실패(5xx·오프라인 등)로 이미 그려진 화면을 지우지 않는다.
@@ -377,6 +412,7 @@ async function loadQuotes() {
   state.inv = inv || {};
   state.analysis = analysis || {};
   state.disc = disc || {};
+  state.moves = moves || {};
   state.data = data;
   const clock = $('#clock');
   if (clock) { // 좁은 화면에선 '확인' 글자를 숨겨 상단바를 한 줄로
@@ -397,14 +433,7 @@ function renderQuotes() {
   // 갱신 시각·장 상태는 시장마다 다르므로(국내 마감인데 미국은 장중 등) 그룹 헤더에서 각각 보여준다.
   $('#updated').textContent = `총 ${quotes.length}종목`;
 
-  // 국장·미장을 나눠 렌더 — 종목이 많아져도 한눈에 구분되도록.
-  const groups = {};
-  for (const q of quotes) { const m = marketOf(q); (groups[m] = groups[m] || []).push(q); }
-  const known = MARKET_GROUPS.map((g) => g.key);
-  // 예상하지 못한 시장 값이 들어와도 종목이 사라지지 않도록 별도 그룹으로 함께 표시한다.
-  const extra = Object.keys(groups).filter((k) => !known.includes(k)).map((k) => ({ key: k, label: k, hint: '' }));
-  const ordered = [...MARKET_GROUPS, ...extra].filter((g) => groups[g.key] && groups[g.key].length) // 빈 그룹은 헤더도 만들지 않음
-    .map((g) => ({ g, list: groups[g.key] }));
+  const ordered = orderedGroups(quotes);
   try { renderBoard(ordered, data.closed); } catch (e) { console.warn('한눈에 렌더 실패:', e); }
   // '등락 큰 순'이면 그룹 안에서 움직임이 큰 종목부터(같으면 원래 순서 유지, 수집 실패는 맨 뒤)
   const move = (q) => (q && q.ok ? Math.abs(q.changePct ?? 0) : -1);
@@ -431,6 +460,7 @@ function renderQuotes() {
   }
   for (const q of quotes) { try { renderAnalysis(q, state.analysis[q.code]); } catch (e) { console.warn('분석 렌더 실패:', q && q.code, e); } }
   for (const q of quotes) { try { renderDisc(q, state.disc[q.code]); } catch (e) { console.warn('공시 렌더 실패:', q && q.code, e); } }
+  for (const q of quotes) { try { renderMoves(q, state.moves[q.code]); } catch (e) { console.warn('급등락 기록 렌더 실패:', q && q.code, e); } }
   for (const q of quotes) { try { renderNews(q, state.news[q.code]); } catch (e) { console.warn('뉴스 렌더 실패:', q && q.code, e); } }
 }
 
@@ -441,6 +471,15 @@ const MARKET_GROUPS = [
 ];
 // market 값이 없어도 통화로 시장을 추정한다(카드 표시 로직과 동일 규칙).
 function marketOf(q) { return q.market || (q.currency === 'KRW' ? 'KR' : 'US'); }
+// 국장·미장을 나눠 렌더 — 종목이 많아져도 한눈에 구분되도록. 예상하지 못한 시장 값이 들어와도 종목이 사라지지 않게 별도 묶음으로.
+function orderedGroups(quotes) {
+  const groups = {};
+  for (const q of quotes) { const m = marketOf(q); (groups[m] = groups[m] || []).push(q); }
+  const known = MARKET_GROUPS.map((g) => g.key);
+  const extra = Object.keys(groups).filter((k) => !known.includes(k)).map((k) => ({ key: k, label: k, hint: '' }));
+  return [...MARKET_GROUPS, ...extra].filter((g) => groups[g.key] && groups[g.key].length) // 빈 묶음은 헤더도 만들지 않음
+    .map((g) => ({ g, list: groups[g.key] }));
+}
 
 // 그 시장의 마지막 시세 시각 — 오늘이면 '18:17', 아니면 '10/17 05:00'(짧게: 이름표가 한 줄에 들어가게)
 function lastTimeOf(list) {
@@ -449,6 +488,45 @@ function lastTimeOf(list) {
   const d = new Date(Math.max(...times));
   const hm = d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
   return d.toDateString() === new Date().toDateString() ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
+}
+
+// ---------- 시장 비교 · 6개월 신고가 · 지난 급등락 ----------
+// 시장 현지 날짜(YYYYMMDD) — 국내는 서울, 그 밖은 뉴욕 기준(봇의 급등락 기록 날짜와 같은 규칙)
+function marketYmd(ms, market) {
+  const tz = market === 'KR' ? 'Asia/Seoul' : 'America/New_York';
+  return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(ms).replace(/-/g, '');
+}
+// 내 종목 등락률의 단순 평균(보유 비중을 모르므로 종목마다 같은 무게) — 수집 실패·값 없는 종목은 뺀다
+function avgPct(list) {
+  const v = list.filter((q) => q && q.ok && Number.isFinite(q.changePct)).map((q) => q.changePct);
+  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+}
+// 같은 시장 지수(market.json의 기호) — '한눈에' 시장 머리에 내 종목 평균과 나란히
+const BENCH = { KR: [['^KS11', '코스피'], ['^KQ11', '코스닥']], US: [['^GSPC', 'S&P 500'], ['^IXIC', '나스닥']] };
+function benchOf(key, indices) {
+  return (BENCH[key] || []).map(([sym, name]) => (indices || []).find((i) => i && i.symbol === sym && Number.isFinite(i.changePct)))
+    .filter(Boolean).map((i) => ({ name: BENCH[key].find(([sym]) => sym === i.symbol)[1], pct: i.changePct }));
+}
+// 오늘 가격이 최근 6개월 종가(오늘 봉은 빼고) 중 가장 높으면 'high', 가장 낮으면 'low' — 차트와 같은 과거 시세 기준
+function sixMonthMark(q, h) {
+  const closes = h && Array.isArray(h.closes) ? h.closes : null;
+  if (!q || !q.ok || !(q.price > 0) || !closes) return null;
+  const at = +new Date(q.asOf), dates = Array.isArray(h.dates) ? h.dates : [];
+  const m = marketOf(q);
+  const lastIsToday = dates.length === closes.length && dates.length > 0 && Number.isFinite(at) && Number.isFinite(dates[dates.length - 1])
+    && marketYmd(dates[dates.length - 1], m) === marketYmd(at, m);
+  const prior = (lastIsToday ? closes.slice(0, -1) : closes).filter((v) => v > 0);
+  if (prior.length < 60) return null; // 석 달치도 없으면(새로 상장 등) 판단 안 함
+  if (q.price > Math.max(...prior)) return 'high';
+  if (q.price < Math.min(...prior)) return 'low';
+  return null;
+}
+// 지난 급등락 — 봇 기록(moves.json)에서 오늘(그 종목 시세의 날짜) 것은 빼고 최근 n건. 오늘 이유는 위 AI 분석·'왜 움직였나'에 있다
+function pastMoves(q, list, n = 4) {
+  const at = +new Date(q && q.asOf);
+  const today = Number.isFinite(at) ? marketYmd(at, marketOf(q)) : '';
+  return (Array.isArray(list) ? list : []).filter((x) => x && /^\d{8}$/.test(x.d) && Number.isFinite(x.p) && x.d !== today)
+    .sort((a, b) => (a.d < b.d ? 1 : a.d > b.d ? -1 : 0)).slice(0, n);
 }
 
 // ---------- 데이터 지연 경고 ----------
@@ -547,7 +625,8 @@ function tileHtml(q) {
   const ap = Math.abs(p), lv = ap < 0.5 ? 0 : ap < 1.5 ? 1 : ap < 3 ? 2 : ap < 5 ? 3 : 4; // 색 진하기 5단계(0.5·1.5·3·5%) — 3% 이상은 진한 색에 흰 글자
   const disc = keyDiscToday(q.code);
   const x = extOf(q);
-  const tip = `${q.name} ${fmtPct(p)}${x ? ` · ${x.label} ${fmtPct(x.changePct)}` : ''}${disc ? ` · 오늘 주요 공시: ${disc.title}` : ''}`;
+  const mk = sixMonthMark(q, state.hist[q.code]);
+  const tip = `${q.name} ${fmtPct(p)}${x ? ` · ${x.label} ${fmtPct(x.changePct)}` : ''}${mk ? ` · 6개월 ${mk === 'high' ? '신고가' : '신저가'}` : ''}${disc ? ` · 오늘 주요 공시: ${disc.title}` : ''}`;
   return `<button type="button" class="tile ${dirClass(p)} h${lv}" data-code="${esc(q.code)}" title="${esc(tip)}">
     <span class="t-nm">${esc(q.name)}</span><span class="t-pct">${fmtPct(p)}</span>${x ? `<span class="t-ext">${x.short} ${fmtPct(x.changePct)}</span>` : ''}${disc ? '<span class="t-dot" role="img" aria-label="오늘 주요 공시"></span>' : ''}</button>`;
 }
@@ -576,9 +655,12 @@ function renderBoard(groups, closed) {
   const byPct = (a, b) => (b && b.ok ? b.changePct ?? 0 : -Infinity) - (a && a.ok ? a.changePct ?? 0 : -Infinity) || 0;
   const mkts = groups.map(({ g, list }) => {
     const { valid, up, down, t, stale, status } = groupInfo(g, list, closed);
+    const avg = avgPct(valid), bench = benchOf(g.key, state.market?.indices);
+    const cmp = avg == null ? '' : `<span class="bm-avg" title="내 종목 등락률의 단순 평균(종목마다 같은 무게) — 같은 시장 지수와 비교">평균 <b class="${dirClass(avg)}-c">${fmtPct(avg)}</b>`
+      + `${bench.map((b) => `<span class="bm-idx">${esc(b.name)} <b class="${dirClass(b.pct)}-c">${fmtPct(b.pct)}</b></span>`).join('')}</span>`;
     return `<div class="bm" style="--n:${list.length}">
       <div class="bm-head"><span class="bm-title">${esc(g.label)}</span>
-        ${valid.length ? `<span class="mgroup-updown"><b class="up-c">▲ ${up}</b> <b class="down-c">▼ ${down}</b></span>` : ''}
+        ${valid.length ? `<span class="mgroup-updown"><b class="up-c">▲ ${up}</b> <b class="down-c">▼ ${down}</b></span>` : ''}${cmp}
         <span class="bm-status${stale ? ' stale' : ''}"${stale ? ` title="${STALE_TIP}"` : ''}>${status}${t ? ` · ${t}` : ''}</span></div>
       <div class="tiles">${[...list].sort(byPct).map(tileHtml).join('')}</div>
     </div>`;
@@ -671,6 +753,20 @@ function basisOf(q, data) {
   return String(data?.sig || '').includes('|d:') ? '뉴스·공시·수급·추세' : '뉴스·수급·추세';
 }
 
+// ---------- 지난 급등락 (봇이 ±2% 넘게 움직인 날마다 남긴 등락·이유) ----------
+const MOVE_SRC = { ai: 'AI', disc: '공시', news: '뉴스' };
+function renderMoves(q, list) {
+  const el = document.getElementById('moves-' + cssId(q.code));
+  if (!el) return;
+  const rows = pastMoves(q, list);
+  if (!rows.length) { el.hidden = true; el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="news-head"><span>지난 급등락</span><span class="disc-src">±2% 넘게 움직인 날 · 그날의 이유</span></div>`
+    + rows.map((x) => `<div class="news-item mv-item"><span class="mv-d">${+x.d.slice(4, 6)}/${+x.d.slice(6, 8)}</span>`
+      + `<span class="mv-p ${dirClass(x.p)}-c">${x.p > 0 ? '▲' : '▼'} ${Math.abs(x.p).toFixed(2)}%</span>`
+      + `<span class="mv-r">${x.r ? `${MOVE_SRC[x.s] ? `<span class="src">${MOVE_SRC[x.s]}</span>` : ''}${esc(x.r)}` : '<span class="muted">이유 기록 없음</span>'}</span></div>`).join('');
+  el.hidden = false;
+}
+
 // ---------- 최근 공시(국내 종목, OpenDART 인증키가 있을 때만 데이터가 있음) ----------
 // 주가에 영향이 큰 종류(실적·계약·증자 등)는 강조, '위험'(횡령·거래정지 등)은 빨강, 오늘 접수분은 '오늘'
 const DART_VIEW = 'https://dart.fss.or.kr/dsaf001/main.do?rcpNo=';
@@ -753,6 +849,8 @@ function renderCard(q, hist, inv) {
   if (isMover) badge = q.changePct > 0
     ? `<span class="badge up">급등 ${fmtPct(q.changePct)}</span>`
     : `<span class="badge down">급락 ${fmtPct(q.changePct)}</span>`;
+  const mk = sixMonthMark(q, hist);
+  if (mk) badge = `<span class="badge mark ${mk}" title="오늘 가격이 최근 6개월 종가 중 가장 ${mk === 'high' ? '높음' : '낮음'}">6개월 ${mk === 'high' ? '신고가' : '신저가'}</span>${badge}`;
   const arrow = q.changePct > 0 ? '▲' : q.changePct < 0 ? '▼' : '–';
   const status = q.marketStatus === 'OPEN' ? '<span class="sdot live"></span>장중' : '<span class="sdot"></span>마감';
 
@@ -781,11 +879,11 @@ function renderCard(q, hist, inv) {
       ${etc ? `<span title="외국인·기관·개인이 모두 같은 방향일 때의 반대편(기타법인 등). 순매수 합계는 0"><i>기타</i> <b class="${dirClass(etc)}-c">${fmtShares(etc)}</b></span>` : ''}
       ${inv.foreignRatio ? `<span class="muted">외인 ${esc(inv.foreignRatio)}</span>` : ''}</div>` : '';
 
-  // 순서: 시세 → AI 분석(왜 움직였나, 급등락 종목) → 기간 수익률·차트·예측 → 수급·고저 → 공시 → 뉴스
+  // 순서: 시세 → AI 분석(왜 움직였나, 급등락 종목) → 기간 수익률·차트·예측 → 수급·고저 → 지난 급등락 → 공시 → 뉴스
   return `<div class="stock ${moverCls}" id="card-${id}">
     <div class="stock-head">
       <div class="nm">${esc(q.name)}<span class="code">${esc(q.code)}</span></div>
-      ${badge}
+      ${badge ? `<div class="badges">${badge}</div>` : ''}
     </div>
     <div class="price-row">
       <span class="price">${fmtPrice(q)}</span>
@@ -803,6 +901,7 @@ function renderCard(q, hist, inv) {
       <span>거래량 <b>${fmtVol(q.volume)}</b></span>
       <span>${status}</span>
     </div>
+    <div class="news moves" id="moves-${id}" hidden></div>
     ${marketOf(q) === 'KR' ? `<div class="news disc" id="disc-${id}" hidden></div>` : ''}
     <div class="news" id="news-${id}"></div>
   </div>`;
@@ -864,7 +963,7 @@ async function loadStatus() {
   const dEl = $('#dartStatus');
   if (!el) return;
   try {
-    const st = await loadJson('status.json');
+    const st = await loadData('status.json');
     // 공시 수집이 멈췄으면(키 오류·하루 한도 초과·점검) 이유를 한 줄로 — 정상('ok')이거나 키가 없으면(값 없음) 숨김
     if (dEl) {
       const d = st?.dart;
@@ -892,7 +991,8 @@ async function loadStatus() {
   } catch { el.hidden = true; if (dEl) dEl.hidden = true; }
 }
 
-function tick() {
+async function tick() {
+  await loadManifest(); // 지문 먼저(작음) — 바뀐 파일만 받는다
   loadStatus().catch(() => {});
   loadMarket().catch((e) => console.warn('시장 갱신 실패:', e));
   loadQuotes().catch((e) => console.warn('종목 갱신 실패:', e));

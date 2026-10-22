@@ -19,7 +19,7 @@ const PORT = Number((arg('--port') || '').split('=')[1]) || process.env.PORT || 
 const MOCK = !!arg('--mock-github');
 // 기본은 이 PC에서만 접속(127.0.0.1). 같은 네트워크의 다른 기기에서 열어야 하면 HOST=0.0.0.0 으로 실행.
 const HOST = process.env.HOST || '127.0.0.1';
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 
 const received = []; // 가짜 API가 받은 이슈 생성 요청
 const sendJson = (res, status, obj) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };

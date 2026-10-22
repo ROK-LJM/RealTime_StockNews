@@ -6,7 +6,11 @@
   var mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
   function saved() { try { var t = localStorage.getItem(KEY); return t === 'light' || t === 'dark' ? t : null; } catch (e) { return null; } }
   function system() { return mq && mq.matches ? 'dark' : 'light'; }
-  function apply(t) { root.setAttribute('data-theme', t); }
+  function apply(t) {
+    root.setAttribute('data-theme', t);
+    var meta = document.querySelector('meta[name="theme-color"]'); // 휴대폰 주소창·앱 상단 색을 바탕색과 맞춤
+    if (meta) meta.setAttribute('content', t === 'dark' ? '#0e0f12' : '#f2f3f5');
+  }
   function changed() { try { document.dispatchEvent(new Event('themechange')); } catch (e) { /* 아주 오래된 브라우저 — 차트 색만 다음 갱신 때 바뀜 */ } }
   apply(saved() || system());
   if (mq) {

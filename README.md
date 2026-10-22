@@ -1,4 +1,4 @@
-# 📈 실시간 주식시장 파악 — 100% 깃허브 무료 버전
+# 실시간 주식시장 파악 — 100% 깃허브 무료 버전
 
 **GitHub Pages + GitHub Actions만 사용** → 청구 개념 자체가 없어 **과금이 구조적으로 불가능**합니다. PC가 꺼져 있어도 링크로 어디서나 접속됩니다.
 
@@ -7,9 +7,9 @@
 - 데이터: 네이버 금융(국내 실시간 시세·수급) · Yahoo Finance(해외 시세·과거 일봉·환율) · Google 뉴스 RSS · Google Gemini(선택, AI 요약 — `GEMINI_API_KEY` Secret, 무료 한도를 국내 장 시간 우선으로 배분) · 금융감독원 OpenDART(선택, 국내 종목 최근 공시 — `DART_API_KEY` Secret)
 - 추적 종목: `config/watchlist.json` 파일로 관리
 
-> ⚠️ 무료 Pages는 **공개(public) 저장소**여야 합니다. 종목 코드 목록이 공개되니(수량·금액은 아님) 감안하세요.
+> 무료 Pages는 **공개(public) 저장소**여야 합니다. 종목 코드 목록이 공개되니(수량·금액은 아님) 감안하세요.
 >
-> ℹ️ 위 시세·뉴스는 비공식 공개 데이터로, **개인 모니터링 용도**로만 사용합니다.
+> 위 시세·뉴스는 비공식 공개 데이터로, **개인 모니터링 용도**로만 사용합니다.
 
 ---
 
@@ -43,18 +43,19 @@ git push -u origin main
 
 ### 6) 접속
 1~2분 뒤 **`https://USERNAME.github.io/REPO/`** 로 접속. (휴대폰·다른 PC 어디서나)
+휴대폰은 브라우저 메뉴의 **홈 화면에 추가**로 두면 로고 아이콘으로 주소창 없이 앱처럼 열립니다.
 
 ### (선택) AI 요약·공시 켜기
 저장소 → **Settings → Secrets and variables → Actions → New repository secret**
-- `GEMINI_API_KEY` — Google AI Studio 무료 키 → 🤖 AI 핵심·🧠 AI 종합분석
-- `DART_API_KEY` — opendart.fss.or.kr 무료 인증키 → 국내 종목 카드의 📋 최근 공시(AI 분석에도 반영)
+- `GEMINI_API_KEY` — Google AI Studio 무료 키 → 지수 AI 핵심·종목 AI 종합분석
+- `DART_API_KEY` — opendart.fss.or.kr 무료 인증키 → 국내 종목 카드의 최근 공시(AI 분석·지난 급등락 이유에도 반영)
 
 키가 없으면 그 기능만 꺼지고 나머지는 그대로 동작합니다.
 
 ---
 
 ## 종목 추가/삭제
-대시보드의 **✏️ 종목 편집** 버튼 → 종목명·코드·티커로 검색해 추가·삭제 → **저장**하면 1~2분 뒤 반영됩니다.
+대시보드의 **종목 편집**(연필) 버튼 → 종목명·코드·티커로 검색해 추가·삭제 → **저장**하면 1~2분 뒤 반영됩니다.
 - 저장은 제목이 `watchlist:`인 깃허브 이슈로 변경 요청을 남기고, 봇(`.github/workflows/watchlist.yml`)이 저장소 주인의 요청만 반영합니다.
 - 토큰 없이: 저장 때 열리는 깃허브 창에서 **Create** 한 번 / 버튼 한 번으로: **이슈 쓰기(Issues: Read and write) 권한만 있는** Fine-grained 토큰을 편집 창에 넣어 두기(그 브라우저에만 저장).
 - 검색용 전체 종목 목록은 봇(`stocklist.yml`)이 매일 07:40 KST에 만듭니다.
@@ -98,17 +99,21 @@ pages/
   .github/workflows/stocklist.yml  매일 검색용 전체 종목 목록 갱신
   config/watchlist.json          추적 종목 목록
   scripts/
-    fetch.mjs                    시세·뉴스 → docs/data/*.json 생성
+    fetch.mjs                    시세·뉴스 → docs/data/*.json 생성(급등락 기록·파일 지문 포함)
     sources.mjs                  시세·뉴스·수급 수집, 태깅, 분위기 산출, AI(Gemini)
+    dart.mjs                     국내 종목 최근 공시(OpenDART, 키가 있을 때만)
     aibudget.mjs                 AI 무료 한도 하루 배분(장 시간 가중치·모델 배분)
     stocklist.mjs                검색용 국내·미국 전체 종목 목록 생성
     watchlist-apply.mjs          '종목 편집' 요청 검증·반영
     util.mjs                     설정 검증·원자적 쓰기 등 공통 유틸
     selftest.mjs                 오프라인 자체 테스트(가짜 네트워크)
     serve.mjs                    로컬 미리보기용(배포 미사용, --mock-github로 편집 저장 시험)
+    make-icons.mjs               홈 화면 아이콘 PNG 생성(로고 모양을 직접 그림)
   docs/                          ← GitHub Pages가 서빙하는 폴더
     index.html / style.css / app.js
-    editor.js                    ✏️ 종목 편집(검색·추가·삭제·저장)
+    theme.js                     화면 밝기(밝게·어둡게 — 기기 설정 따름, 버튼으로 전환)
+    editor.js                    종목 편집(검색·추가·삭제·저장)
     help.html                    사용설명서
-    data/*.json                  봇이 생성 (시세·뉴스·분위기·종목 목록)
+    favicon.svg · icon-*.png · manifest.webmanifest   로고·홈 화면 아이콘·앱 설명
+    data/*.json                  봇이 생성 (시세·뉴스·분위기·급등락 기록·종목 목록, manifest.json = 파일별 지문)
 ```

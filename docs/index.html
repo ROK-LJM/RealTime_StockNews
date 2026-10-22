@@ -7,8 +7,15 @@
        글꼴(Pretendard, 무료 OFL)만 jsDelivr에서 받는다 — 스타일·글꼴 파일이라 실행되는 스크립트는 여전히 이 사이트 것뿐이다. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; img-src 'self' data:; connect-src 'self' https://api.github.com; object-src 'none'; base-uri 'self'" />
   <meta name="color-scheme" content="light dark" />
+  <!-- 휴대폰 주소창 색 — theme.js가 밝기에 맞춰 바꾼다(그래서 theme.js보다 앞에) -->
+  <meta name="theme-color" content="#f2f3f5" />
   <title>실시간 주식시장 파악</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+  <!-- 홈 화면에 추가 — 앱처럼 주소창 없이 열림(아이콘은 scripts/make-icons.mjs가 만듦) -->
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="./icon-180.png" />
+  <meta name="apple-mobile-web-app-title" content="주식시장 파악" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <!-- 버전 고정 + 무결성 확인(파일이 바뀌면 쓰지 않고 기본 글꼴로) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css" integrity="sha384-2nNKoOPayicGa+aRguOQuiZP+RqQ4G3jalfDeOgftkKD7zBM2gJXTwcFqCZltdv0" crossorigin="anonymous" />
   <link rel="stylesheet" href="./style.css" />

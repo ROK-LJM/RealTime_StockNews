@@ -10,6 +10,7 @@
 //  - 파일은 원자적으로 쓴다(임시 파일 → 이름 변경) → 중간에 끊겨도 반쯤 쓴 JSON이 남지 않는다.
 //
 // `node scripts/fetch.mjs`로 실행하면 바로 1회 갱신한다. 다른 모듈(자체 테스트)은 run()을 가져다 쓴다.
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,6 +32,15 @@ const AI_CALLS_PER_RUN = 4;
 // 시각 기준(정시부터 N분마다 첫 5분 안에 도는 회차)이라 '언제 받았는지'를 파일에 따로 적지 않아도 된다(불필요한 커밋 방지).
 // 그 사이 회차와 실패한 종목은 직전 값을 그대로 쓴다. 새로 추가된 종목은 바로 받는다.
 const REFRESH_MIN = { history: 30, investors: 30, news: 15, disclosures: 15 };
+
+// 급등락 기록(moves.json) — AI 분석 기준(±2%)과 같은 날만, 120일·종목당 20건까지. 날짜는 그 시장 현지 날짜(YYYYMMDD)
+const MOVE_KEEP_DAYS = 120, MOVE_KEEP_N = 20, MOVE_REASON_MAX = 140;
+const MARKET_TZ = { KR: 'Asia/Seoul', US: 'America/New_York' };
+const ymdIn = (ms, timeZone) => new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(ms).replace(/-/g, '');
+
+// 화면이 1분마다 받는 파일 — 회차 끝에 파일별 내용 지문(sha1 앞 10자리)을 manifest.json에 남기면
+// 화면은 지문만 먼저 받고 바뀐 파일만 다시 받는다(평소 1분 갱신 약 220KB → 수 KB, 휴대폰 데이터 절약).
+const MANIFEST_FILES = ['quotes.json', 'market.json', 'news.json', 'history.json', 'investors.json', 'analysis.json', 'disclosures.json', 'moves.json', 'status.json'];
 
 // 설정 검증: 고칠 수 있는 항목(앞자리 0 누락·소문자 티커)은 고치고, 틀린 항목은 빼며 이유를 로그로 남긴다.
 function readConfig(root) {
@@ -262,6 +272,48 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
     write('analysis.json', analysis);
   } catch (e) { console.error('  ✗ 종합분석 실패 — analysis.json 유지:', e.message); }
 
+  // 7) 급등락 기록(moves.json) — '지난번엔 왜 움직였나'. 종목이 ±2%(AI 분석 기준) 넘게 움직인 날마다 그날 등락과 이유 한 줄을 남긴다.
+  //    날짜는 시세 시각(asOf)의 그 시장 현지 날짜 — 장중엔 회차마다 그날 기록을 고치고, 2% 아래로 돌아오면 지운다(마감 값이 기준).
+  //    이유: 그날 이후의 AI 진단 > 최근 3일 안의 주요 공시 > 전날부터의 뉴스 제목. 이미 더 나은 출처의 이유가 있으면 바꾸지 않는다.
+  //    시세를 못 받은 종목·회차는 손대지 않는다. 120일·종목당 20건까지, 추적 목록에서 빠진 종목은 지운다.
+  if (!Object.values(quotesByCode).some((q) => q && q.ok)) console.warn('  ! 시세 없음 — moves.json 유지');
+  else try {
+    const prevMoves = readJson('moves.json');
+    const an = readJson('analysis.json') || {};
+    const keepFrom = ymdIn(now - MOVE_KEEP_DAYS * 86400e3, MARKET_TZ.KR);
+    const rank = { ai: 3, disc: 2, news: 1 };
+    const cut = (s) => (s.length > MOVE_REASON_MAX ? `${s.slice(0, MOVE_REASON_MAX - 1)}…` : s);
+    const moves = {};
+    let recorded = 0, removed = 0;
+    for (const it of items) {
+      const tz = MARKET_TZ[it.market] || MARKET_TZ.US;
+      const list = (isObj(prevMoves) && Array.isArray(prevMoves[it.code]) ? prevMoves[it.code] : [])
+        .filter((x) => isObj(x) && /^\d{8}$/.test(x.d) && Number.isFinite(x.p) && x.d >= keepFrom);
+      const q = quotesByCode[it.code];
+      const at = q && q.ok && Number.isFinite(q.changePct) ? +new Date(q.asOf) : NaN;
+      if (Number.isFinite(at)) {
+        const day = ymdIn(at, tz), dayStart = (days) => ymdIn(at - days * 86400e3, tz);
+        const i = list.findIndex((x) => x.d === day);
+        if (Math.abs(q.changePct) >= STOCK_ANALYSIS_THRESHOLD) {
+          const a = an[it.code];
+          const d = (disclosures[it.code]?.items || []).find((x) => x && x.key && x.title && x.date <= day && x.date >= dayStart(3));
+          const n = (news[it.code]?.items || []).find((x) => x && x.title && Number.isFinite(x.pubMs) && ymdIn(x.pubMs, tz) >= dayStart(1));
+          const why = a && a.headline && Number.isFinite(a.at) && ymdIn(a.at, tz) >= day ? { r: a.headline, s: 'ai' }
+            : d ? { r: `[${d.tag || '공시'}] ${d.title}`, s: 'disc' } : n ? { r: n.title, s: 'news' } : { r: '', s: '' };
+          const old = i >= 0 ? list[i] : null;
+          const keep = old && (rank[old.s] || 0) > (rank[why.s] || 0);
+          const entry = { d: day, p: Math.round(q.changePct * 100) / 100, r: cut(String(keep ? old.r : why.r)), s: keep ? old.s : why.s };
+          if (i >= 0) list[i] = entry; else list.push(entry);
+          recorded++;
+        } else if (i >= 0) { list.splice(i, 1); removed++; }
+      }
+      list.sort((x, y) => (x.d < y.d ? 1 : x.d > y.d ? -1 : 0));
+      if (list.length) moves[it.code] = list.slice(0, MOVE_KEEP_N);
+    }
+    if (prevMoves == null || JSON.stringify(moves) !== JSON.stringify(prevMoves)) write('moves.json', moves);
+    if (recorded || removed) console.log(`  · 급등락 기록: ±2% 이상 ${recorded}종목${removed ? ` · 2% 아래로 돌아와 지움 ${removed}건` : ''}`);
+  } catch (e) { console.error('  ✗ 급등락 기록 실패 — moves.json 유지:', e.message); }
+
   // AI 상태 한 줄 요약 — 키 없음/모델 전환/할당량 소진/배분 대기를 Actions 로그에서 바로 알 수 있게
   const st = aiStatus();
   const models = aiModels();
@@ -295,6 +347,17 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
   if (JSON.stringify(status) !== JSON.stringify(prevStatus)) {
     try { write('status.json', status); } catch (e) { console.error('  ✗ AI 상태 기록 실패:', e.message); }
   }
+
+  // 파일별 내용 지문(manifest.json) — 이번 회차에 쓴 파일이 있을 때만 다시 계산하고, 내용이 같으면 쓰지 않는다(불필요한 커밋 방지).
+  // 데이터 파일과 같은 커밋·같은 배포로 나가므로 화면이 받은 지문과 파일 내용이 맞는다(어긋나면 화면이 예전처럼 새로 받음).
+  if (written.length) try {
+    const files = {};
+    for (const f of MANIFEST_FILES) {
+      try { files[f] = crypto.createHash('sha1').update(fs.readFileSync(path.join(dataDir, f))).digest('hex').slice(0, 10); }
+      catch { /* 아직 없는 파일 — 화면은 그 파일만 예전처럼 받는다 */ }
+    }
+    if (JSON.stringify({ files }) !== JSON.stringify(readJson('manifest.json'))) write('manifest.json', { files });
+  } catch (e) { console.error('  ✗ 파일 지문 기록 실패:', e.message); }
   console.log('[fetch] 완료');
   return { written, items: items.length, ai: st };
 }
