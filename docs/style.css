@@ -13,10 +13,11 @@
   --line-2: #d3d7dd;
   --text: #15171c;
   --text-2: #4a505b;
-  --muted: #6e7380;
+  --muted: #656a77;  /* 바탕·회색 상자 위 작은 글씨 대비 4.5:1 이상 */
   --up: #e3263d;   --up-rgb: 227, 38, 61;   --up-deep: #b3122a;
   --down: #1f66e5; --down-rgb: 31, 102, 229; --down-deep: #1550b8;
-  --warn: #b26400; --warn-rgb: 222, 135, 0;
+  --up-h3: #e3263d; --up-h4: #b3122a; --down-h3: #1f66e5; --down-h4: #1550b8;  /* 타일 진한 두 단계 — 흰 글자 4.5:1 이상 */
+  --warn: #995500; --warn-rgb: 222, 135, 0;  /* 주황 글씨 — 옅은 주황 바탕 위에서도 4.5:1 */
   --live: #14a44d; --live-rgb: 20, 164, 77;
   --ok: #0f8a3e;
   --bad: #d1342a;
@@ -39,9 +40,10 @@
   --line-2: #363940;
   --text: #edeff2;
   --text-2: #b3b8c2;
-  --muted: #7f8591;
+  --muted: #888e9a;
   --up: #ff4b5f;   --up-rgb: 255, 75, 95;   --up-deep: #ff6878;
   --down: #4a90ff; --down-rgb: 74, 144, 255; --down-deep: #6aa4ff;
+  --up-h3: rgba(255, 75, 95, .55); --up-h4: #d62d42; --down-h3: rgba(74, 144, 255, .55); --down-h4: #2f6fe0;
   --warn: #f2a93b; --warn-rgb: 242, 169, 59;
   --live: #2fd170; --live-rgb: 47, 209, 112;
   --ok: #3ddc84;
@@ -55,9 +57,10 @@
   :root:not([data-theme]) {
     color-scheme: dark;
     --bg: #0e0f12; --surface: #17181c; --surface-2: #1f2025; --surface-3: #2a2c32; --seg-on: #3a3d45;
-    --line: #25272d; --line-2: #363940; --text: #edeff2; --text-2: #b3b8c2; --muted: #7f8591;
+    --line: #25272d; --line-2: #363940; --text: #edeff2; --text-2: #b3b8c2; --muted: #888e9a;
     --up: #ff4b5f; --up-rgb: 255, 75, 95; --up-deep: #ff6878;
     --down: #4a90ff; --down-rgb: 74, 144, 255; --down-deep: #6aa4ff;
+    --up-h3: rgba(255, 75, 95, .55); --up-h4: #d62d42; --down-h3: rgba(74, 144, 255, .55); --down-h4: #2f6fe0;
     --warn: #f2a93b; --warn-rgb: 242, 169, 59; --live: #2fd170; --live-rgb: 47, 209, 112;
     --ok: #3ddc84; --bad: #ff6a5f; --ink: #edeff2; --on-ink: #111215; --logo-line: #363940;
   }
@@ -78,6 +81,7 @@ button { cursor: pointer; }
 :focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 .up-c { color: var(--up); }
 .down-c { color: var(--down); }
+.mgroup-updown .up-c { color: var(--up-deep); } .mgroup-updown .down-c { color: var(--down-deep); } /* 회색 페이지 바탕 위 작은 글씨 */
 .flat-c { color: var(--muted); }
 
 /* 선 아이콘 — index.html의 <symbol>을 <use>로 쓴다(색은 글자색을 따름) */
@@ -198,16 +202,17 @@ input::placeholder { color: var(--muted); }
 /* 진하기: h0 0.5% 미만 · h1 1.5% · h2 3% · h3 5% · h4 그 이상 — h3부터 흰 글자 */
 .tile.up.h1 { background: rgba(var(--up-rgb), .1); }
 .tile.up.h2 { background: rgba(var(--up-rgb), .22); }
-.tile.up.h3 { background: rgba(var(--up-rgb), .78); color: #fff; }
-.tile.up.h4 { background: var(--up); color: #fff; }
+.tile.up.h3 { background: var(--up-h3); color: #fff; }
+.tile.up.h4 { background: var(--up-h4); color: #fff; }
 .tile.down.h1 { background: rgba(var(--down-rgb), .1); }
 .tile.down.h2 { background: rgba(var(--down-rgb), .22); }
-.tile.down.h3 { background: rgba(var(--down-rgb), .78); color: #fff; }
-.tile.down.h4 { background: var(--down); color: #fff; }
+.tile.down.h3 { background: var(--down-h3); color: #fff; }
+.tile.down.h4 { background: var(--down-h4); color: #fff; }
 .tile.up .t-pct { color: var(--up-deep); }
 .tile.down .t-pct { color: var(--down-deep); }
 .tile.flat .t-pct { color: var(--muted); }
 .tile.h3 .t-pct, .tile.h4 .t-pct { color: #fff; }
+.tile.h3 .t-ext, .tile.h4 .t-ext { opacity: 1; } /* 진한 칸에선 흐리게 하면 글자가 묻힘 */
 .tile.err { background: transparent; color: var(--muted); box-shadow: inset 0 0 0 1px var(--line-2); }
 .t-nm { max-width: 100%; font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .t-pct { font-size: 15px; font-weight: 700; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
@@ -244,8 +249,8 @@ input::placeholder { color: var(--muted); }
 .brief-name { font-size: 16px; font-weight: 700; }
 .brief-chg { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .brief-tag { margin-left: auto; padding: 2px 8px; border-radius: 6px; background: var(--surface-2); color: var(--text-2); font-size: 12px; font-weight: 600; }
-.brief-tag.up { background: rgba(var(--up-rgb), .1); color: var(--up); }
-.brief-tag.down { background: rgba(var(--down-rgb), .1); color: var(--down); }
+.brief-tag.up { background: rgba(var(--up-rgb), .1); color: var(--up-deep); }
+.brief-tag.down { background: rgba(var(--down-rgb), .1); color: var(--down-deep); }
 .brief-reason { margin: 10px 0 6px; font-size: 15.5px; font-weight: 600; line-height: 1.5; }
 .brief-reason a { color: var(--text); text-decoration: none; }
 .brief-reason a:hover { text-decoration: underline; }
@@ -313,8 +318,8 @@ input::placeholder { color: var(--muted); }
 .stock .nm { font-size: 16px; font-weight: 700; letter-spacing: -.01em; }
 .stock .code { margin-left: 6px; font-size: 12px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
 .badge { padding: 2px 7px; border-radius: 6px; font-size: 12px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.badge.up { background: rgba(var(--up-rgb), .1); color: var(--up); }
-.badge.down { background: rgba(var(--down-rgb), .1); color: var(--down); }
+.badge.up { background: rgba(var(--up-rgb), .1); color: var(--up-deep); }
+.badge.down { background: rgba(var(--down-rgb), .1); color: var(--down-deep); }
 .badge.flat { background: var(--surface-2); color: var(--muted); }
 .badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
 /* 6개월 신고가·신저가 — 등락 배지와 구분되게 테두리만 */
@@ -340,6 +345,7 @@ input::placeholder { color: var(--muted); }
   background: var(--surface-2); color: var(--text); text-align: left; }
 .an-toggle:hover { background: var(--surface-3); }
 .an-badge { flex-shrink: 0; margin-top: 1px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line-2); }
+.an-badge.old { background: rgba(var(--warn-rgb), .14); color: var(--warn); box-shadow: none; } /* 지난 거래일에 만든 분석 */
 .an-head { flex: 1; font-size: 14px; font-weight: 600; line-height: 1.45; }
 .an-caret { display: inline-flex; color: var(--muted); }
 .an-caret .ic { width: 16px; height: 16px; transition: transform .15s; }
@@ -401,11 +407,11 @@ input::placeholder { color: var(--muted); }
 }
 /* 뉴스 태그도 한국식 — 호재 빨강 · 악재 파랑, 공시는 영향 큰 종류 주황 · 위험 빨강 */
 .tag { flex-shrink: 0; margin-top: 1px; padding: 0 5px; border-radius: 4px; font-size: 11px; font-weight: 700; line-height: 18px; white-space: nowrap; }
-.tag.pos { background: rgba(var(--up-rgb), .1); color: var(--up); }
-.tag.neg { background: rgba(var(--down-rgb), .1); color: var(--down); }
+.tag.pos { background: rgba(var(--up-rgb), .1); color: var(--up-deep); }
+.tag.neg { background: rgba(var(--down-rgb), .1); color: var(--down-deep); }
 .tag.neutral { background: var(--surface-2); color: var(--muted); }
 .tag.key { background: rgba(var(--warn-rgb), .14); color: var(--warn); }
-.tag.risk { background: var(--bad); color: #fff; }
+.tag.risk { background: var(--bad); color: var(--on-ink); } /* 어둡게에선 밝은 빨강 위 검은 글자 */
 .disc-src { font-size: 11.5px; font-weight: 500; color: var(--muted); }
 /* 지난 급등락 — 날짜 · 등락 · 그날의 이유 */
 .mv-item { display: grid; grid-template-columns: 38px 70px minmax(0, 1fr); align-items: baseline; gap: 8px; }
@@ -547,6 +553,10 @@ input::placeholder { color: var(--muted); }
   .idx-row .pv { grid-area: pv; text-align: left; }
   .idx-row .pc { grid-area: pc; min-width: 0; font-size: 12.5px; }
   .idx-row .ch { display: none; }
+  /* AI 종합분석 — 배지·화살표 줄 아래에 진단을 전체 폭으로(좁은 칸에 세로로 길게 접히지 않게) */
+  .an-toggle { flex-wrap: wrap; row-gap: 6px; }
+  .an-head { order: 3; flex: 1 0 100%; }
+  .an-caret { margin-left: auto; }
   .board { padding: 14px 14px 10px; }
   .board-head h2 { font-size: 17px; }
   .bm { flex-basis: 100%; }

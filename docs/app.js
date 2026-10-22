@@ -173,8 +173,8 @@ function chartColors() {
   const v = (name, d) => s.getPropertyValue(name).trim() || d;
   _ccKey = key;
   return (_cc = {
-    up: v('--up', '#e3263d'), down: v('--down', '#1f66e5'), warn: v('--warn', '#b26400'), warnRgb: v('--warn-rgb', '222, 135, 0'),
-    muted: v('--muted', '#6e7380'), line: v('--line-2', '#d3d7dd'), surface: v('--surface', '#ffffff'), font: v('--font', 'sans-serif'),
+    up: v('--up', '#e3263d'), down: v('--down', '#1f66e5'), warn: v('--warn', '#995500'), warnRgb: v('--warn-rgb', '222, 135, 0'),
+    muted: v('--muted', '#656a77'), line: v('--line-2', '#d3d7dd'), surface: v('--surface', '#ffffff'), font: v('--font', 'sans-serif'),
   });
 }
 
@@ -596,6 +596,15 @@ function aiWaitText(ai, next = '') {
   return ['곧 분석', '한 번에 몇 종목씩, 약 5분 간격'];
 }
 
+// AI 종합분석이 지금 시세의 거래일(그 시장 현지 날짜)에 만든 것인지 — 장이 새로 열리면 전날 분석은 '지난 분석'.
+// 분석·시세 시각을 모르면 그대로 쓴다(예전 데이터)
+function aiFresh(q, a) {
+  const at = Number(a && a.at), qt = Date.parse(q && q.asOf);
+  if (!Number.isFinite(at) || at <= 0 || !Number.isFinite(qt)) return true;
+  const m = marketOf(q);
+  return marketYmd(at, m) >= marketYmd(qt, m);
+}
+
 // ---------- 데이터 지연 경고 ----------
 // 수집 봇(5분 간격)이 멈추거나 시세 출처가 막혀도 화면은 마지막 값을 그대로 보여준다 — 장중인데 오래 그대로면 알린다.
 //  ① 시세가 '장중'인데 마지막 시각이 45분 넘게 지남. 국내는 15:30~16:00 체결이 없어 정상이어도 26분까지 벌어진다(실측).
@@ -677,7 +686,7 @@ function keyDiscToday(code) {
 }
 function whyOf(q) {
   const a = state.analysis[q.code];
-  if (a && a.headline) return { src: 'AI', label: 'AI 진단', text: a.headline };
+  if (a && a.headline && aiFresh(q, a)) return { src: 'AI', label: 'AI 진단', text: a.headline }; // 전날 분석이면 오늘 공시·뉴스로
   const d = keyDiscToday(q.code);
   if (d) return { src: '공시', label: '오늘 주요 공시', text: `[${d.tag || '공시'}] ${d.title}` };
   const m = marketOf(q), at = +new Date(q.asOf);
@@ -875,6 +884,12 @@ function renderAnalysis(q, data) {
     return;
   }
   const dirCls = (q.changePct ?? 0) < 0 ? 'down' : (q.changePct ?? 0) > 0 ? 'up' : 'flat';
+  // 지난 거래일에 만든 분석(장이 새로 열렸는데 아직 새 분석 전) — 배지에 그날 날짜를 주황으로
+  const oldYmd = aiFresh(q, data) ? '' : marketYmd(data.at, marketOf(q));
+  const oldMd = oldYmd ? `${+oldYmd.slice(4, 6)}/${+oldYmd.slice(6, 8)}` : '';
+  const badge = oldMd
+    ? `<span class="an-badge old" title="지난 거래일(${oldMd})에 만든 분석 — 오늘 움직임 분석은 AI 차례가 오면 바뀌어요">AI 종합분석 · ${oldMd}</span>`
+    : '<span class="an-badge">AI 종합분석</span>';
   const factors = (data.factors || []).map((f) => `<li>${esc(f)}</li>`).join('');
   const detail = `${data.summary ? `<p class="an-summary">${esc(data.summary)}</p>` : ''}`
     + `${factors ? `<ul class="an-factors">${factors}</ul>` : ''}`
@@ -882,7 +897,7 @@ function renderAnalysis(q, data) {
     + `<p class="an-disc">AI가 ${basisOf(q, data)}를 종합한 추정입니다${fmtAiTime(data.at) ? `(${esc(fmtAiTime(data.at))} 분석)` : ''}. 투자조언이 아닙니다.</p>`;
   const wasOpen = state.openAnalysis.has(q.code); // 새로고침 전에 펼쳐 뒀다면 그대로 유지
   el.innerHTML = `<button class="an-toggle ${dirCls}" type="button" aria-expanded="${wasOpen}">
-      <span class="an-badge">AI 종합분석</span>
+      ${badge}
       <span class="an-head">${esc(data.headline)}</span>
       <span class="an-caret"><svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></span>
     </button>

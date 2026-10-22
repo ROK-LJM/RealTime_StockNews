@@ -1163,6 +1163,29 @@ await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] �
   assert.equal(t({ state: 'off' }), null, 'AI 키가 없으면 안내 안 함');
   assert.equal(t(null), null, '상태를 모르면 안내 안 함');
 });
+await test('지난 AI 분석(app.js): 지금 시세의 거래일에 만든 분석만 "왜 움직였나" 이유로 · 전날 분석이면 오늘 뉴스 · 미국은 뉴욕 날짜 · 시각 모르면 그대로', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const why = appJs.slice(appJs.indexOf('function whyOf('), appJs.indexOf('function tileHtml('));
+  const ctx = { state: { analysis: {}, news: {} }, keyDiscToday: () => null };
+  const f = vm.runInNewContext(`${block}\n${why}; ({ aiFresh, whyOf })`, ctx);
+  const at = (iso) => Date.parse(iso);
+  const q = { code: 'A', name: '가나', market: 'KR', ok: true, changePct: -3.1, asOf: '2026-10-23T09:05:00+09:00' };
+  assert.equal(f.aiFresh(q, { headline: 'x', at: at('2026-10-23T09:01:00+09:00') }), true, '같은 거래일');
+  assert.equal(f.aiFresh(q, { headline: 'x', at: at('2026-10-22T15:20:00+09:00') }), false, '전 거래일');
+  assert.equal(f.aiFresh({ ...q, asOf: '2026-10-22T15:30:00+09:00' }, { headline: 'x', at: at('2026-10-22T15:20:00+09:00') }), true, '장 열리기 전(시세가 아직 어제) — 어제 분석이 최신');
+  assert.equal(f.aiFresh(q, { headline: 'x' }), true, '분석 시각 모름 → 그대로');
+  assert.equal(f.aiFresh({ ...q, asOf: undefined }, { headline: 'x', at: at('2026-10-20T10:00:00+09:00') }), true, '시세 시각 모름 → 그대로');
+  const u = { code: 'U', name: '유', market: 'US', ok: true, changePct: 5, asOf: '2026-10-22T20:00:00.000Z' };
+  assert.equal(f.aiFresh(u, { headline: 'x', at: at('2026-10-22T14:00:00Z') }), true, '미국은 뉴욕 날짜 — 한국 날짜론 다음 날이어도 같은 거래일');
+  assert.equal(f.aiFresh(u, { headline: 'x', at: at('2026-10-21T19:45:00Z') }), false, '미국 전 거래일');
+  ctx.state.analysis.A = { headline: '어제 이유', at: at('2026-10-22T15:20:00+09:00') };
+  ctx.state.news.A = { items: [{ title: '가나, 실적 부진에 급락', pubMs: at('2026-10-23T09:00:00+09:00') }] };
+  assert.equal(f.whyOf(q).src, '뉴스', '전날 분석은 건너뛰고 오늘 뉴스');
+  ctx.state.analysis.A = { headline: '오늘 이유', at: at('2026-10-23T09:03:00+09:00') };
+  assert.equal(f.whyOf(q).text, '오늘 이유');
+});
 await test('상장 시장(quotes.json exch): 검색 목록의 국내 KOSPI·KOSDAQ · 미국 거래소 · 목록에 없으면 없음 · 시세 안내 기사는 "시세" 표시·호재/악재 집계 제외', async () => {
   const root = workspace();
   writeData(root, 'stocklist.json', { v: 2, kr: [['005930', '삼성전자', 'KOSPI', 1]], us: [['AAPL', '애플', 'Apple Inc.', 'NASDAQ', 1]], meta: {} });
