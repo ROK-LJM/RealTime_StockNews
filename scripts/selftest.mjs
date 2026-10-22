@@ -1040,6 +1040,46 @@ await test('시장 비교·6개월 신고가·지난 급등락(app.js): 단순 �
   assert.deepEqual(pm, ['20261014', '20261010', '20261001', '20260920'], '오늘(뉴욕 10/15) 것·형식 오류 빼고 최신 4건');
   assert.deepEqual([...f.pastMoves({ market: 'US', asOf: 'x' }, null)], []);
 });
+// 실제 제목(2026-10-22 news.json) — 시세만 알려 주는 자동 기사 / 이유가 들어 있는 기사
+const PRICE_ONLY_YES = ['SK하이닉스 주가, 10월 22일 장중 1,281,000원 1.00% 하락', '삼성전자우 주가, 10월 22일 장중 172,900원 0.41% 상승',
+  'SK텔레콤 주가, 10월 21일 애프터마켓 77,300원 0.00% 보합', 'LG에너지솔루션 주가, 10월 21일 411,500원 0.60% 하락', '현대중공업 주가 하락 중',
+  '슈퍼 마이크로 컴퓨터 주가 상승 중', 'HD건설기계 장중 3%대 상승', '현대중공업 주가 2,000원 상승 후 장마감', '한화솔루션 주가 50원 하락 후 장마감',
+  '[특징주] 한화솔루션 장중 2%대 강세 3만1450원 기록 : 기업주식정보', 'SK텔레콤 거래량 13.6% 감소…20일 65만2578주',
+  '[특징주] 한미반도체, 장중 1%대 상승하며 20만2000원 기록 : 기업주식정보'];
+const PRICE_ONLY_NO = ['영업이익 추정치 웃돈 파두…주가는 장중 6.75% 하락', '삼성전기 주가 3.08% 상승…엔비디아 기판 생산능력 확대에 공급 수혜 기대',
+  '호실적에 자사주 소각까지…삼성E&A 15% 상승세 [특징주]', '[장중수급포착] 대덕전자, 기관 8일 연속 순매수행진... 주가 +4.24%',
+  '[개장시황] 삼성전기 5.05% 급등…코스피 차익매물에 하락 출발', 'Why Super Micro Computer Stock Popped Today', '수주 기대감에 장중 3%대 상승',
+  '대덕전자, 장중 2.51% 하락…iM증권은 이익 전망 상향', '9개국 이상 거점 둔 한화에어로스페이스…주가 89만9000원으로 상승', '[특징주] SK텔레콤, 뚜렷한 공시 없이 장중 소폭 하락세 : 기업주식정보'];
+await test('시세 안내 기사: 날짜·가격만 있는 자동 기사·"주가 상승 중"·"장중 3%대 상승"은 이유에서 제외 · 이유가 붙은 제목은 유지 · 봇과 화면 판정이 같음', async () => {
+  for (const t of PRICE_ONLY_YES) assert.equal(src.priceOnly(t), true, t);
+  for (const t of PRICE_ONLY_NO) assert.equal(src.priceOnly(t), false, t);
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(`${block}; ({ priceOnly, reasonNews })`, {});
+  for (const t of [...PRICE_ONLY_YES, ...PRICE_ONLY_NO, '', '삼성전자 주가 하락 출발']) assert.equal(f.priceOnly(t), src.priceOnly(t), `화면·봇 같은 판정: ${t}`);
+  const items = [{ title: PRICE_ONLY_YES[0] }, { title: '' }, { title: PRICE_ONLY_YES[4] }, { title: PRICE_ONLY_NO[0] }, { title: PRICE_ONLY_NO[1] }];
+  assert.equal(f.reasonNews(items).title, PRICE_ONLY_NO[0], '시세 안내 기사를 건너뛴 가장 최근 기사');
+  assert.equal(f.reasonNews([{ title: PRICE_ONLY_YES[1] }]), null);
+  assert.equal(f.reasonNews(null), null);
+});
+await test('급등락 기록: 이유로 쓸 뉴스는 시세 안내 기사를 건너뛴 가장 최근 기사', async () => {
+  const root = workspace();
+  const news = (m, u) => {
+    const name = queryName(u), now = Date.now();
+    const item = (t, ago) => `<item><title>${t} - 테스트일보</title><link>https://news.example.com/${ago}</link><pubDate>${new Date(now - ago).toUTCString()}</pubDate><source url="https://news.example.com">테스트일보</source></item>`;
+    return text(`<?xml version="1.0"?><rss><channel>${item(`${name} 주가, 10월 15일 장중 70,000원 4.20% 상승`, 600e3)}${item(`${name} 주가 상승 중`, 900e3)}${item(`${name}, 대규모 수주 소식에 급등`, 3600e3)}</channel></rss>`);
+  };
+  await pipeline(root, { gemini: () => text('upstream error', 500), krAt: NOW_KR, news });
+  assert.equal(read(root, 'news.json')['005930'].items[0].title, '삼성전자 주가, 10월 15일 장중 70,000원 4.20% 상승', '뉴스 목록엔 그대로(최신순)');
+  assert.deepEqual(read(root, 'moves.json')['005930'][0], { d: '20261015', p: 4.2, r: '삼성전자, 대규모 수주 소식에 급등', s: 'news' });
+  // 예전 기록에 시세 안내 기사가 이유로 남아 있고 지금도 그런 기사뿐이면 그 이유를 지키지 않고 비운다
+  const r2 = workspace();
+  writeData(r2, 'moves.json', { '005930': [{ d: '20261015', p: 4, r: '삼성전자 주가, 10월 15일 장중 70,000원 4.00% 상승', s: 'news' }] });
+  const onlyPrice = (m, u) => { const name = queryName(u); return text(`<?xml version="1.0"?><rss><channel><item><title>${name} 주가 상승 중 - 테스트일보</title><link>https://news.example.com/p</link><pubDate>${new Date(Date.now() - 600e3).toUTCString()}</pubDate><source url="https://news.example.com">테스트일보</source></item></channel></rss>`); };
+  await pipeline(r2, { gemini: () => text('upstream error', 500), krAt: NOW_KR, news: onlyPrice });
+  assert.deepEqual(read(r2, 'moves.json')['005930'][0], { d: '20261015', p: 4.2, r: '', s: '' });
+});
 await test('공시 도구: ZIP(압축·무압축·데이터 설명자) 속 XML · 상장사만 표로 · 우선주는 보통주 회사 · 종류 판정 · 한국 날짜', () => {
   const xml = corpXml();
   for (const opt of [{}, { method: 0 }, { descriptor: true }]) {

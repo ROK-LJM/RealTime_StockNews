@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis,
-  aiStatus, aiGate, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD,
+  aiStatus, aiGate, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, priceOnly,
 } from './sources.mjs';
 import { startBudget, toStored, totalUsed, capacity, inSession, isKrSession, nextAllowanceAt, closedCheckDay, usExtWindow, usAfterPostSameDay } from './aibudget.mjs';
 import { validateWatchlist, writeJsonAtomic, analysisSig, sigMove } from './util.mjs';
@@ -297,11 +297,13 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
         if (Math.abs(q.changePct) >= STOCK_ANALYSIS_THRESHOLD) {
           const a = an[it.code];
           const d = (disclosures[it.code]?.items || []).find((x) => x && x.key && x.title && x.date <= day && x.date >= dayStart(3));
-          const n = (news[it.code]?.items || []).find((x) => x && x.title && Number.isFinite(x.pubMs) && ymdIn(x.pubMs, tz) >= dayStart(1));
+          const n = (news[it.code]?.items || []).find((x) => x && x.title && !priceOnly(x.title) && Number.isFinite(x.pubMs) && ymdIn(x.pubMs, tz) >= dayStart(1));
           const why = a && a.headline && Number.isFinite(a.at) && ymdIn(a.at, tz) >= day ? { r: a.headline, s: 'ai' }
             : d ? { r: `[${d.tag || '공시'}] ${d.title}`, s: 'disc' } : n ? { r: n.title, s: 'news' } : { r: '', s: '' };
           const old = i >= 0 ? list[i] : null;
-          const keep = old && (rank[old.s] || 0) > (rank[why.s] || 0);
+          // 예전에 시세 안내 기사로 남긴 이유(N6 전 기록)는 지킬 만한 이유가 아니다 — 더 나은 게 없으면 비운다
+          const oldRank = old && !(old.s === 'news' && priceOnly(old.r)) ? rank[old.s] || 0 : 0;
+          const keep = old && oldRank > (rank[why.s] || 0);
           const entry = { d: day, p: Math.round(q.changePct * 100) / 100, r: cut(String(keep ? old.r : why.r)), s: keep ? old.s : why.s };
           if (i >= 0) list[i] = entry; else list.push(entry);
           recorded++;

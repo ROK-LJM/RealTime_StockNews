@@ -528,6 +528,19 @@ function pastMoves(q, list, n = 4) {
   return (Array.isArray(list) ? list : []).filter((x) => x && /^\d{8}$/.test(x.d) && Number.isFinite(x.p) && x.d !== today)
     .sort((a, b) => (a.d < b.d ? 1 : a.d > b.d ? -1 : 0)).slice(0, n);
 }
+// 시세만 알려 주는 자동 기사('OO 주가, 10월 22일 장중 …원 …% 하락'·'OO 주가 상승 중')는 '왜 움직였나'의 이유로 쓰지 않는다
+// — 뉴스 목록에는 그대로 둔다. scripts/sources.mjs의 PRICE_ONLY와 같게 유지(자체 테스트가 두 곳 결과를 비교)
+const PRICE_ONLY = [
+  /주가,?\s*\d{1,2}월\s*\d{1,2}일\s*(?:장중|장\s?마감|애프터마켓|프리마켓|시간외|오전|오후)?\s*[\d,.]+원\s*[\d.]+%\s*(?:상승|하락|보합)$/,
+  /^\S+(?:\s\S+){0,3}\s주가\s*(?:상승|하락|강세|약세|보합)\s*중$/,
+  /^[^\s,…·]+\s(?:장중|장\s?초반|오전|오후)\s*[\d.]+%대?\s*(?:상승|하락|강세|약세|급등|급락)(?:\s*중|세)?$/,
+  /^\S+(?:\s\S+){0,3}\s주가\s*[\d,]+원\s*(?:상승|하락|보합)\s*(?:후\s*)?장\s?마감$/,
+  /^(?:\[특징주\]\s*)?[^\s,…·]+(?:\s[^\s,…·]+)?,?\s장중\s*[\d.]+%대?\s*(?:상승|하락|강세|약세)(?:하며)?\s*[\d만,.]+원\s*기록/,
+  /^\S+(?:\s\S+){0,3}\s거래량\s*[\d.]+%\s*(?:증가|감소)/,
+];
+const priceOnly = (title) => PRICE_ONLY.some((re) => re.test(String(title ?? '').trim()));
+// 이유로 쓸 뉴스 — 시세 안내 기사를 건너뛴 가장 최근 기사(뉴스는 최신순)
+function reasonNews(items) { return (Array.isArray(items) ? items : []).find((x) => x && x.title && !priceOnly(x.title)) || null; }
 
 // ---------- 데이터 지연 경고 ----------
 // 수집 봇(5분 간격)이 멈추거나 시세 출처가 막혀도 화면은 마지막 값을 그대로 보여준다 — 장중인데 오래 그대로면 알린다.
@@ -600,7 +613,7 @@ function groupInfo(g, list, closed) {
 
 // ---------- 내 종목 한눈에 ----------
 // 시장별 등락률 색 타일(진할수록 크게 움직임, 오른 종목부터) + ±2% 넘게 움직인 종목의 '왜' 한 줄.
-// 이유는 AI 진단 → 오늘 주요 공시 → 첫 뉴스 순으로 고른다. 이미 받은 데이터만 쓴다(추가 요청 없음).
+// 이유는 AI 진단 → 오늘 주요 공시 → 최근 뉴스(시세 안내 기사는 건너뜀) 순으로 고른다. 이미 받은 데이터만 쓴다(추가 요청 없음).
 // 타일·줄을 누르면 그 종목 카드로 이동한다.
 const WHY_MIN = 2;  // % — AI 종합분석 대상 기준과 같게
 const WHY_SHOW = 6; // 처음에 보여줄 줄 수(나머지는 '더 보기')
@@ -613,8 +626,8 @@ function whyOf(q) {
   if (a && a.headline) return { src: 'AI', label: 'AI 진단', text: a.headline };
   const d = keyDiscToday(q.code);
   if (d) return { src: '공시', label: '오늘 주요 공시', text: `[${d.tag || '공시'}] ${d.title}` };
-  const n = state.news[q.code]?.items?.[0];
-  if (n && n.title) return { src: '뉴스', label: '최근 뉴스', text: n.title };
+  const n = reasonNews(state.news[q.code]?.items);
+  if (n) return { src: '뉴스', label: '최근 뉴스', text: n.title };
   return null;
 }
 function tileHtml(q) {
