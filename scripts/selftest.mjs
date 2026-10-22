@@ -867,6 +867,7 @@ await test('뉴스 관련도: 종목 이름 바로 뒤에 다른 회사 이름(�
   assert.equal(src.isRelevantNews('현대차그룹, AI 인프라 확충…2029년 새만금서 GPU 1만장 운영 추진', car), true, '그룹 기사는 관련');
   assert.equal(src.isRelevantNews('현대차, 증권가 목표가 상향 잇따라', car), true, '쉼표 뒤 증권가는 다른 말');
   assert.equal(src.isRelevantNews('현대자동차 美 관세 합의 수혜', car), true, '별칭');
+  assert.equal(src.isRelevantNews('삼성바이오, 美 공장이 파업 상쇄...수주 회복 기대-현대차證', car), false, '증권사 이름을 한자로 줄여 써도');
   assert.equal(src.isRelevantNews('현대건설기계 장중 3%대 상승', eng), false);
   assert.equal(src.isRelevantNews('로이터 “삼성물산·현대건설, 차세대 SMR 건설 파트너로 부상”', eng), true);
   assert.equal(src.isRelevantNews('Hyundai Motor shares rise', { code: 'HYMTF', market: 'US', name: 'Hyundai', en: 'Hyundai Motor' }), true, '미국 종목은 그대로');
