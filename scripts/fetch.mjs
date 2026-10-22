@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis,
-  aiStatus, aiGate, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, priceOnly,
+  aiStatus, aiGate, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, priceOnly, pickReasonNews,
 } from './sources.mjs';
 import { startBudget, toStored, totalUsed, capacity, inSession, isKrSession, nextAllowanceAt, closedCheckDay, usExtWindow, usAfterPostSameDay } from './aibudget.mjs';
 import { validateWatchlist, writeJsonAtomic, analysisSig, sigMove } from './util.mjs';
@@ -80,6 +80,12 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
   const items = readConfig(root);
   if (!items) return { written, items: 0 };
   console.log(`[fetch] ${items.length}개 종목 갱신 시작…`);
+  // 검색 목록(stocklist.json, 매일 봇이 만듦) — 상장 시장(시장 대비 비교)·미국 영문명(뉴스 관련도)에 쓴다. 없으면 둘 다 생략
+  const stockList = readJson('stocklist.json');
+  const exchOf = new Map([
+    ...(stockList?.kr || []).filter((r) => Array.isArray(r) && r[0] && typeof r[2] === 'string').map((r) => [r[0], r[2]]),
+    ...(stockList?.us || []).filter((r) => Array.isArray(r) && r[0] && typeof r[3] === 'string').map((r) => [r[0], r[3]]),
+  ]);
   const quotesByCode = {}; // 종목별 등락률을 종합분석 대상 선별에 사용
   const history = {};      // 종합분석에서 추세 입력으로 재사용
   const investors = {};    // 종합분석에서 수급 입력으로 재사용
@@ -111,6 +117,8 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
   try {
     const quotes = await getQuotes(items);
     quotes.forEach((q) => { quotesByCode[q.code] = q; });
+    // 상장 시장(검색 목록 기준: 국내 KOSPI·KOSDAQ, 미국 NASDAQ·NYSE 등) — 화면이 종목마다 같은 시장 지수와 비교한다
+    for (const q of quotes) { const e = exchOf.get(q.code); if (e) q.exch = e; }
     if (quotes.some((q) => q.ok)) {
       const prevQuotesFile = readJson('quotes.json');
       // 미국 시간외 가격(ext) — 정규장 밖 종목에만. 시간외 시간대(프리 04:00~09:30·애프터 16:00~20:00 ET)에만 새로 받고,
@@ -207,7 +215,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
   // 5) 종목별 뉴스 (순차 수집으로 과호출 방지) — 받기 실패(ok:false)면 직전 뉴스 유지
   //    미국 종목은 검색 목록(stocklist.json)의 영문 회사명을 함께 넘겨 'Tesla'·'Nvidia'처럼 영문 제목도 관련 기사로 인정한다.
   try {
-    const usEn = new Map((readJson('stocklist.json')?.us || []).filter((r) => Array.isArray(r) && r[0]).map((r) => [r[0], r[2] || '']));
+    const usEn = new Map((stockList?.us || []).filter((r) => Array.isArray(r) && r[0]).map((r) => [r[0], r[2] || '']));
     const withEn = (it) => (it.market === 'US' ? { ...it, en: usEn.get(it.code) || '' } : it);
     await collect('news', '뉴스', 'news.json', (v) => isObj(v) && v.ok === true && Array.isArray(v.items), (it) => getNews(withEn(it)), news);
     const anyNews = Object.values(news).some((n) => n && n.items && n.items.length);
@@ -297,7 +305,8 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
         if (Math.abs(q.changePct) >= STOCK_ANALYSIS_THRESHOLD) {
           const a = an[it.code];
           const d = (disclosures[it.code]?.items || []).find((x) => x && x.key && x.title && x.date <= day && x.date >= dayStart(3));
-          const n = (news[it.code]?.items || []).find((x) => x && x.title && !priceOnly(x.title) && Number.isFinite(x.pubMs) && ymdIn(x.pubMs, tz) >= dayStart(1));
+          const n = pickReasonNews((news[it.code]?.items || []).filter((x) => x && Number.isFinite(x.pubMs) && ymdIn(x.pubMs, tz) >= dayStart(1)),
+            q.changePct, day, (ms) => ymdIn(ms, tz), [q.name]);
           const why = a && a.headline && Number.isFinite(a.at) && ymdIn(a.at, tz) >= day ? { r: a.headline, s: 'ai' }
             : d ? { r: `[${d.tag || '공시'}] ${d.title}`, s: 'disc' } : n ? { r: n.title, s: 'news' } : { r: '', s: '' };
           const old = i >= 0 ? list[i] : null;

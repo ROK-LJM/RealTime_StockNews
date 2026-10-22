@@ -1056,12 +1056,13 @@ await test('시세 안내 기사: 날짜·가격만 있는 자동 기사·"주�
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
   const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
-  const f = vm.runInNewContext(`${block}; ({ priceOnly, reasonNews })`, {});
+  const f = vm.runInNewContext(`${block}; ({ priceOnly, pickReasonNews })`, {});
   for (const t of [...PRICE_ONLY_YES, ...PRICE_ONLY_NO, '', '삼성전자 주가 하락 출발']) assert.equal(f.priceOnly(t), src.priceOnly(t), `화면·봇 같은 판정: ${t}`);
   const items = [{ title: PRICE_ONLY_YES[0] }, { title: '' }, { title: PRICE_ONLY_YES[4] }, { title: PRICE_ONLY_NO[0] }, { title: PRICE_ONLY_NO[1] }];
-  assert.equal(f.reasonNews(items).title, PRICE_ONLY_NO[0], '시세 안내 기사를 건너뛴 가장 최근 기사');
-  assert.equal(f.reasonNews([{ title: PRICE_ONLY_YES[1] }]), null);
-  assert.equal(f.reasonNews(null), null);
+  const none = () => '';
+  assert.equal(f.pickReasonNews(items, -2.5, '', none).title, PRICE_ONLY_NO[0], '시세 안내 기사를 건너뛴 가장 최근 기사(방향이 반대인 기사는 제외)');
+  assert.equal(f.pickReasonNews([{ title: PRICE_ONLY_YES[1] }], -2.5, '', none), null);
+  assert.equal(f.pickReasonNews(null, -2.5, '', none), null);
 });
 await test('급등락 기록: 이유로 쓸 뉴스는 시세 안내 기사를 건너뛴 가장 최근 기사', async () => {
   const root = workspace();
@@ -1079,6 +1080,75 @@ await test('급등락 기록: 이유로 쓸 뉴스는 시세 안내 기사를 �
   const onlyPrice = (m, u) => { const name = queryName(u); return text(`<?xml version="1.0"?><rss><channel><item><title>${name} 주가 상승 중 - 테스트일보</title><link>https://news.example.com/p</link><pubDate>${new Date(Date.now() - 600e3).toUTCString()}</pubDate><source url="https://news.example.com">테스트일보</source></item></channel></rss>`); };
   await pipeline(r2, { gemini: () => text('upstream error', 500), krAt: NOW_KR, news: onlyPrice });
   assert.deepEqual(read(r2, 'moves.json')['005930'][0], { d: '20261015', p: 4.2, r: '', s: '' });
+});
+await test('이유 고르기: 상품 상장 공지·방향이 반대인 기사 제외 · 그날 같은 방향 [특징주] 먼저 · 나열 기사는 뒤로 · 같은 등급은 최신순 · 봇과 화면 같음', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(`${block}; ({ pickReasonNews })`, {});
+  const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const at = (h) => T(`2026-10-22T${String(h).padStart(2, '0')}:00:00+09:00`), yday = T('2026-10-21T15:00:00+09:00');
+  const items = [
+    { title: '“삼성전자·SK하이닉스 등락에 투자”…한국투자증권, ELW 224종 상장', pubMs: at(14) },
+    { title: '[오늘의 특징주] 엠에스바이오 136% 폭등...SKAI·에이전트AI 상한가, 비나텍·삼성E&A도 급등', pubMs: at(13) },
+    { title: '코스피 20% 빠질 때 15% 급등… ESS 동력 삼아 날아오른 LG엔솔', pubMs: at(12) },
+    { title: '[특징주] 삼성E&A, 어닝 서프라이즈에 6900억 자사주 소각 얹자 14%↑', pubMs: at(11) },
+    { title: 'LG엔솔 악몽이… 개미 울린 ‘중복상장’ 잔혹사', pubMs: at(10) },
+    { title: '[특징주] 어제 오른 이유…자사주 소각에 급등', pubMs: yday },
+  ];
+  const pick = (list, pct, names = []) => {
+    const a = src.pickReasonNews(list, pct, '20261022', kst, names), b = f.pickReasonNews(list, pct, '20261022', kst, names);
+    assert.equal(b ? b.title : null, a ? a.title : null, '봇·화면 같은 선택');
+    return a ? a.title : null;
+  };
+  assert.equal(pick(items, 16.1), items[3].title, '오른 날: 그날 같은 방향 [특징주]');
+  assert.equal(pick(items.filter((x, i) => i !== 3), 16.1), items[2].title, '[특징주]가 없으면 방향이 어긋나지 않는 가장 최근 기사(상장 공지·나열 기사 제외)');
+  assert.equal(pick(items, -3.65), items[4].title, "내린 날: '급등' 기사·오른 [특징주]는 빼고 나열 기사는 뒤로");
+  assert.equal(pick([items[2], items[3]], -3.65), null, '방향이 반대인 기사뿐이면 이유 없음');
+  assert.equal(pick([items[1], items[0]], 2.5), items[1].title, '나열 기사밖에 없으면 그것이라도');
+  assert.equal(pick([{ title: '[오늘의 증권가 콜] LS ELECTRIC, 유니드, 삼성바이오, LIG디펜스, 테스, 한화솔루션 등', pubMs: at(9) }, items[5]], 2.5), items[5].title, '쉼표로 여러 종목 나열 + 등 = 나열 기사');
+  assert.equal(pick([items[0], { title: 'SK하이닉스 주가 하락 중' }], -3), null, '상장 공지·시세 안내뿐이면 없음');
+  assert.equal(pick(items, 0), items[2].title, '보합이면 방향 판단 없이 최신순(상장 공지·나열 기사 제외)');
+  // 한 제목에 두 종목 — 그 종목 이름 바로 뒤의 말로 방향을 본다
+  const mixed = [{ title: "[특징주] 삼성전자 '상승' SK하이닉스 1%대 '하락'.. 차익실현 매물 출회", pubMs: at(14) }, { title: '삼성전자, HBM 공급 협상 지연 우려', pubMs: at(12) }];
+  assert.equal(pick(mixed, -2.9, ['삼성전자']), mixed[1].title, "삼성전자는 이름 뒤 '상승' — 오늘 하락과 반대라 제외");
+  assert.equal(pick(mixed, -3.25, ['SK하이닉스']), mixed[0].title, "SK하이닉스는 이름 뒤 '하락' — 같은 방향 [특징주]");
+  assert.equal(pick([{ title: '[특징주] 반도체 대형주 약세 전환…삼성전자, 외국인 매도 확대', pubMs: at(13) }, mixed[1]], -2.9, ['삼성전자']),
+    '[특징주] 반도체 대형주 약세 전환…삼성전자, 외국인 매도 확대', '이름 바로 뒤에 방향 말이 없으면 제목 전체(약세)로');
+});
+await test('시장 대비(app.js): 국내 코스피·코스닥 · 미국 나스닥 상장은 나스닥 · 그 밖은 S&P 500 · 시장 따라(같은 방향·1%p 안쪽·지수 1% 이상) · 모르면 비교 안 함', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(`${block}; ({ vsMarket })`, {});
+  const idx = [{ symbol: '^KS11', changePct: -1.97 }, { symbol: '^KQ11', changePct: -1.85 }, { symbol: '^GSPC', changePct: 0.58 }, { symbol: '^IXIC', changePct: 1.05 }];
+  const v = (q) => { const r = f.vsMarket({ ok: true, ...q }, idx); return r ? JSON.parse(JSON.stringify(r)) : null; };
+  assert.deepEqual(v({ market: 'KR', exch: 'KOSPI', changePct: -2.5 }), { sym: '^KS11', name: '코스피', pct: -1.97, diff: -0.53, follows: true });
+  assert.deepEqual(v({ market: 'KR', exch: 'KOSDAQ', changePct: 3 }), { sym: '^KQ11', name: '코스닥', pct: -1.85, diff: 4.85, follows: false });
+  assert.deepEqual(v({ market: 'US', exch: 'NASDAQ', changePct: 2.54 }), { sym: '^IXIC', name: '나스닥', pct: 1.05, diff: 1.49, follows: false }, '1%p 넘게 차이');
+  assert.equal(v({ market: 'US', exch: 'NYSE', changePct: 0.9 }).follows, false, '지수가 1% 안 움직인 날은 시장 따라 아님');
+  assert.equal(v({ market: 'US', exch: 'NYSE', changePct: 0.9 }).name, 'S&P 500');
+  assert.equal(v({ market: 'US', exch: 'NASDAQ ETF', changePct: 1 }).name, '나스닥');
+  assert.equal(v({ market: 'KR', exch: 'KOSPI', changePct: 2.5 }).follows, false, '반대 방향');
+  assert.equal(v({ market: 'KR', changePct: -2.5 }), null, '상장 시장을 모르면 비교 안 함');
+  assert.equal(f.vsMarket({ ok: false, market: 'KR', exch: 'KOSPI', changePct: -2 }, idx), null);
+  assert.equal(f.vsMarket({ ok: true, market: 'KR', exch: 'KOSPI', changePct: -2 }, [{ symbol: '^KQ11', changePct: -1 }]), null, '그 지수가 없으면 비교 안 함');
+});
+await test('상장 시장(quotes.json exch): 검색 목록의 국내 KOSPI·KOSDAQ · 미국 거래소 · 목록에 없으면 없음 · 시세 안내 기사는 "시세" 표시·호재/악재 집계 제외', async () => {
+  const root = workspace();
+  writeData(root, 'stocklist.json', { v: 2, kr: [['005930', '삼성전자', 'KOSPI', 1]], us: [['AAPL', '애플', 'Apple Inc.', 'NASDAQ', 1]], meta: {} });
+  const news = (m, u) => {
+    const name = queryName(u), now = Date.now();
+    const item = (t, ago) => `<item><title>${t} - 테스트일보</title><link>https://news.example.com/${ago}</link><pubDate>${new Date(now - ago).toUTCString()}</pubDate><source url="https://news.example.com">테스트일보</source></item>`;
+    return text(`<?xml version="1.0"?><rss><channel>${item(`${name} 주가 상승 중`, 600e3)}${item(`${name}, 대규모 수주 소식`, 900e3)}</channel></rss>`);
+  };
+  await pipeline(root, { news });
+  const q = Object.fromEntries(read(root, 'quotes.json').quotes.map((x) => [x.code, x]));
+  assert.deepEqual([q['005930'].exch, q.AAPL.exch, q['000660'].exch], ['KOSPI', 'NASDAQ', undefined]);
+  const n = read(root, 'news.json')['005930'];
+  assert.deepEqual([n.items[0].sentiment.label, n.items[0].sentiment.tone], ['시세', 'neutral'], "'상승'이 들어 있어도 시세 안내 기사는 호재가 아님");
+  assert.equal(n.items[1].sentiment.label, '호재');
+  assert.deepEqual([n.summary.pos, n.summary.neg, n.summary.label], [1, 0, '호재 우세']);
 });
 await test('공시 도구: ZIP(압축·무압축·데이터 설명자) 속 XML · 상장사만 표로 · 우선주는 보통주 회사 · 종류 판정 · 한국 날짜', () => {
   const xml = corpXml();

@@ -346,6 +346,35 @@ export const PRICE_ONLY = [
   /^\S+(?:\s\S+){0,3}\s거래량\s*[\d.]+%\s*(?:증가|감소)/,
 ];
 export const priceOnly = (title) => PRICE_ONLY.some((re) => re.test(String(title ?? '').trim()));
+// 이유로 쓸 뉴스 고르기(급등락 기록) — docs/app.js의 pickReasonNews와 같게 유지(자체 테스트가 비교).
+// 시세 안내·상품 상장 공지('…ELW 224종 상장')·방향이 반대인 기사('15% 급등' 기사인데 오늘은 하락 — 이유일 수 없음)는 빼고
+// ① 그날 나온 같은 방향의 [특징주] → ② 그 밖의 기사 → ③ 여러 종목 나열·'[오늘의 …]' 모음 순. 같은 등급 안에서는 최신순.
+export const LISTING_RE = /(ELW|ETN|ETF|리츠|스팩)[^…]{0,30}상장|신규\s*상장/;
+const UP_RE = /상승|강세|급등|반등|↑|오름|올라|치솟|폭등|상한가|신고가/;
+const DOWN_RE = /하락|약세|급락|↓|내림|내려|떨어|폭락|하한가|신저가|주춤|추락/;
+const roundupTitle = (t) => ((t.match(/[,，]/g) || []).length >= 3 && /등\s*$/.test(t)) || /^\[오늘의\s?[^\]]*\]/.test(t);
+const titleDir = (t) => (UP_RE.test(t) ? 1 : 0) - (DOWN_RE.test(t) ? 1 : 0); // 1 오름 말만 · -1 내림 말만 · 0 둘 다·없음
+// 그 종목의 방향 — 한 제목에 여러 종목이면('[특징주] 삼성전자 '상승' SK하이닉스 1%대 '하락'') 종목 이름 바로 뒤 10자 안의
+// 오름·내림 말로, 없으면 제목 전체로 판단
+function nameDir(t, names) {
+  for (const n of names || []) {
+    const i = n ? t.indexOf(n) : -1;
+    if (i < 0) continue;
+    const seg = t.slice(i + n.length, i + n.length + 10);
+    const d = (UP_RE.test(seg) ? 1 : 0) - (DOWN_RE.test(seg) ? 1 : 0);
+    if (d) return d;
+  }
+  return titleDir(t);
+}
+// items: 최신순 뉴스, pct: 그날 등락률, day: 그 시장 현지 날짜(YYYYMMDD), ymd(ms): 같은 기준의 날짜 함수, names: 종목 이름들
+export function pickReasonNews(items, pct, day, ymd, names = []) {
+  const s = Math.sign(Number(pct) || 0);
+  const dir = (t) => nameDir(t, names);
+  const tier = (it) => (/\[특징주\]/.test(it.title) && s && dir(it.title) === s && Number.isFinite(it.pubMs) && ymd(it.pubMs) === day ? 0
+    : roundupTitle(it.title) ? 2 : 1);
+  return (Array.isArray(items) ? items : []).filter((it) => it && it.title && !priceOnly(it.title) && !LISTING_RE.test(it.title) && !(s && dir(it.title) === -s))
+    .map((it, i) => [tier(it), i, it]).sort((a, b) => a[0] - b[0] || a[1] - b[1])[0]?.[2] || null;
+}
 
 export async function getNews(item) {
   const code = String(item.code).trim();
@@ -362,6 +391,8 @@ export async function getNews(item) {
     const items = market === 'KR'
       ? await googleNews(`${krBaseName(item.name || code, code)} 주가`, true, 2, keep)
       : await googleNews(`${item.name || code} ${code} stock`, false, 2, keep);
+    // 시세 안내 기사의 '상승·하락'은 가격 설명일 뿐 호재·악재가 아니다 — '시세' 표시로 바꾸고 호재·악재 집계에서 뺀다
+    for (const it of items) if (priceOnly(it.title)) it.sentiment = { label: '시세', tone: 'neutral', score: 0, keywords: [] };
     let pos = 0, neg = 0;
     for (const it of items) { if (it.sentiment.tone === 'pos') pos++; else if (it.sentiment.tone === 'neg') neg++; }
     const summary = { label: pos > neg ? '호재 우세' : neg > pos ? '악재 우세' : '중립', tone: pos > neg ? 'pos' : neg > pos ? 'neg' : 'neutral', pos, neg, total: items.length };

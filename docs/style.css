@@ -228,6 +228,8 @@ input::placeholder { color: var(--muted); }
 .src, .ai-badge, .an-badge { display: inline-block; padding: 0 5px; border-radius: 4px; background: var(--surface-3); color: var(--text-2);
   font-size: 11px; font-weight: 700; line-height: 18px; white-space: nowrap; vertical-align: 1px; }
 .src { margin-right: 7px; }
+/* '시장 따라' — 시장 전체와 비슷하게 움직임(이유 출처 표시와 구분되게 테두리만) */
+.src.mkt { background: transparent; box-shadow: inset 0 0 0 1px var(--line-2); color: var(--text-2); }
 .why-more { display: inline-flex; align-items: center; gap: 2px; margin-top: 4px; padding: 4px 0; border: 0; background: none;
   color: var(--text-2); font-size: 12.5px; font-weight: 600; }
 .why-more:hover { color: var(--text); }
@@ -326,6 +328,10 @@ input::placeholder { color: var(--muted); }
 .ext-row { margin-top: 2px; font-size: 13px; font-variant-numeric: tabular-nums; }
 .ext-row .ext-label { margin-right: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .ext-row b { font-weight: 700; }
+/* 같은 시장 지수 대비 — 시세 아래 한 줄('코스피 -1.97% 대비 +0.85%p') */
+.vs-row { margin-top: 2px; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; cursor: help; }
+.vs-row b { font-weight: 700; }
+.vs-row .src { margin-left: 4px; }
 
 /* 급등락 종목 AI 종합분석 — 한 줄 진단 + 펼치기 */
 .analysis { margin-top: 10px; }

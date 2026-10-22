@@ -28,6 +28,7 @@ function fmtChange(q) {
   return sign + '$' + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 function fmtPct(pct) { return pct == null ? '' : `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`; }
+function fmtPctP(d) { return d == null ? '' : `${d >= 0 ? '+' : ''}${d.toFixed(2)}%p`; } // 두 등락률의 차이(%포인트)
 function dirClass(pct) { return pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat'; }
 function fmtVol(v) {
   if (v == null) return '—';
@@ -326,7 +327,6 @@ async function loadMarket() {
     $('#indices').innerHTML = groups.map(([title, rows]) => `<div class="idx-group"><div class="idx-gt">${title}</div>${rows.join('')}</div>`).join('')
       || '<div class="muted">지수 데이터를 불러오지 못했습니다.</div>';
     try { renderBriefs(m.briefs); } catch (e) { console.warn('브리핑 렌더 실패:', e); } // 브리핑이 깨져도 게이지·지수는 유지
-    if (state.data) { try { renderBoard(orderedGroups(state.data.quotes || []), state.data.closed); } catch (e) { console.warn('한눈에 렌더 실패:', e); } } // 지수 비교 반영
   } catch (e) {
     $('#moodLabel').textContent = '시장 데이터 대기 중'; $('#moodSummary').textContent = '아직 데이터가 생성되지 않았을 수 있어요(첫 갱신 대기).';
   }
@@ -539,8 +539,50 @@ const PRICE_ONLY = [
   /^\S+(?:\s\S+){0,3}\s거래량\s*[\d.]+%\s*(?:증가|감소)/,
 ];
 const priceOnly = (title) => PRICE_ONLY.some((re) => re.test(String(title ?? '').trim()));
-// 이유로 쓸 뉴스 — 시세 안내 기사를 건너뛴 가장 최근 기사(뉴스는 최신순)
-function reasonNews(items) { return (Array.isArray(items) ? items : []).find((x) => x && x.title && !priceOnly(x.title)) || null; }
+// 이유로 쓸 뉴스 고르기 — scripts/sources.mjs의 pickReasonNews와 같게 유지(자체 테스트가 비교).
+// 시세 안내·상품 상장 공지('…ELW 224종 상장')·방향이 반대인 기사('15% 급등' 기사인데 오늘은 하락 — 이유일 수 없음)는 빼고
+// ① 그날 나온 같은 방향의 [특징주] → ② 그 밖의 기사 → ③ 여러 종목 나열·'[오늘의 …]' 모음 순. 같은 등급 안에서는 최신순.
+const LISTING_RE = /(ELW|ETN|ETF|리츠|스팩)[^…]{0,30}상장|신규\s*상장/;
+const UP_RE = /상승|강세|급등|반등|↑|오름|올라|치솟|폭등|상한가|신고가/;
+const DOWN_RE = /하락|약세|급락|↓|내림|내려|떨어|폭락|하한가|신저가|주춤|추락/;
+const roundupTitle = (t) => ((t.match(/[,，]/g) || []).length >= 3 && /등\s*$/.test(t)) || /^\[오늘의\s?[^\]]*\]/.test(t);
+const titleDir = (t) => (UP_RE.test(t) ? 1 : 0) - (DOWN_RE.test(t) ? 1 : 0); // 1 오름 말만 · -1 내림 말만 · 0 둘 다·없음
+// 그 종목의 방향 — 한 제목에 여러 종목이면('[특징주] 삼성전자 '상승' SK하이닉스 1%대 '하락'') 종목 이름 바로 뒤 10자 안의
+// 오름·내림 말로, 없으면 제목 전체로 판단
+function nameDir(t, names) {
+  for (const n of names || []) {
+    const i = n ? t.indexOf(n) : -1;
+    if (i < 0) continue;
+    const seg = t.slice(i + n.length, i + n.length + 10);
+    const d = (UP_RE.test(seg) ? 1 : 0) - (DOWN_RE.test(seg) ? 1 : 0);
+    if (d) return d;
+  }
+  return titleDir(t);
+}
+// items: 최신순 뉴스, pct: 그날 등락률, day: 그 시장 현지 날짜(YYYYMMDD), ymd(ms): 같은 기준의 날짜 함수, names: 종목 이름들
+function pickReasonNews(items, pct, day, ymd, names = []) {
+  const s = Math.sign(Number(pct) || 0);
+  const dir = (t) => nameDir(t, names);
+  const tier = (it) => (/\[특징주\]/.test(it.title) && s && dir(it.title) === s && Number.isFinite(it.pubMs) && ymd(it.pubMs) === day ? 0
+    : roundupTitle(it.title) ? 2 : 1);
+  return (Array.isArray(items) ? items : []).filter((it) => it && it.title && !priceOnly(it.title) && !LISTING_RE.test(it.title) && !(s && dir(it.title) === -s))
+    .map((it, i) => [tier(it), i, it]).sort((a, b) => a[0] - b[0] || a[1] - b[1])[0]?.[2] || null;
+}
+// O1 시장 대비 — 종목마다 같은 시장 지수와 비교(국내 상장 시장별 코스피·코스닥, 미국 나스닥 상장은 나스닥 · 그 밖은 S&P 500).
+// 상장 시장(q.exch)은 봇이 검색 목록에서 붙인다 — 모르면 비교하지 않는다. 지수가 1% 넘게 움직인 날 같은 방향으로 1%p 안쪽이면 '시장 따라'
+const BENCH_NAME = { '^KS11': '코스피', '^KQ11': '코스닥', '^GSPC': 'S&P 500', '^IXIC': '나스닥' };
+function benchFor(q, indices) {
+  const ex = String(q && q.exch || '');
+  const sym = marketOf(q || {}) === 'KR' ? (ex === 'KOSPI' ? '^KS11' : ex === 'KOSDAQ' ? '^KQ11' : null) : (!ex ? null : /NASDAQ/.test(ex) ? '^IXIC' : '^GSPC');
+  const i = sym && (indices || []).find((x) => x && x.symbol === sym && Number.isFinite(x.changePct));
+  return i ? { sym, name: BENCH_NAME[sym], pct: i.changePct } : null;
+}
+function vsMarket(q, indices) {
+  const b = q && q.ok && Number.isFinite(q.changePct) ? benchFor(q, indices) : null;
+  if (!b) return null;
+  const diff = Math.round((q.changePct - b.pct) * 100) / 100;
+  return { ...b, diff, follows: Math.abs(b.pct) >= 1 && Math.sign(q.changePct) === Math.sign(b.pct) && Math.abs(diff) < 1 };
+}
 
 // ---------- 데이터 지연 경고 ----------
 // 수집 봇(5분 간격)이 멈추거나 시세 출처가 막혀도 화면은 마지막 값을 그대로 보여준다 — 장중인데 오래 그대로면 알린다.
@@ -626,7 +668,8 @@ function whyOf(q) {
   if (a && a.headline) return { src: 'AI', label: 'AI 진단', text: a.headline };
   const d = keyDiscToday(q.code);
   if (d) return { src: '공시', label: '오늘 주요 공시', text: `[${d.tag || '공시'}] ${d.title}` };
-  const n = reasonNews(state.news[q.code]?.items);
+  const m = marketOf(q), at = +new Date(q.asOf);
+  const n = pickReasonNews(state.news[q.code]?.items, q.changePct, Number.isFinite(at) ? marketYmd(at, m) : '', (ms) => marketYmd(ms, m), [q.name]);
   if (n) return { src: '뉴스', label: '최근 뉴스', text: n.title };
   return null;
 }
@@ -639,7 +682,8 @@ function tileHtml(q) {
   const disc = keyDiscToday(q.code);
   const x = extOf(q);
   const mk = sixMonthMark(q, state.hist[q.code]);
-  const tip = `${q.name} ${fmtPct(p)}${x ? ` · ${x.label} ${fmtPct(x.changePct)}` : ''}${mk ? ` · 6개월 ${mk === 'high' ? '신고가' : '신저가'}` : ''}${disc ? ` · 오늘 주요 공시: ${disc.title}` : ''}`;
+  const vs = vsMarket(q, state.market?.indices);
+  const tip = `${q.name} ${fmtPct(p)}${vs ? ` · ${vs.name} 대비 ${fmtPctP(vs.diff)}${vs.follows ? '(시장 따라)' : ''}` : ''}${x ? ` · ${x.label} ${fmtPct(x.changePct)}` : ''}${mk ? ` · 6개월 ${mk === 'high' ? '신고가' : '신저가'}` : ''}${disc ? ` · 오늘 주요 공시: ${disc.title}` : ''}`;
   return `<button type="button" class="tile ${dirClass(p)} h${lv}" data-code="${esc(q.code)}" title="${esc(tip)}">
     <span class="t-nm">${esc(q.name)}</span><span class="t-pct">${fmtPct(p)}</span>${x ? `<span class="t-ext">${x.short} ${fmtPct(x.changePct)}</span>` : ''}${disc ? '<span class="t-dot" role="img" aria-label="오늘 주요 공시"></span>' : ''}</button>`;
 }
@@ -683,11 +727,11 @@ function renderBoard(groups, closed) {
     .sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct)));
   const show = isNarrow() ? 4 : WHY_SHOW; // 휴대폰은 처음에 4줄
   const rows = movers.map((q, i) => {
-    const w = whyOf(q), p = q.changePct;
+    const w = whyOf(q), p = q.changePct, vs = vsMarket(q, state.market?.indices);
     return `<button type="button" class="why-row${i >= show && !state.whyAll ? ' more' : ''}" data-code="${esc(q.code)}">
       <span class="w-pct ${dirClass(p)}-c">${p > 0 ? '▲' : '▼'} ${Math.abs(p).toFixed(2)}%</span>
       <span class="w-nm">${esc(q.name)}</span>
-      <span class="w-txt">${w ? `<span class="src" title="${esc(w.label)}">${w.src}</span>${esc(w.text)}` : '<span class="muted">아직 이유 정보가 없어요(뉴스·공시·AI 대기)</span>'}</span>
+      <span class="w-txt">${vs && vs.follows ? `<span class="src mkt" title="같은 날 ${esc(vs.name)} ${fmtPct(vs.pct)} — 시장 전체와 비슷하게 움직임(차이 ${fmtPctP(vs.diff)})">시장 따라</span>` : ''}${w ? `<span class="src" title="${esc(w.label)}">${w.src}</span>${esc(w.text)}` : '<span class="muted">아직 이유 정보가 없어요(뉴스·공시·AI 대기)</span>'}</span>
     </button>`;
   }).join('');
   const more = movers.length > show && !state.whyAll ? `<button type="button" class="why-more" data-why="all">${movers.length - show}종목 더 보기<svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></button>` : '';
@@ -768,6 +812,13 @@ function basisOf(q, data) {
 
 // ---------- 지난 급등락 (봇이 ±2% 넘게 움직인 날마다 남긴 등락·이유) ----------
 const MOVE_SRC = { ai: 'AI', disc: '공시', news: '뉴스' };
+// 같은 시장 지수 대비 — 0에 가까우면 시장 전체와 비슷하게 움직인 것
+function vsRow(q) {
+  const v = vsMarket(q, state.market?.indices);
+  if (!v) return '';
+  return `<div class="vs-row" title="같은 날 ${esc(v.name)} 등락(${fmtPct(v.pct)})을 뺀 값 — 0에 가까우면 시장 전체와 비슷하게 움직인 것">`
+    + `${esc(v.name)} ${fmtPct(v.pct)} 대비 <b class="${dirClass(v.diff)}-c">${fmtPctP(v.diff)}</b>${v.follows ? ' <span class="src mkt">시장 따라</span>' : ''}</div>`;
+}
 function renderMoves(q, list) {
   const el = document.getElementById('moves-' + cssId(q.code));
   if (!el) return;
@@ -903,6 +954,7 @@ function renderCard(q, hist, inv) {
       <span class="chg ${c}-c">${arrow} ${fmtChange({ change: q.change, currency: q.currency })} (${fmtPct(q.changePct)})</span>
     </div>
     ${extRow(q)}
+    ${vsRow(q)}
     <div class="analysis" id="analysis-${id}"></div>
     ${retRow}
     <div class="chart"><canvas id="chart-${id}"></canvas></div>
@@ -1007,7 +1059,7 @@ async function loadStatus() {
 async function tick() {
   await loadManifest(); // 지문 먼저(작음) — 바뀐 파일만 받는다
   loadStatus().catch(() => {});
-  loadMarket().catch((e) => console.warn('시장 갱신 실패:', e));
+  await loadMarket().catch((e) => console.warn('시장 갱신 실패:', e)); // 지수 먼저 — 카드·'한눈에'의 시장 대비가 같은 회차 지수를 쓰게
   loadQuotes().catch((e) => console.warn('종목 갱신 실패:', e));
 }
 function restartTimer() {
