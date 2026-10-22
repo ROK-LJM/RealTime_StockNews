@@ -860,6 +860,17 @@ await test('뉴스 관련도: 우선주는 보통주 이름 · 영문 핵심 이
   assert.ok(src.SPAM_RE.test('규칙이 적용되는 순서가 궁금한 a1 카지노') && src.SPAM_RE.test('먹튀 없는 토토사이트 추천'));
   assert.ok(!src.SPAM_RE.test('개미들, 엔비디아에 베팅') && !src.SPAM_RE.test('삼성전자, 새 메모리 슬롯 규격 공개'), '금융 기사의 베팅·슬롯은 스팸 아님');
 });
+await test('뉴스 관련도: 종목 이름 바로 뒤에 다른 회사 이름(현대차증권·현대건설기계)이 이어지면 그 회사 기사 · 그룹·제대로 된 언급은 관련', () => {
+  const car = { code: '005380', market: 'KR', name: '현대차' }, eng = { code: '000720', market: 'KR', name: '현대건설' };
+  assert.equal(src.isRelevantNews('현대차증권, LS일렉트릭 내년 이익 전망 상향...“미국 빅테크 수주·매출 증가”', car), false);
+  assert.equal(src.isRelevantNews('현대차증권 "현대차 목표가 상향…하이브리드 판매 호조"', car), true, '같은 제목에 현대차 언급이 따로 있으면 관련');
+  assert.equal(src.isRelevantNews('현대차그룹, AI 인프라 확충…2029년 새만금서 GPU 1만장 운영 추진', car), true, '그룹 기사는 관련');
+  assert.equal(src.isRelevantNews('현대차, 증권가 목표가 상향 잇따라', car), true, '쉼표 뒤 증권가는 다른 말');
+  assert.equal(src.isRelevantNews('현대자동차 美 관세 합의 수혜', car), true, '별칭');
+  assert.equal(src.isRelevantNews('현대건설기계 장중 3%대 상승', eng), false);
+  assert.equal(src.isRelevantNews('로이터 “삼성물산·현대건설, 차세대 SMR 건설 파트너로 부상”', eng), true);
+  assert.equal(src.isRelevantNews('Hyundai Motor shares rise', { code: 'HYMTF', market: 'US', name: 'Hyundai', en: 'Hyundai Motor' }), true, '미국 종목은 그대로');
+});
 await test('뉴스 관련도(파이프라인): 무관 기사·스팸은 빼고 관련 기사만 저장 · 우선주는 보통주로 검색 · 미국은 검색 목록 영문명으로', async () => {
   const root = workspace([...ITEMS, { code: '066575', market: 'KR', name: 'LG전자우' }]);
   writeData(root, 'stocklist.json', { v: 2, kr: [], us: [['AAPL', '애플', 'Apple Inc.', 'NASDAQ', 1]], meta: {} });

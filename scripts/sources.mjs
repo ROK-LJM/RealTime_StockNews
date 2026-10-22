@@ -325,10 +325,26 @@ export function newsKeys(item) {
   for (const a of NEWS_ALIAS[code] || []) add(a);
   return [...keys];
 }
+// 이름 바로 뒤에 계열사·다른 회사 이름이 이어지면('현대차' → '현대차증권, LS일렉트릭…', '현대건설' → '현대건설기계') 그 회사 기사
+// (실측 2026-10-22: 현대차 이유로 '현대차증권' 기사가 잡힘). '현대차그룹'처럼 그 회사 묶음은 관련 기사로 둔다.
+const AFFILIATE_SUFFIX = /^(?:증권|투자증권|캐피탈|카드|생명|화재|손해보험|손보|자산운용|기계|엔지니어링|중공업|모비스|글로비스|제철|로템|위아|오토에버|바이오로직스|바이오에피스|리츠|인베스트먼트|파트너스)/;
+function onlyAffiliate(raw, item) {
+  if (item?.market !== 'KR') return false;
+  const code = String(item.code ?? '').trim();
+  const names = [...new Set([item.name, krBaseName(item.name, code), ...(NEWS_ALIAS[code] || [])].filter(Boolean))];
+  let found = false;
+  for (const n of names) {
+    for (let i = raw.indexOf(n); i >= 0; i = raw.indexOf(n, i + 1)) {
+      found = true;
+      if (!AFFILIATE_SUFFIX.test(raw.slice(i + n.length))) return false; // 제대로 된 언급이 하나라도 있으면 관련 기사
+    }
+  }
+  return found; // 찾은 이름이 모두 다른 회사 이름의 앞부분(이름을 못 찾았으면 아래 일반 판정 그대로)
+}
 // 관련 기사인가 — 열쇠말이 제목에 있거나, 미국 종목이면 티커가 대문자 단어로 있으면('PLUG'는 되고 'plug-in'은 안 됨)
 export function isRelevantNews(title, item, keys = newsKeys(item)) {
   const t = normTitle(title);
-  if (keys.some((k) => t.includes(k))) return true;
+  if (keys.some((k) => t.includes(k))) return !onlyAffiliate(String(title ?? ''), item);
   const code = String(item?.code ?? '').trim();
   return item?.market !== 'KR' && /^[A-Z][A-Z.\-]{0,9}$/.test(code)
     && new RegExp(`(^|[^A-Za-z])${code.replace(/[.\-]/g, '\\$&')}([^A-Za-z]|$)`).test(String(title ?? ''));
