@@ -258,10 +258,18 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
   //       한도에 걸린 종목은 이전 분석을 그대로 유지하고 다음 회차에 갱신되므로 화면에서 사라지지 않는다.
   //    ③ 하루 예산을 장 시간에 맞춰 나눠 쓴다(aibudget.mjs) — 지금 쓸 차례가 아니면 ②와 같이 다음 회차로 미룬다.
   //    ④ 시세를 하나도 못 받은 회차엔 손대지 않는다 — 급등락 대상이 '없음'으로 보여 기존 분석을 {}로 지우던 문제 방지.
+  //    ⑤ 공시 일정 달력의 가까운 일정(그 시장 날짜로 그제~7일 뒤 — 실적 발표 예정·IR·배당락 등)을 원인 후보로 함께 넘긴다.
+  //       시그니처에는 넣지 않는다(일정만 바뀌었다고 다시 분석하지 않음 — 새 공시는 공시 쪽 시그니처로 이미 다시 분석된다).
   if (!Object.values(quotesByCode).some((q) => q && q.ok)) console.warn('  ! 시세 없음 — analysis.json 유지');
   else try {
     const prev = readJson('analysis.json') || {};
     const analysis = {};
+    const cal = readJson('calendar.json');
+    // 지난 공시('disc')·이미 낸 실적 공시는 뺀다 — 공시는 공시 줄로 따로 들어간다
+    const scheduleOf = (it) => {
+      const tz = MARKET_TZ[it.market] || MARKET_TZ.US, from = ymdIn(now - 2 * 86400e3, tz), to = ymdIn(now + 7 * 86400e3, tz);
+      return (Array.isArray(cal?.events) ? cal.events : []).filter((e) => e && e.c === it.code && e.k !== 'disc' && e.t !== '실적 공시' && e.d >= from && e.d <= to);
+    };
     const movers = items
       .map((it) => ({ it, q: quotesByCode[it.code] }))
       .filter(({ q }) => q && q.ok && Math.abs(q.changePct ?? 0) >= STOCK_ANALYSIS_THRESHOLD)
@@ -281,7 +289,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
       }
       calls++;
       try {
-        const a = await aiStockAnalysis({ quote: q, news: news[it.code], flow: investors[it.code], history: history[it.code], disclosures: disclosures[it.code], now });
+        const a = await aiStockAnalysis({ quote: q, news: news[it.code], flow: investors[it.code], history: history[it.code], disclosures: disclosures[it.code], schedule: scheduleOf(it), now });
         if (a) analysis[it.code] = { ...a, sig, at: now };
         else if (prev[it.code]) analysis[it.code] = prev[it.code]; // 일시적 실패 시 기존 분석 유지
       } catch (e) { console.error(`    종합분석 실패(${it.code}):`, e.message); if (prev[it.code]) analysis[it.code] = prev[it.code]; }

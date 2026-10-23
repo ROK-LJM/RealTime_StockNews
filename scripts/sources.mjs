@@ -391,7 +391,7 @@ export const PRICE_ONLY = [
 export const priceOnly = (title) => PRICE_ONLY.some((re) => re.test(String(title ?? '').trim()));
 // 이유로 쓸 뉴스 고르기(급등락 기록) — docs/app.js의 pickReasonNews와 같게 유지(자체 테스트가 비교).
 // 시세 안내·상품 상장 공지('…ELW 224종 상장')·방향이 반대인 기사('15% 급등' 기사인데 오늘은 하락 — 이유일 수 없음)는 빼고
-// ① 그날 나온 같은 방향의 [특징주] → ② 같은 방향 기사 → ③ 방향을 알 수 없는 기사 → ④ 여러 종목 나열·'[오늘의 …]' 모음·리포트 요약 순.
+// ① 그날 나온 같은 방향의 [특징주] → ② 같은 방향 기사 → ③ 방향을 알 수 없는 기사 → ④ 여러 종목 나열·'[오늘의 …]' 모음·리포트 요약·주가 전망 글 순.
 // 같은 등급 안에서는 최신순. 방향은 제목의 오름·내림 말, 없으면 호재·악재 태그(내린 날의 '수주 1조 돌파' 같은 호재 기사는 이유 아님).
 export const LISTING_RE = /(ELW|ETN|ETF|리츠|스팩)[^…]{0,30}상장|신규\s*상장/;
 const UP_RE = /상승|강세|급등|반등|↑|오름|올라|치솟|폭등|상한가|신고가/;
@@ -412,6 +412,10 @@ function nameDir(t, names) {
 }
 // 증권사 리포트 요약('[리포트 브리핑]심텍, … 목표가 180,000원 - 교보증권') — 목표가와 함께 나와 대개 좋은 쪽이라 나쁜 말이 없으면 오름으로 본다
 const REPORT_RE = /^\[리포트\s?브리핑\]|목표가\s*[\d,]+\s*원/;
+// 주가 전망·기술적 분석 글(자동 생성 해설 — '…주가는 ₩370,322 지지선을 지킬 수 있을까?'·'과매도 RSI가 반전 가능성…'·'…상승세는 지속될까?'·'… 주가 횡보')
+// — 원인이 아니라 해설이라 나열·리포트 요약과 함께 맨 뒤로(사실이 섞인 제목도 있어 빼지는 않는다)
+const SPEC_RE = /지지선|저항선|과매도|과매수|\bRSI\b|기술적\s*분석|횡보|(?:있을까|될까|갈까|할까)\s*\??\s*$/;
+const weakTitle = (t) => roundupTitle(t) || REPORT_RE.test(t) || SPEC_RE.test(t);
 // '소식에도'·'불구'처럼 거스르는 말이 있으면 호재·악재 낱말로 방향을 짐작하지 않는다
 const CONTRA_RE = /에도[\s,.…'"‘’“”]|에도$|불구|무색/;
 // 기사가 가리키는 그 종목의 방향 — ① 이름 뒤·제목의 오름·내림 말 ② 없으면 호재·악재 태그 ③ 리포트 요약은 좋은 쪽
@@ -427,7 +431,7 @@ export function pickReasonNews(items, pct, day, ymd, names = []) {
   const s = Math.sign(Number(pct) || 0);
   const dir = (it) => newsDir(it, names);
   const tier = (it) => (/\[특징주\]/.test(it.title) && s && dir(it) === s && Number.isFinite(it.pubMs) && ymd(it.pubMs) === day ? 0
-    : roundupTitle(it.title) || REPORT_RE.test(it.title) ? 3 : s && dir(it) === s ? 1 : 2);
+    : weakTitle(it.title) ? 3 : s && dir(it) === s ? 1 : 2);
   return (Array.isArray(items) ? items : []).filter((it) => it && it.title && !priceOnly(it.title) && !LISTING_RE.test(it.title) && !(s && dir(it) === -s))
     .map((it, i) => [tier(it), i, it]).sort((a, b) => a[0] - b[0] || a[1] - b[1])[0]?.[2] || null;
 }
@@ -647,7 +651,7 @@ function historyStats(history) {
 }
 
 // 뉴스·수급·추세·시세를 모두 넘겨 Gemini가 "오늘 왜 이렇게 움직이는지"를 종합 분석. 키 없거나 실패 시 null.
-export async function aiStockAnalysis({ quote, news, flow, history, disclosures, now = Date.now() }) {
+export async function aiStockAnalysis({ quote, news, flow, history, disclosures, schedule, now = Date.now() }) {
   if (!GEMINI_KEY || !quote) return null;
   const name = quote.name || quote.code;
   const pct = quote.changePct ?? 0;
@@ -675,6 +679,13 @@ export async function aiStockAnalysis({ quote, news, flow, history, disclosures,
     const ds = String(d.date || '');
     return `- ${ds === today ? '오늘' : `${ds.slice(4, 6)}/${ds.slice(6, 8)}`} [${d.tag || '기타'}] ${d.title}`;
   }).join('\n');
+  // 가까운 일정(공시 일정 달력 — 국내는 공시에 적힌 일정, 미국은 나스닥 실적·배당) — 그 시장 날짜 기준 '오늘'·'어제'·'내일', 그 밖은 날짜
+  const localDay = new Intl.DateTimeFormat('en-CA', { timeZone: us ? 'America/New_York' : 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .format(now).replace(/-/g, '');
+  const dayNo = (s) => Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8)) / 864e5;
+  const rel = (d) => { const k = dayNo(d) - dayNo(localDay); return k === 0 ? '오늘' : k === -1 ? '어제' : k === 1 ? '내일' : `${+d.slice(4, 6)}/${+d.slice(6, 8)}`; };
+  const sched = (Array.isArray(schedule) ? schedule : []).filter((e) => e && /^\d{8}$/.test(String(e.d)) && e.t).slice(0, 5);
+  const schedLines = sched.map((e) => `- ${rel(e.d)}${e.tm ? ` ${e.tm}` : ''} ${e.t}${e.s ? ` — ${String(e.s).slice(0, 60)}` : ''}`).join('\n');
   const basis = us ? '뉴스·추세' : discs.length ? '뉴스·공시·수급·추세' : '뉴스·수급·추세';
   const prompt =
     `너는 ${us ? '미국' : '한국'} 증시 애널리스트다(답은 한국어로). 아래 정보를 종합해 '${name}'이(가) 오늘 왜 ${dir}하는지 핵심 원인을 분석하라.\n` +
@@ -682,6 +693,7 @@ export async function aiStockAnalysis({ quote, news, flow, history, disclosures,
     `과거 흐름: ${histLine}\n` +
     (us ? '' : `수급(순매수): ${flowLine}\n`) +
     (discs.length ? `최근 공시(전자공시 2주, 최신순):\n${discLines}\n` : '') +
+    (sched.length ? `가까운 일정(${us ? '나스닥' : '전자공시'} 기준 — 오늘 움직임과 이어질 때만 원인으로):\n${schedLines}\n` : '') +
     `최근 뉴스 제목:\n${heads}\n\n` +
     `단순 시황 중계가 아니라 '원인'에 집중하라. ${basis}를 서로 연결해 설명하고, 근거가 약하면 단정하지 말 것.\n` +
     `반드시 이 JSON만 출력:\n` +

@@ -337,6 +337,14 @@ input::placeholder { color: var(--muted); }
 .vs-row { margin-top: 2px; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; cursor: help; }
 .vs-row b { font-weight: 700; }
 .vs-row .src { margin-left: 4px; }
+/* 다음 일정 한 줄(공시 일정 달력) — 시장 대비 줄과 같은 크기, 누르면 달력 */
+.sched-row { margin-top: 6px; font-size: 12.5px; line-height: 1.55; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sched-row .sched-k { margin-right: 6px; }
+.sched-row a { color: var(--text-2); text-decoration: none; }
+.sched-row a:hover { color: var(--text); text-decoration: underline; }
+.sched-dd { margin-left: 6px; font-weight: 700; color: var(--text); white-space: nowrap; }
+.sched-more { margin-left: 6px; white-space: nowrap; }
+.sched-it { white-space: nowrap; } /* 일정 하나(이름 + 시각)는 줄 안에서 끊기지 않게 */
 
 /* 급등락 종목 AI 종합분석 — 한 줄 진단 + 펼치기 */
 .analysis { margin-top: 10px; }

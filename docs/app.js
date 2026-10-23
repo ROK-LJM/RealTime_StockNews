@@ -11,7 +11,7 @@ const $ = (s) => document.querySelector(s);
 // loadedOnce: 한 번이라도 시세를 그렸는지. 이후의 일시적 로드 실패로 화면을 비우지 않기 위한 표시.
 // sort: 카드 순서('mine' 내 순서 | 'move' 등락 큰 순, 이 기기에 기억). whyAll: '왜 움직였나' 전체 펼침. data: 마지막으로 받은 quotes.json
 const state = { timer: null, intervalSec: 60, hist: {}, news: {}, inv: {}, analysis: {}, disc: {}, openAnalysis: new Set(), loadedOnce: false,
-  sort: 'mine', view: 'full', whyAll: false, data: null, market: null, moves: {}, status: null, briefOpen: new Map() };
+  sort: 'mine', view: 'full', whyAll: false, data: null, market: null, moves: {}, status: null, briefOpen: new Map(), cal: null };
 
 // ---------- 포맷 ----------
 function fmtPrice(q) {
@@ -388,9 +388,9 @@ const isNarrow = () => window.matchMedia('(max-width: 720px)').matches;
 
 // ---------- 보유 종목 ----------
 async function loadQuotes() {
-  let data, news, hist, inv, analysis, disc, moves;
+  let data, news, hist, inv, analysis, disc, moves, cal;
   try {
-    [data, news, hist, inv, analysis, disc, moves] = await Promise.all([
+    [data, news, hist, inv, analysis, disc, moves, cal] = await Promise.all([
       loadData('quotes.json'),
       loadData('news.json').catch(() => ({})),
       loadData('history.json').catch(() => ({})),
@@ -398,6 +398,7 @@ async function loadQuotes() {
       loadData('analysis.json').catch(() => ({})),
       loadData('disclosures.json').catch(() => ({})),
       loadData('moves.json').catch(() => ({})),
+      loadData('calendar.json').catch(() => null),
     ]);
   } catch (e) {
     // 자동 새로고침 중 일시적 실패(5xx·오프라인 등)로 이미 그려진 화면을 지우지 않는다.
@@ -413,6 +414,7 @@ async function loadQuotes() {
   state.analysis = analysis || {};
   state.disc = disc || {};
   state.moves = moves || {};
+  if (cal && Array.isArray(cal.events)) state.cal = cal; // 공시 일정 달력 — 못 받으면 직전 값
   state.data = data;
   const clock = $('#clock');
   if (clock) { // 좁은 화면에선 '확인' 글자를 숨겨 상단바를 한 줄로
@@ -542,7 +544,7 @@ const PRICE_ONLY = [
 const priceOnly = (title) => PRICE_ONLY.some((re) => re.test(String(title ?? '').trim()));
 // 이유로 쓸 뉴스 고르기 — scripts/sources.mjs의 pickReasonNews와 같게 유지(자체 테스트가 비교).
 // 시세 안내·상품 상장 공지('…ELW 224종 상장')·방향이 반대인 기사('15% 급등' 기사인데 오늘은 하락 — 이유일 수 없음)는 빼고
-// ① 그날 나온 같은 방향의 [특징주] → ② 같은 방향 기사 → ③ 방향을 알 수 없는 기사 → ④ 여러 종목 나열·'[오늘의 …]' 모음·리포트 요약 순.
+// ① 그날 나온 같은 방향의 [특징주] → ② 같은 방향 기사 → ③ 방향을 알 수 없는 기사 → ④ 여러 종목 나열·'[오늘의 …]' 모음·리포트 요약·주가 전망 글 순.
 // 같은 등급 안에서는 최신순. 방향은 제목의 오름·내림 말, 없으면 호재·악재 태그(내린 날의 '수주 1조 돌파' 같은 호재 기사는 이유 아님).
 const LISTING_RE = /(ELW|ETN|ETF|리츠|스팩)[^…]{0,30}상장|신규\s*상장/;
 const UP_RE = /상승|강세|급등|반등|↑|오름|올라|치솟|폭등|상한가|신고가/;
@@ -563,6 +565,10 @@ function nameDir(t, names) {
 }
 // 증권사 리포트 요약('[리포트 브리핑]심텍, … 목표가 180,000원 - 교보증권') — 목표가와 함께 나와 대개 좋은 쪽이라 나쁜 말이 없으면 오름으로 본다
 const REPORT_RE = /^\[리포트\s?브리핑\]|목표가\s*[\d,]+\s*원/;
+// 주가 전망·기술적 분석 글(자동 생성 해설 — '…주가는 ₩370,322 지지선을 지킬 수 있을까?'·'과매도 RSI가 반전 가능성…'·'…상승세는 지속될까?'·'… 주가 횡보')
+// — 원인이 아니라 해설이라 나열·리포트 요약과 함께 맨 뒤로(사실이 섞인 제목도 있어 빼지는 않는다)
+const SPEC_RE = /지지선|저항선|과매도|과매수|\bRSI\b|기술적\s*분석|횡보|(?:있을까|될까|갈까|할까)\s*\??\s*$/;
+const weakTitle = (t) => roundupTitle(t) || REPORT_RE.test(t) || SPEC_RE.test(t);
 // '소식에도'·'불구'처럼 거스르는 말이 있으면 호재·악재 낱말로 방향을 짐작하지 않는다
 const CONTRA_RE = /에도[\s,.…'"‘’“”]|에도$|불구|무색/;
 // 기사가 가리키는 그 종목의 방향 — ① 이름 뒤·제목의 오름·내림 말 ② 없으면 호재·악재 태그 ③ 리포트 요약은 좋은 쪽
@@ -578,7 +584,7 @@ function pickReasonNews(items, pct, day, ymd, names = []) {
   const s = Math.sign(Number(pct) || 0);
   const dir = (it) => newsDir(it, names);
   const tier = (it) => (/\[특징주\]/.test(it.title) && s && dir(it) === s && Number.isFinite(it.pubMs) && ymd(it.pubMs) === day ? 0
-    : roundupTitle(it.title) || REPORT_RE.test(it.title) ? 3 : s && dir(it) === s ? 1 : 2);
+    : weakTitle(it.title) ? 3 : s && dir(it) === s ? 1 : 2);
   return (Array.isArray(items) ? items : []).filter((it) => it && it.title && !priceOnly(it.title) && !LISTING_RE.test(it.title) && !(s && dir(it) === -s))
     .map((it, i) => [tier(it), i, it]).sort((a, b) => a[0] - b[0] || a[1] - b[1])[0]?.[2] || null;
 }
@@ -617,6 +623,22 @@ function aiFresh(q, a) {
   if (!Number.isFinite(at) || at <= 0 || !Number.isFinite(qt)) return true;
   const m = marketOf(q);
   return marketYmd(at, m) >= marketYmd(qt, m);
+}
+
+// 다음 일정 — 공시 일정 달력(calendar.json)에서 그 종목의 오늘(그 시장 날짜)부터 2주 안 가장 가까운 날의 일정.
+// 지난 공시·이미 낸 실적 공시는 빼고, 그날 일정은 두 개까지(시각, 미국 실적은 장 전·후를 붙여). more = 2주 안 나머지 일정 수
+const SCHED_DAYS = 14;
+const ymdUtc = (s) => Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8));
+function nextSchedule(events, code, today, days = SCHED_DAYS) {
+  if (!/^\d{8}$/.test(String(today))) return null;
+  const until = new Date(ymdUtc(today) + days * 864e5).toISOString().slice(0, 10).replace(/-/g, '');
+  const list = (Array.isArray(events) ? events : []).filter((e) => e && e.c === code && /^\d{8}$/.test(String(e.d))
+    && e.d >= today && e.d <= until && e.k !== 'disc' && e.t !== '실적 공시');
+  if (!list.length) return null;
+  const d = list.reduce((m, e) => (e.d < m ? e.d : m), list[0].d);
+  const day = list.filter((e) => e.d === d); // 달력 데이터는 날짜·종류(실적 → IR → 주총 …) 순
+  const label = (e) => `${e.t}${e.tm ? ` ${e.tm}` : ''}${e.m === 'US' && e.k === 'earn' && e.s ? ` · ${e.s}` : ''}`;
+  return { d, dd: Math.round((ymdUtc(d) - ymdUtc(today)) / 864e5), items: day.slice(0, 2).map(label), more: list.length - Math.min(2, day.length) };
 }
 
 // ---------- 데이터 지연 경고 ----------
@@ -763,8 +785,8 @@ function renderBoard(groups, closed) {
   const show = isNarrow() ? 4 : WHY_SHOW; // 휴대폰은 처음에 4줄
   const rows = movers.map((q, i) => {
     const p = q.changePct, vs = vsMarket(q, state.market?.indices), w0 = whyOf(q);
-    // 시장 따라 종목은 여러 종목 나열·리포트 요약 기사보다 시장 흐름이 더 나은 설명
-    const w = vs && vs.follows && w0 && w0.src === '뉴스' && (roundupTitle(w0.text) || REPORT_RE.test(w0.text)) ? null : w0;
+    // 시장 따라 종목은 여러 종목 나열·리포트 요약·주가 전망 글보다 시장 흐름이 더 나은 설명
+    const w = vs && vs.follows && w0 && w0.src === '뉴스' && weakTitle(w0.text) ? null : w0;
     return `<button type="button" class="why-row${i >= show && !state.whyAll ? ' more' : ''}" data-code="${esc(q.code)}">
       <span class="w-pct ${dirClass(p)}-c">${p > 0 ? '▲' : '▼'} ${Math.abs(p).toFixed(2)}%</span>
       <span class="w-nm">${esc(q.name)}</span>
@@ -856,6 +878,16 @@ function vsRow(q) {
   if (!v) return '';
   return `<div class="vs-row" title="같은 날 ${esc(v.name)} 등락(${fmtPct(v.pct)})을 뺀 값 — 0에 가까우면 시장 전체와 비슷하게 움직인 것">`
     + `${esc(v.name)} ${fmtPct(v.pct)} 대비 <b class="${dirClass(v.diff)}-c">${fmtPctP(v.diff)}</b>${v.follows ? ' <span class="src mkt">시장 따라</span>' : ''}</div>`;
+}
+// 다음 일정 한 줄 — 누르면 그 종목·그날로 달력이 열린다(간단히 보기에서도 보임)
+const WEEKDAY = '일월화수목금토';
+function schedRow(q) {
+  const s = nextSchedule(state.cal && state.cal.events, q.code, marketYmd(Date.now(), marketOf(q)));
+  if (!s) return '';
+  const md = `${+s.d.slice(4, 6)}/${+s.d.slice(6, 8)}(${WEEKDAY[new Date(ymdUtc(s.d)).getUTCDay()]})`;
+  return `<div class="sched-row"><span class="sched-k">다음 일정</span>`
+    + `<a href="./calendar.html?code=${encodeURIComponent(q.code)}&amp;d=${s.d}">${md} ${s.items.map((x) => `<span class="sched-it">${esc(x)}</span>`).join(' · ')}</a>`
+    + `<b class="sched-dd">${s.dd === 0 ? '오늘' : `D-${s.dd}`}</b>${s.more ? `<span class="sched-more">외 ${s.more}건</span>` : ''}</div>`;
 }
 function renderMoves(q, list) {
   const el = document.getElementById('moves-' + cssId(q.code));
@@ -992,7 +1024,7 @@ function renderCard(q, hist, inv) {
       ${etc ? `<span title="외국인·기관·개인이 모두 같은 방향일 때의 반대편(기타법인 등). 순매수 합계는 0"><i>기타</i> <b class="${dirClass(etc)}-c">${fmtShares(etc)}</b></span>` : ''}
       ${inv.foreignRatio ? `<span class="muted">외인 ${esc(inv.foreignRatio)}</span>` : ''}</div>` : '';
 
-  // 순서: 시세 → AI 분석(왜 움직였나, 급등락 종목) → 기간 수익률·차트·예측 → 수급·고저 → 지난 급등락 → 공시 → 뉴스
+  // 순서: 시세 → AI 분석(왜 움직였나, 급등락 종목) → 다음 일정 → 기간 수익률·차트·예측 → 수급·고저 → 지난 급등락 → 공시 → 뉴스
   return `<div class="stock ${moverCls}" id="card-${id}">
     <div class="stock-head">
       <div class="nm">${esc(q.name)}<span class="code">${esc(q.code)}</span></div>
@@ -1005,6 +1037,7 @@ function renderCard(q, hist, inv) {
     ${extRow(q)}
     ${vsRow(q)}
     <div class="analysis" id="analysis-${id}"></div>
+    ${schedRow(q)}
     ${retRow}
     <div class="chart"><canvas id="chart-${id}"></canvas></div>
     ${fcRow}

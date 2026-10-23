@@ -729,6 +729,29 @@ await test('해외 종목 AI 분석: 미국 증시 관점 · 달러 소수 둘�
   assert.ok(us.includes('미국 증시 애널리스트') && !us.includes('수급(순매수)') && /현재가 \$\d+\.\d{2}/.test(us), us.slice(0, 200));
   assert.ok(kr.includes('한국 증시 애널리스트') && kr.includes('수급(순매수)') && /현재가 [\d,]+원/.test(kr));
 });
+await test('일정 → AI 분석: 가까운 일정(그 시장 날짜로 그제~7일 뒤)을 오늘·어제·내일로 · 지난 공시·이미 낸 실적 공시·기간 밖·다른 종목은 뺌 · 시그니처는 그대로', async () => {
+  const bodyOf = (name) => NET.bodies.find((b, i) => isGemini(NET.calls[i]) && b.includes(`'${name}'`)) || '';
+  const K = (d, k, t, x = {}) => ({ d, c: '005930', n: '삼성전자', m: 'KR', k, t, ...x });
+  const A = (d, k, t, x = {}) => ({ d, c: 'AAPL', n: '애플', m: 'US', k, t, ...x });
+  // NOW_KR = 10/15(목) 12:00 서울 = 10/14(수) 23:00 뉴욕
+  const events = [K('20261012', 'div', '배당 기준일'), A('20261012', 'div', '배당락', { s: '주당 $0.27' }), K('20261013', 'ir', '기업설명회(IR)', { tm: '10:00' }),
+    A('20261014', 'earn', '실적 발표', { s: '미국 장 마감 뒤' }), K('20261015', 'earn', '실적 공시'), K('20261015', 'disc', '단일판매ㆍ공급계약체결', { tag: '계약' }),
+    K('20261016', 'earn', '3분기 실적 발표 예정', { s: '결산실적 공시 예정일' }), { d: '20261016', c: '000660', n: 'SK하이닉스', m: 'KR', k: 'ir', t: '기업설명회(IR)' },
+    K('20261022', 'meet', '임시주주총회', { tm: '09:00' }), K('20261023', 'cap', '자사주 매입 끝')];
+  const root = workspace();
+  writeData(root, 'calendar.json', { v: 1, pv: 4, at: NOW_KR, codes: [], kr: 'ok', us: 'ok', events, docs: {}, diag: [] });
+  await pipeline(root, { usPct: { AAPL: 3 } });
+  const kr = bodyOf('삼성전자'), us = bodyOf('애플');
+  assert.ok(kr.includes('가까운 일정(전자공시 기준 — 오늘 움직임과 이어질 때만 원인으로)'), kr.slice(0, 900));
+  for (const line of ['- 10/13 10:00 기업설명회(IR)', '- 내일 3분기 실적 발표 예정 — 결산실적 공시 예정일', '- 10/22 09:00 임시주주총회']) assert.ok(kr.includes(line), line);
+  for (const line of ['배당 기준일', '- 오늘 실적 공시', '단일판매', '자사주 매입 끝', '- 내일 기업설명회(IR)']) assert.ok(!kr.includes(line), `뺄 일정: ${line}`);
+  assert.ok(us.includes('가까운 일정(나스닥 기준') && us.includes('- 오늘 실적 발표 — 미국 장 마감 뒤') && us.includes('- 10/12 배당락 — 주당 $0.27'),
+    '미국은 뉴욕 날짜로(서울로는 이미 10/15) — ' + us.slice(0, 900));
+  const plain = workspace();
+  await pipeline(plain, { usPct: { AAPL: 3 } });
+  assert.ok(!bodyOf('삼성전자').includes('가까운 일정'), '달력이 없으면 일정 줄 없음');
+  assert.equal(read(root, 'analysis.json')['005930'].sig, read(plain, 'analysis.json')['005930'].sig, '시그니처는 일정과 무관');
+});
 await test('미국 시간외: 시간대(프리 04:00~09:30·애프터 16:00~20:00 ET, 평일·서머타임) · 5분봉 마지막 체결 판정', () => {
   const w = (s) => bud.usExtWindow(T(s));
   assert.deepEqual(['2026-10-15T07:59:00Z', '2026-10-15T08:00:00Z', '2026-10-15T13:29:00Z', '2026-10-15T13:30:00Z', '2026-10-15T19:59:00Z',
@@ -1242,6 +1265,33 @@ await test('이유 고르기: 상품 상장 공지·방향이 반대인 기사 �
   assert.equal(pick([{ title: '[특징주] 반도체 대형주 약세 전환…삼성전자, 외국인 매도 확대', pubMs: at(13) }, mixed[1]], -2.9, ['삼성전자']),
     '[특징주] 반도체 대형주 약세 전환…삼성전자, 외국인 매도 확대', '이름 바로 뒤에 방향 말이 없으면 제목 전체(약세)로');
 });
+await test('이유 고르기(21차): 주가 전망·기술적 분석 글(지지선·저항선·과매도·RSI·기술적 분석·횡보·…할 수 있을까?·…지속될까?)은 맨 뒤 — 그것뿐이면 그것 · 봇과 화면 같음', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(`${block}; ({ pickReasonNews })`, {});
+  const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const at = (h) => T(`2026-10-23T${String(h).padStart(2, '0')}:00:00+09:00`);
+  const it = (title, h, tone = 'neutral') => ({ title, pubMs: at(h), sentiment: { label: { pos: '호재', neg: '악재', neutral: '중립' }[tone], tone } });
+  const pick = (list, pct, names = []) => {
+    const a = src.pickReasonNews(list, pct, '20261023', kst, names), b = f.pickReasonNews(list, pct, '20261023', kst, names);
+    assert.equal(b ? b.title : null, a ? a.title : null, '봇·화면 같은 선택');
+    return a ? a.title : null;
+  };
+  // 실제 제목(2026-10-23, 자동 생성 해설 사이트) — LG에너지솔루션 -2.05%
+  const spec = it('과매도 신호가 나타나는 가운데 LG에너지솔루션 주가는 ₩370,322 지지선을 지킬 수 있을까?', 15, 'neg');
+  const real = it('LG에너지솔루션, 북미 ESS 수주 지연 우려', 9);
+  assert.equal(pick([spec, real], -2.05, ['LG에너지솔루션']), real.title, '더 최근의 같은 방향 전망 글보다 원인 기사');
+  assert.equal(pick([spec], -2.05, ['LG에너지솔루션']), spec.title, '그것뿐이면 그것');
+  // 실제 제목(10/16~10/23) — 오른 날, 같은 방향 말이 있어도 맨 뒤
+  for (const t of ['과매도 RSI가 반전 가능성을 시사하면서 한화에어로스페이스 주가 상승', '삼성전자 주식 기술적 분석: 매수세 우위로 상승했지만 저항선에 근접',
+    '두산에너빌리티, 경상남도와 제조 역량 확대: 034020의 상승세는 지속될까?', '레벨 4 자율주행 트럭 테스트가 미래 혁신을 부각시키는 가운데 현대차 주가 횡보',
+    '삼성전자, 강세 이어갈까?']) {
+    const other = it('반도체 업황 회복 기대감 확산', 9);
+    assert.equal(pick([it(t, 15), other], 2.5), other.title, t);
+  }
+  assert.equal(pick([it('삼성전자, HBM4 엔비디아 공급 확정…주가 강세', 15), it('반도체 업황 회복 기대감 확산', 9)], 2.5), '삼성전자, HBM4 엔비디아 공급 확정…주가 강세', '보통 기사는 그대로');
+});
 await test('이유 고르기(18차): 방향 말이 없으면 호재·악재 태그로 — 내린 날 호재 기사 제외 · "~에도"는 태그로 짐작 안 함 · 같은 방향 기사 먼저 · 리포트 요약은 맨 뒤(내린 날엔 나쁜 말 없으면 제외) · 봇과 화면 같음', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
@@ -1315,6 +1365,26 @@ await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] �
   assert.match(t({ state: 'idle' }), /곧 분석/);
   assert.equal(t({ state: 'off' }), null, 'AI 키가 없으면 안내 안 함');
   assert.equal(t(null), null, '상태를 모르면 안내 안 함');
+});
+await test('다음 일정(app.js): 2주 안 가장 가까운 날 · 그날 두 개까지(시각·미국 장 전후) · 지난 공시·이미 낸 실적 공시·지난 날 빼고 · 나머지 수 · 없으면 없음', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(`${block}; ({ nextSchedule })`, {});
+  const E = (d, k, t, x = {}) => ({ d, c: '005930', m: 'KR', k, t, ...x }); // 달력 데이터처럼 날짜·종류 순
+  const ev = [E('20261014', 'ir', '기업설명회(IR)'), E('20261015', 'earn', '실적 공시'), E('20261015', 'disc', '단일판매ㆍ공급계약체결'),
+    { d: '20261016', c: '000660', m: 'KR', k: 'ir', t: '기업설명회(IR)' },
+    E('20261020', 'earn', '3분기 실적 발표 예정'), E('20261020', 'ir', '기업설명회(IR)', { tm: '15:45' }), E('20261020', 'meet', '주총 기준일'),
+    E('20261027', 'div', '배당 기준일'), E('20261030', 'cap', '자사주 매입 끝'),
+    { d: '20261102', c: 'AAPL', m: 'US', k: 'earn', t: '실적 발표(예상일)', s: '미국 장 마감 뒤', est: true }];
+  const n = (...a) => JSON.parse(JSON.stringify(f.nextSchedule(...a)));
+  assert.deepEqual(n(ev, '005930', '20261015'), { d: '20261020', dd: 5, items: ['3분기 실적 발표 예정', '기업설명회(IR) 15:45'], more: 2 },
+    '어제 일정·이미 낸 실적 공시·지난 공시·다른 종목은 빼고 그날 셋 중 둘 + 나머지(그날 1·10/27 1) — 10/30은 2주 밖');
+  assert.deepEqual(n(ev, '005930', '20261020'), { d: '20261020', dd: 0, items: ['3분기 실적 발표 예정', '기업설명회(IR) 15:45'], more: 3 }, '오늘 일정');
+  assert.deepEqual(n(ev, 'AAPL', '20261030'), { d: '20261102', dd: 3, items: ['실적 발표(예상일) · 미국 장 마감 뒤'], more: 0 }, '미국 실적은 장 전·후');
+  assert.equal(f.nextSchedule(ev, '005930', '20261031'), null, '2주 안에 없음');
+  assert.equal(f.nextSchedule(null, '005930', '20261015'), null);
+  assert.equal(f.nextSchedule(ev, '005930', ''), null);
 });
 await test('지난 AI 분석(app.js): 지금 시세의 거래일에 만든 분석만 "왜 움직였나" 이유로 · 전날 분석이면 오늘 뉴스 · 미국은 뉴욕 날짜 · 시각 모르면 그대로', async () => {
   const vm = await import('node:vm');
