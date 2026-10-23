@@ -133,9 +133,17 @@ const DART_ROWS = {
 };
 const dartList = (corp, rows) => ({ status: '000', message: '정상', page_no: 1, page_count: 10, total_count: rows.length, total_page: 1,
   list: rows.map(([no, nm, rm = '']) => ({ corp_cls: 'Y', corp_name: '회사', corp_code: corp, stock_code: '', report_nm: nm, rcept_no: no, flr_nm: '회사', rcept_dt: no.slice(0, 8), rm })) });
-// 공시 원본(ZIP 속 XML) 표본 — 실제 공시 원문(2026-10, DART 뷰어)에서 읽은 줄 구성을 본뜬 것
-const docRow = (...cells) => `<TR>${cells.map((c) => (/^\d{4}-\d{2}-\d{2}$/.test(c) ? `<TU AUNIT="DATE" AUNITVALUE="${c.replace(/-/g, '')}">${c}</TU>` : `<TD><P>${c}</P></TD>`)).join('')}</TR>`;
-const docXml = (title, rows) => `<?xml version="1.0" encoding="utf-8"?><DOCUMENT><DOCUMENT-NAME>${title}</DOCUMENT-NAME><BODY><P>${title}</P><TABLE>${rows.join('')}</TABLE></BODY></DOCUMENT>`;
+// 공시 원본(document.xml ZIP 속 본문) 표본 — 실제 원본의 꼴(2026-10-23 봇 진단 diag로 확인)을 본뜸, 줄 구성은 DART 뷰어에서 읽은 실제 공시:
+//   거래소 공시 = XForms HTML(소문자 태그, 태그마다 CRLF 줄바꿈·들여쓰기, <style> 블록, 값은 span.xforms_input) → docXml·docRow
+//   주요사항보고서 = DART XML(dart4 — 대문자 TR·TD·TE·TU, LF 줄바꿈, 날짜는 'YYYY년 MM월 DD일') → dartXml·dartRow
+const xfCell = (c) => `       <td width="120"> <span ${/^(?:\d{4}-\d{2}-\d{2}|\d{1,2} ?: ?\d{2})$/.test(c) ? 'class="xforms_input" ' : ''}style="width:120px;font-size:10pt;">${c}</span> </td> \r\n`;
+const docRow = (...cells) => `      <tr> \r\n${cells.map(xfCell).join('')}      </tr> \r\n`;
+const docXml = (title, rows) => `<html>\r\n <head>\r\n  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">\r\n  <style type="text/css">\r\n.xforms * { font-family: 돋움체;}\r\n.xforms td {\r\npadding-left:0px;\r\nline-height:22px;\r\n}\r\n</style>\r\n`
+  + `  <title>${title}</title>\r\n </head>\r\n <body> \r\n  <div class="xforms"> \r\n   <div> \r\n    <div class="xforms_title"> \r\n     <div> \r\n      <span style="width:600px;font-weight:bold;text-align:center;">${title}</span> \r\n     </div> \r\n    </div> \r\n`
+  + `    <table border="1" bordercolordark="white" bordercolorlight="#666666" cellpadding="1" cellspacing="0" id="XFormD5_Form0_Table13"> \r\n     <tbody> \r\n${rows.join('')}     </tbody> \r\n    </table> \r\n   </div> \r\n  </div> \r\n </body>\r\n</html>\r\n`;
+const dartRow = (...cells) => `<TR ACOPY="Y" ADELETE="Y">\n${cells.map((c) => (/^20\d{2}년 \d{2}월 \d{2}일$/.test(c) ? `<TE><TU AUNIT="DATE" AUNITVALUE="${c.replace(/\D/g, '')}">${c}</TU></TE>` : `<TD>${c}</TD>`)).join('\n')}\n</TR>\n`;
+const dartXml = (title, rows) => `<?xml version="1.0" encoding="utf-8"?>\n<DOCUMENT xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="dart4.xsd">\n<DOCUMENT-NAME ACODE="11300">${title}</DOCUMENT-NAME>\n`
+  + `<BODY ATOCID="2">\n<LIBRARY>\n<SECTION-1 ACLASS="MANDATORY">\n<TITLE ATOC="Y">${title}</TITLE>\n<TABLE ACLASS="NORMAL" WIDTH="600" BORDER="1">\n<TBODY>\n${rows.join('\n')}</TBODY>\n</TABLE>\n</SECTION-1>\n</LIBRARY>\n</BODY>\n</DOCUMENT>\n`;
 const DOCS = {
   earnNotice: ['결산실적공시예고(안내공시)', docXml('결산실적공시 예고', [
     docRow('1. 회사명', '두산에너빌리티(주) (Doosan Enerbility Co., Ltd.)'), docRow('2. 결산대상기간', '시작일', '2026-01-01'), docRow('종료일', '2026-09-30'),
@@ -158,11 +166,16 @@ const DOCS = {
   dividend: ['현금ㆍ현물배당결정', docXml('현금ㆍ현물배당결정', [
     docRow('1. 배당구분', '분기배당'), docRow('3. 1주당 배당금(원)', '보통주식', '370'), docRow('종류주식', '370'), docRow('5. 배당금총액(원)', '2,452,947,961,500'),
     docRow('6. 배당기준일', '2026-09-30'), docRow('7. 배당금지급 예정일자', '2026-11-20'), docRow('10. 이사회결의일(결정일)', '2026-10-30')])],
+  buyback: ['주요사항보고서(자기주식취득결정)', dartXml('주요사항보고서(자기주식 취득 결정)', [
+    dartRow('금융위원회 / 한국거래소 귀중', ' 2026 년    10 월    22 일'),
+    dartRow('1. 취득예정주식(주)', '보통주식', '14,465,408'), dartRow('기타주식', '-'),
+    dartRow('3. 취득예상기간', '시작일', '2026년 10월 23일'), dartRow('종료일', '2027년 01월 22일'),
+    dartRow('4. 보유예상기간', '시작일', '-'), dartRow('종료일', '-'), dartRow('7. 취득결정일', '2026년 10월 22일')])],
 };
-// 나스닥 응답(실제 형태, 2026-10-23 AAPL) — 실적 발표일 · 배당
 // 원본 ZIP에 함께 든 첨부(감사보고서 등 '{접수번호}_00760.xml') — 본문이 아니므로 여기 날짜를 쓰면 안 된다(ZIP에서 앞에 있고 더 크다)
 const ATTACH_DOC = docXml('첨부', [docRow('1. 일시', '2026-12-31', '10:00'), docRow('3. 결산실적 공시예정일', '2026-12-30'),
   docRow('6. 배당기준일', '2026-12-28'), docRow('7. 배당금지급 예정일자', '2026-12-27'), docRow('비고', '첨부 서류 '.repeat(40))]);
+// 나스닥 응답(실제 형태, 2026-10-23 AAPL) — 실적 발표일 · 배당
 const NASDAQ_EARN = { data: { reportText: "Apple Inc. Common Stock is expected* to report earnings on  11/02/2026 after market close.  The report will be for the fiscal Quarter ending Sep 2026.", heading: 'AAPL Earnings Date', announcement: 'Earnings announcement* for AAPL: Nov 02, 2026' }, message: null, status: { rCode: 200 } };
 const NASDAQ_DIV = { data: { exDividendDate: '08/10/2026', dividends: { rows: [
   { exOrEffDate: '08/10/2026', type: 'Cash', amount: '$0.27', declarationDate: '07/30/2026', recordDate: '08/10/2026', paymentDate: '08/13/2026', currency: 'USD' },
@@ -1347,6 +1360,11 @@ await test('공시 일정(본문): 실적 발표 예정일·IR 일시·기준일
   assert.deepEqual(ev('meetFix'), [{ d: '20261211', tm: '09:00', k: 'meet', t: '임시주주총회', s: '서울특별시 영등포구 국제금융로2길 28 본사 5층 강당' },
     { d: '20261106', k: 'meet', t: '주총 기준일', s: '임시주주총회 의결권 기준' }], "'정정일자'·'제출일'·정정 전 일시(12/04)는 주총 날짜가 아님, '09 : 00' 시각");
   assert.deepEqual(ev('dividend'), [{ d: '20260930', k: 'div', t: '배당 기준일', s: '주당 370원' }, { d: '20261120', k: 'div', t: '배당 지급', s: '주당 370원' }]);
+  assert.deepEqual(ev('buyback'), [{ d: '20261023', k: 'cap', t: '자사주 매입 시작', s: '2026.10.23 ~ 2027.01.22' }, { d: '20270122', k: 'cap', t: '자사주 매입 끝', s: '2026.10.23 ~ 2027.01.22' }],
+    "주요사항보고서(dart4 XML) — '보유예상기간'의 시작·종료 '-'는 매입 기간이 아님");
+  // 실제 원본은 태그마다 줄을 바꿔 쓴다 — 원본 줄바꿈은 표의 줄이 아니고, <style>의 CSS는 칸이 아님
+  assert.deepEqual(cal.docRows(DOCS.ir[1]).find((r) => r[0] === '1. 일시 및 장소'), ['1. 일시 및 장소', '일시', '2026-10-29', '15:45'], '태그마다 줄바꿈해도 표의 한 줄');
+  assert.ok(!cal.docRows(DOCS.ir[1]).flat().some((c) => /font-family|line-height/.test(c)), '꾸밈(style) 글은 칸이 아님');
   assert.equal(cal.dateIn('2026년 3월 20일 (금)'), '20260320');
   assert.equal(cal.dateIn('2026년 3분기'), null);
   assert.equal(cal.timeIn('오후 3시 30분'), '15:30');
@@ -1430,7 +1448,7 @@ await test('공시 일정(파이프라인): 국내 지난 공시·공시에 적�
     assert.equal(c.diag.length, 1, '일정을 못 찾은 본문만 진단');
     const dg = c.diag[0];
     assert.deepEqual([dg.no, dg.pick, dg.enc, dg.files.map((f) => f[0])], ['20261007000888', '20261007000888.xml', 'utf8', ['20261007000888_00760.xml', '20261007000888.xml']]);
-    assert.ok(dg.rows.includes('1. 일시 | 미정') && /TABLE 1/.test(dg.tags) && dg.head.startsWith('<BODY>') && dg.bad === 0, JSON.stringify(dg));
+    assert.ok(dg.rows.includes('1. 일시 | 미정') && /TABLE 1/.test(dg.tags) && /^<body>/i.test(dg.head) && dg.bad === 0, JSON.stringify(dg));
     assert.ok(NET.calls.filter((u) => /list\.json/.test(u) && /pblntf_ty=I/.test(u)).length >= 1, '유형별 목록');
     assert.ok(NET.calls.filter((u) => /pblntf_ty/.test(u)).every((u) => /last_reprt_at=Y/.test(u)), '정정 전 공시는 빼고 최종 보고서만');
     assert.match(read(root, 'manifest.json').files['calendar.json'], /^[0-9a-f]{10}$/, '파일 지문에 포함');

@@ -5,6 +5,8 @@
 //   결산실적공시 예고 → 실적 발표 예정일 · 기업설명회(IR) → 일시 · 기준일 설정 → 기준일(사유로 배당·주총 구분) ·
 //   배당 결정 → 배당 기준일·지급일 · 주총 소집 → 주총일·의결권 기준일 · 주식 소각·자기주식 취득/처분 → 기간·소각일 ·
 //   유·무상증자 → 배정 기준일·신주 상장일 · 분할·병합·감자 → 신주 상장일.
+//   원본 꼴(2026-10-23 봇 진단 diag로 확인 — 둘 다 UTF-8, ZIP에 본문 하나): 거래소 공시는 XForms HTML(소문자 태그, 태그마다 CRLF 줄바꿈·들여쓰기,
+//   <style> 블록, 값은 span.xforms_input), 주요사항보고서는 DART XML(dart4 — TR·TD·TE·TU, LF 줄바꿈). 원본의 줄바꿈은 표의 줄이 아니다.
 //   본문 형식(실측 2026-10 공시 원문): '3. 결산실적 공시예정일 | 2026-10-29', '1. 일시 및 장소 | 일시 | 2026-10-29 | 15:45',
 //   '1. 기준일 | 2026-10-29', '2. 일시 | 2026-12-11 | 09 : 00', '5. 소각을 위한 자기주식 취득 예정기간 | 시작일 | 2026-10-23' 다음 줄 '종료일 | 2027-01-22'.
 //   정정 공시는 앞에 '정정전 | 정정후' 표가 붙으므로 같은 항목이 여러 번이면 마지막(고친 본문)을 쓴다.
@@ -20,7 +22,7 @@ import { dartEnabled, dartHalted, corpOf, tagOf, kstYmd, listFilings, getDocumen
 import { mapLimit } from './util.mjs';
 
 export const CAL_REFRESH_MS = 3 * 3600e3;
-export const PARSER_V = 2;  // 본문 읽는 방식의 판 — 바꾸면 기억한 본문 결과(docs)를 버리고 다시 받는다
+export const PARSER_V = 3;  // 본문 읽는 방식의 판 — 바꾸면 기억한 본문 결과(docs)를 버리고 다시 받는다
 const BACK_DAYS = 90;       // 지난 공시·일정
 const AHEAD_DAYS = 400;     // 앞으로의 일정(자사주 매입 기간 끝 등)
 const DOCS_PER_RUN = 40;    // 한 번에 새로 받는 본문 수 — 나머지는 다음 갱신 때
@@ -44,6 +46,8 @@ export function docRows(xml) {
     s = s.replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&amp;/gi, '&');
   }
   s = s
+    .replace(/<(style|script)\b[\s\S]*?<\/\1\s*>/gi, ' ') // 화면 꾸밈(CSS)·스크립트는 글이 아님
+    .replace(/[\r\n\t]+/g, ' ') // 원본의 줄바꿈·탭은 빈칸 — 원본은 태그마다 줄을 바꿔 쓰므로, 줄·칸은 아래 표 태그로만 나눈다
     .replace(/<(TU|TE|TD)\b[^>]*?\bAUNITVALUE\s*=\s*"([^"]*)"[^>]*?(?:\/>|>\s*<\/\1\s*>)/gi, (_, t, v) => `<${t}>${v}</${t}>`) // 값이 속성에만 있는 칸
     .replace(/<\/?TR\b[^>]*>|<\/?TABLE\b[^>]*>/gi, '\n')  // 여는 태그로도 나눈다(닫는 태그가 빠진 표)
     .replace(/<\/?(?:TD|TH|TE|TU)\b[^>]*>/gi, '\t')
