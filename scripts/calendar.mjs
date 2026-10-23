@@ -22,7 +22,7 @@ import { dartEnabled, dartHalted, corpOf, tagOf, kstYmd, listFilings, getDocumen
 import { mapLimit } from './util.mjs';
 
 export const CAL_REFRESH_MS = 3 * 3600e3;
-export const PARSER_V = 3;  // 본문 읽는 방식의 판 — 바꾸면 기억한 본문 결과(docs)를 버리고 다시 받는다
+export const PARSER_V = 4;  // 본문 읽는 방식의 판 — 바꾸면 기억한 본문 결과(docs)를 버리고 다시 받는다
 const BACK_DAYS = 90;       // 지난 공시·일정
 const AHEAD_DAYS = 400;     // 앞으로의 일정(자사주 매입 기간 끝 등)
 const DOCS_PER_RUN = 40;    // 한 번에 새로 받는 본문 수 — 나머지는 다음 갱신 때
@@ -79,7 +79,8 @@ export function timeIn(s) {
 }
 // 항목 이름 칸 — 짧은 칸만(설명 문장 속 '상기 공시예정일에…' 같은 낱말은 이름이 아니다)
 const isLabel = (c, re) => c.length <= 40 && re.test(c);
-// 이름(re)이 있는 마지막 줄에서 그 뒤 칸의 날짜(·시각) → { d, tm, r } · 이름은 있는데 날짜가 없으면('-') d: null
+// 이름(re)이 있는 마지막 줄에서 그 뒤 칸의 날짜(·시각) → { d, tm, r(날짜가 있던 줄) } · 이름은 있는데 날짜가 없으면('-') d: null
+//   그 줄에 날짜가 없고 '-'도 없으면 아래 두 줄까지(다음 번호 항목 전) 본다 — '1. 일시 | 행사일 | 시간' 아래 머리 줄 '시작일 | 종료일 | 시작시간 | …', 그 아래 값 줄
 function labeled(rows, re, { time = false } = {}) {
   for (let r = rows.length - 1; r >= 0; r--) {
     const row = rows[r];
@@ -90,6 +91,14 @@ function labeled(rows, re, { time = false } = {}) {
       const f = findDate(cell);
       if (!f) continue;
       return { d: f.d, tm: time ? timeIn(cell.slice(f.end)) || timeIn(row[j + 1] || '') : null, r };
+    }
+    if (!row.slice(i + 1).includes('-')) {
+      for (let k = r + 1; k <= r + 2 && k < rows.length && !/^\d+\./.test(rows[k][0]); k++) {
+        const j = rows[k].findIndex((c) => findDate(c));
+        if (j < 0) continue;
+        const f = findDate(rows[k][j]);
+        return { d: f.d, tm: time ? timeIn(rows[k][j].slice(f.end)) || rows[k].slice(j + 1).map(timeIn).find(Boolean) || null : null, r: k };
+      }
     }
     return { d: null, r };
   }
@@ -133,8 +142,10 @@ export function parseDocEvents(title, xmlOrRows) {
     const q = end ? { '03': '1분기', '06': '2분기', '09': '3분기', '12': '4분기' }[end.slice(4, 6)] || '' : '';
     add(labeled(rows, /공시\s*예정\s*일/), 'earn', `${q ? `${q} ` : ''}실적 발표 예정`, '결산실적 공시 예정일');
   } else if (/기업설명회|\(IR\)/.test(T)) {
-    const s = [textOf(rows, /개최\s*목적/), textOf(rows, /개최\s*방법/)].filter(Boolean).join(' · ');
-    add(labeled(rows, /^(?:\d+\.\s*)?(?:개최\s*)?일\s*시(?:\s*및\s*장소)?$/, { time: true }), 'ir', '기업설명회(IR)', s);
+    const hit = labeled(rows, /^(?:\d+\.\s*)?(?:개최\s*)?일\s*시(?:\s*및\s*장소)?$/, { time: true });
+    const until = hit?.d && rows[hit.r].map(dateIn).find((d) => d && d > hit.d); // 여러 날 IR(해외 NDR 등)의 끝 날
+    const s = [until ? `${dot(hit.d)} ~ ${dot(until)}` : '', textOf(rows, /(?:개최|실시)\s*목적/), textOf(rows, /(?:개최|실시)\s*방법/)].filter(Boolean).join(' · ');
+    add(hit, 'ir', '기업설명회(IR)', s);
   } else if (/주주명부폐쇄|기준일\s*설정/.test(T)) {
     const why = textOf(rows, /설정\s*사유/);
     const k = /배당/.test(why) ? 'div' : /주주총회|주총/.test(why) ? 'meet' : 'rec';
