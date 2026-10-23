@@ -1,0 +1,111 @@
+/* pages/docs/calendar.css — 공시 일정 달력(calendar.html). 색 토큰·글꼴·상단바·버튼은 style.css를 그대로 쓴다.
+   종류 색은 상승·하락(빨강·파랑)과 겹치지 않게: 실적 먹색 · IR 보라 · 주총·기준일 청록 · 배당 초록 · 자사주·증자 주황 · 지난 공시 회색 테두리 */
+:root {
+  --g-earn: #15171c; --g-ir: #6b56c4; --g-meet: #0e7c86; --g-div: #0f8a3e; --g-cap: #b56a00; --g-disc: #9aa0ab;
+}
+:root[data-theme="dark"] {
+  --g-earn: #edeff2; --g-ir: #a897ee; --g-meet: #4cc3cc; --g-div: #3ddc84; --g-cap: #f2a93b; --g-disc: #6f7581;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) { --g-earn: #edeff2; --g-ir: #a897ee; --g-meet: #4cc3cc; --g-div: #3ddc84; --g-cap: #f2a93b; --g-disc: #6f7581; }
+}
+
+.cal-page { gap: 14px; }
+.brand { color: inherit; text-decoration: none; }
+
+/* 달 넘기기 · 보기 · 거르기 */
+.cal-head { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; }
+.cal-top { display: flex; align-items: center; justify-content: space-between; gap: 10px 12px; flex-wrap: wrap; }
+.cal-nav { display: flex; align-items: center; gap: 2px; }
+.cal-month { min-width: 7.6em; margin: 0 4px; font-size: 19px; font-weight: 700; letter-spacing: -.02em; text-align: center; font-variant-numeric: tabular-nums; }
+.cal-month.dim { color: var(--muted); }
+.cal-nav .btn { height: 32px; margin-left: 8px; }
+.icon-btn:disabled { opacity: .35; cursor: default; background: transparent; }
+.cal-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.kchips { display: flex; gap: 6px; flex-wrap: wrap; }
+.kchip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 8px;
+  background: var(--surface); color: var(--muted); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.kchip:hover { color: var(--text); }
+.kchip[aria-pressed="true"] { border-color: var(--text-2); background: var(--surface-2); color: var(--text); }
+.kchip[aria-pressed="false"] .kdot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--line-2); }
+
+/* 종류 점 */
+.kdot { display: inline-block; flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; background: var(--g); }
+.g-earn { --g: var(--g-earn); } .g-ir { --g: var(--g-ir); } .g-meet { --g: var(--g-meet); }
+.g-div { --g: var(--g-div); } .g-cap { --g: var(--g-cap); }
+.kdot.g-disc { background: transparent; box-shadow: inset 0 0 0 1.5px var(--g-disc); }
+
+/* 본문 — 넓으면 달력 | 선택한 날, 좁으면 위아래 */
+.cal-body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; align-items: start; }
+.view-list .cal-body { grid-template-columns: minmax(0, 1fr); }
+.view-list .cal-side { display: none; }
+.cal-main { overflow: hidden; }
+
+/* 달력 칸 */
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.cal-wd { padding: 9px 8px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; font-weight: 600; }
+.cal-day { display: flex; flex-direction: column; align-items: stretch; gap: 3px; min-width: 0; min-height: 108px; padding: 6px 6px 8px;
+  border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--surface); color: var(--text); text-align: left; }
+.cal-grid > :nth-child(7n) { border-right: 0; }
+.cal-day:hover { background: var(--surface-2); }
+.cal-day.out { background: var(--bg); }
+.cal-day.out .dn { color: var(--muted); }
+.cal-day[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--text); }
+.dn { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%;
+  font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cal-day.today .dn { background: var(--ink); color: var(--on-ink); }
+.evs { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ev { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 12px; line-height: 17px; }
+.evt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-day.past .evt { color: var(--text-2); }
+.more { padding-left: 12px; color: var(--text-2); font-size: 11.5px; font-weight: 600; }
+
+/* 선택한 날 · 다가오는 일정 · 목록 */
+.side-sec { padding: 14px 16px; }
+.side-sec + .side-sec { border-top: 1px solid var(--line); }
+.side-h, .ag-h { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: 14.5px; font-weight: 700; }
+.dday { padding: 1px 6px; border-radius: 5px; background: var(--surface-2); color: var(--text-2); font-size: 11.5px; font-weight: 600; }
+.side-sub { color: var(--muted); font-size: 12px; font-weight: 600; }
+.side-empty { margin: 6px 0 2px; color: var(--muted); font-size: 13px; }
+.ce-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.ce { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); }
+.ce:first-child { border-top: 0; }
+.ce-k { display: inline-flex; align-items: center; gap: 6px; min-width: 66px; margin-top: 2px; color: var(--text-2); font-size: 12px; font-weight: 700; white-space: nowrap; }
+.ce-top { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 7px; font-size: 13.5px; }
+.ce-name { font-weight: 700; }
+.ce-mkt, .ce-when { color: var(--muted); font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ce-t { margin-top: 2px; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.ce-s { color: var(--muted); }
+.ce.past .ce-name, .ce.past .ce-t { color: var(--text-2); }
+.ce-link { display: inline-flex; padding: 5px; border-radius: 7px; color: var(--muted); }
+.ce-link:hover { background: var(--surface-3); color: var(--text); }
+.ce-link .ic { width: 16px; height: 16px; }
+.agenda { padding: 6px 16px 12px; }
+.ag-day { padding: 12px 0 2px; }
+.ag-day + .ag-day { border-top: 1px solid var(--line); }
+.ag-day.past .ag-h { color: var(--text-2); }
+.agenda-past { height: 30px; margin: 8px 0 2px; font-size: 12.5px; }
+.cal-empty { padding: 28px 18px; color: var(--muted); font-size: 13.5px; text-align: center; }
+.cal-empty .btn { margin-bottom: 8px; }
+.cal-note { margin: 0; padding: 0 4px; color: var(--muted); font-size: 12px; line-height: 1.65; }
+
+@media (max-width: 1100px) {
+  .cal-body { grid-template-columns: minmax(0, 1fr); }
+}
+/* 휴대폰 — 칸에는 종류 점만, 날을 누르면 아래 '선택한 날'에 자세히 */
+@media (max-width: 720px) {
+  .cal-head { padding: 12px; gap: 10px; }
+  .cal-month { min-width: 6.4em; font-size: 17px; }
+  .cal-filters select { flex: 1 1 140px; min-width: 0; }
+  .kchips { flex-wrap: nowrap; width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .kchips::-webkit-scrollbar { display: none; }
+  .cal-wd { padding: 7px 0; text-align: center; }
+  .cal-day { align-items: center; gap: 4px; min-height: 56px; padding: 4px 1px 6px; }
+  .dn { width: 24px; height: 24px; font-size: 12.5px; }
+  .evs { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 3px; }
+  .ev { gap: 0; }
+  .evt { display: none; }
+  .more { padding: 0; font-size: 10px; line-height: 7px; }
+  .side-sec, .agenda { padding-left: 14px; padding-right: 14px; }
+  .ce-k { min-width: 58px; }
+}

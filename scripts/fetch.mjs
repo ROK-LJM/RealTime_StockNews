@@ -21,6 +21,7 @@ import {
 import { startBudget, toStored, totalUsed, capacity, inSession, isKrSession, nextAllowanceAt, closedCheckDay, usExtWindow, usAfterPostSameDay } from './aibudget.mjs';
 import { validateWatchlist, writeJsonAtomic, analysisSig, sigMove } from './util.mjs';
 import { dartEnabled, resetDart, dartHalted, ensureCorpTable, getDisclosures } from './dart.mjs';
+import { calendarDue, buildCalendar } from './calendar.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -40,7 +41,7 @@ const ymdIn = (ms, timeZone) => new Intl.DateTimeFormat('en-CA', { timeZone, yea
 
 // 화면이 1분마다 받는 파일 — 회차 끝에 파일별 내용 지문(sha1 앞 10자리)을 manifest.json에 남기면
 // 화면은 지문만 먼저 받고 바뀐 파일만 다시 받는다(평소 1분 갱신 약 220KB → 수 KB, 휴대폰 데이터 절약).
-const MANIFEST_FILES = ['quotes.json', 'market.json', 'news.json', 'history.json', 'investors.json', 'analysis.json', 'disclosures.json', 'moves.json', 'status.json'];
+const MANIFEST_FILES = ['quotes.json', 'market.json', 'news.json', 'history.json', 'investors.json', 'analysis.json', 'disclosures.json', 'moves.json', 'status.json', 'calendar.json'];
 
 // 설정 검증: 고칠 수 있는 항목(앞자리 0 누락·소문자 티커)은 고치고, 틀린 항목은 빼며 이유를 로그로 남긴다.
 function readConfig(root) {
@@ -59,7 +60,8 @@ function readConfig(root) {
 // 1회 갱신. root/dataDir를 바꿔 임시 폴더에서도 돌릴 수 있다(자체 테스트용). 쓴 파일 목록을 돌려준다.
 // now: 이번 회차 기준 시각 — AI 예산 배분·분석 시각 기록에 쓴다(테스트는 고정 시각을 넘긴다).
 // refreshAll: 과거 시세·수급·뉴스를 간격과 상관없이 모두 새로 받는다(자체 테스트용, 아래 REFRESH_MIN 참고).
-export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data'), now = Date.now(), refreshAll = false } = {}) {
+// calendar: 공시 일정 달력 단계(3시간마다) — 자체 테스트는 그 단계를 보는 테스트에서만 켠다
+export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data'), now = Date.now(), refreshAll = false, calendar = true } = {}) {
   resetState(); // 회차마다 캐시·AI 상태를 새로 시작
   fs.mkdirSync(dataDir, { recursive: true });
   const written = [];
@@ -226,19 +228,27 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
   // 5-1) 국내 종목 최근 공시(OpenDART) — 무료 인증키(DART_API_KEY)가 있을 때만, 뉴스와 같은 간격으로(dart.mjs 참고).
   //      키가 없으면 건너뛴다(저장소에 둔 빈 파일 {} 그대로 — 화면이 없는 파일을 매분 요청하지 않게). 멈춘 이유는 status.json의 dart에.
   const disclosures = {}; // 종합분석에서 공시 입력으로 재사용
-  let dartState = null;
+  let dartState = null, corpMap = null; // corpMap: 종목코드→고유번호(공시 일정 달력도 씀)
   if (dartEnabled()) try {
     resetDart();
     const kr = items.filter((it) => it.market === 'KR').map((it) => it.code);
     const corp = await ensureCorpTable(readJson('dartcorp.json'), kr, now);
     if (corp.changed) write('dartcorp.json', corp.table);
     if (corp.error) console.error('    공시 고유번호 목록 받기 실패:', corp.error);
+    if (corp.table.at) corpMap = corp.table.map;
     await collect('disclosures', '공시', 'disclosures.json', (v) => isObj(v) && v.ok === true && Array.isArray(v.items),
       (it) => getDisclosures(it, corp.table.map, now), disclosures);
     dartState = dartHalted() || (corp.table.at ? 'ok' : `고유번호 목록 받기 실패 — ${corp.error || '다음 회차에 다시 시도'}`);
     if (dartState !== 'ok') console.warn(`  ! 공시: ${dartState} — 직전 값 유지`);
     write('disclosures.json', disclosures);
   } catch (e) { console.error('  ✗ 공시 실패 — disclosures.json 유지:', e.message); }
+
+  // 5-2) 공시 일정 달력(calendar.json, 화면 calendar.html) — 3시간마다(종목이 바뀌면 바로) 다시 만든다(calendar.mjs 참고).
+  //      국내는 공시 키가 있을 때 지난 공시·공시에 적힌 일정, 미국은 키 없이 나스닥의 실적 발표일·배당. 실패한 종목은 직전 일정 유지
+  if (calendar) try {
+    const prevCal = readJson('calendar.json');
+    if (calendarDue(prevCal, items, now)) write('calendar.json', await buildCalendar({ items, corpMap, prev: prevCal, now }));
+  } catch (e) { console.error('  ✗ 공시 일정 실패 — calendar.json 유지:', e.message); }
 
   // 6) 급등락 종목 AI 종합분석 (뉴스+수급+추세+시세 종합) — Gemini 키 있을 때만, ±임계치 이상만.
   //    ① 입력 시그니처가 직전과 같으면 재호출 없이 이전 분석 재사용(과호출·장마감 무한커밋 방지).

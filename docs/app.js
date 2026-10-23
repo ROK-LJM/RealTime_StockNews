@@ -886,7 +886,7 @@ function renderDisc(q, data) {
     return `<div class="news-item"><span class="tag ${cls}">${esc(x.tag || '기타')}</span>
       <span>${extLink(DART_VIEW + x.no, x.title)} <span class="news-time">${when}</span></span></div>`;
   }).join('');
-  el.innerHTML = `<div class="news-head"><span>최근 공시</span><span class="disc-src">전자공시(DART)</span></div>${rows}`;
+  el.innerHTML = `<div class="news-head"><span>최근 공시</span><span class="disc-src">전자공시(DART) · <a href="./calendar.html?code=${encodeURIComponent(q.code)}">일정 보기</a></span></div>${rows}`;
   el.hidden = false;
 }
 

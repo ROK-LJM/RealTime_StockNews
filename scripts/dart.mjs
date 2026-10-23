@@ -7,6 +7,7 @@
 // · 종목마다 최근 2주 공시를 최대 10건 받아 철회된 것은 빼고 최근 5건을 남긴다. 제목으로 종류(실적·계약·증자…)를 붙인다.
 // · 키 오류·하루 한도 초과·점검이면 그 회차의 나머지 요청을 멈춘다(화면은 직전 값 유지, 이유는 status.json에).
 // · 하루 요청 한도는 2만 건 — 국내 20종목을 15분마다 받아도 하루 2천 건 정도다.
+// · 공시 일정 달력(calendar.mjs)도 여기의 목록·본문 받기를 쓴다(3시간마다 · 본문은 공시마다 한 번).
 import zlib from 'node:zlib';
 
 const API = 'https://opendart.fss.or.kr/api';
@@ -56,6 +57,12 @@ function errorOf(buf) {
   return status ? new DartError(status, message.trim()) : new Error('알 수 없는 응답');
 }
 
+// XML 선언의 인코딩대로 글자로 — 공시 원본 중 예전 것은 EUC-KR
+function decodeXml(b) {
+  const enc = b.toString('latin1', 0, Math.min(b.length, 200)).match(/encoding\s*=\s*["']([^"']+)["']/i)?.[1] || 'utf-8';
+  return /euc-?kr|ks_c_5601|cp949|windows-949/i.test(enc) ? new TextDecoder('euc-kr').decode(b) : b.toString('utf8');
+}
+
 // ZIP 안의 첫 .xml 파일 — 중앙 디렉터리 기준으로 읽어 로컬 헤더에 크기가 비어 있는 형식(데이터 설명자)도 처리
 export function unzipXml(buf) {
   if (buf.length < 22 || buf.readUInt32LE(0) !== 0x04034b50) throw new Error('ZIP 형식이 아님');
@@ -77,8 +84,8 @@ export function unzipXml(buf) {
     if (buf.readUInt32LE(local) !== 0x04034b50) throw new Error('ZIP 항목 손상');
     const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
     const data = buf.subarray(start, start + size);
-    if (method === 0) return data.toString('utf8');
-    if (method === 8) return zlib.inflateRawSync(data).toString('utf8');
+    if (method === 0) return decodeXml(data);
+    if (method === 8) return decodeXml(zlib.inflateRawSync(data));
     throw new Error(`지원하지 않는 압축 방식(${method})`);
   }
   throw new Error('ZIP 안에 XML 없음');
@@ -158,6 +165,24 @@ export function tagOf(title) {
 // 한국 날짜 YYYYMMDD (한국은 서머타임이 없어 고정 +9시간)
 export const kstYmd = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
 
+// 공시 목록 한 번 받기 → [{ title, date, no }] — 철회된 공시 제외, 기간 안에 없으면 []. 키·한도 오류는 회차를 멈춘다
+async function fetchList(params) {
+  let j;
+  try { j = JSON.parse((await get('list.json', params)).toString('utf8')); }
+  catch (e) { throw e instanceof SyntaxError ? new Error('응답 형식 오류') : e; }
+  const status = String(j?.status ?? '');
+  if (status === '013') return []; // 기간 안에 공시 없음
+  if (status !== '000') { const err = new DartError(status, String(j?.message ?? '')); noteFatal(err); throw err; }
+  return (Array.isArray(j.list) ? j.list : [])
+    .filter((x) => x && /^\d{14}$/.test(String(x.rcept_no)) && !String(x.rm ?? '').includes('철')) // 철회된 공시 제외
+    .map((x) => {
+      const title = String(x.report_nm ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
+      const no = String(x.rcept_no);
+      return { title, date: /^\d{8}$/.test(String(x.rcept_dt)) ? String(x.rcept_dt) : no.slice(0, 8), no };
+    })
+    .filter((x) => x.title);
+}
+
 // 한 종목의 최근 공시 → { ok: true, items: [{ title, date, no, tag, key? }] }
 // 국내 종목이 아니거나 고유번호가 없으면(ETF 등) null — 이번 회차가 멈췄어도 null(직전 값 유지)
 export async function getDisclosures(item, map, now) {
@@ -165,23 +190,25 @@ export async function getDisclosures(item, map, now) {
   const corp = corpOf(map || {}, item.code);
   if (!corp) return null;
   const params = { corp_code: corp, bgn_de: kstYmd(now - LOOKBACK_DAYS * 86400e3), end_de: kstYmd(now), last_reprt_at: 'Y', page_count: '10' };
-  let j;
-  try { j = JSON.parse((await get('list.json', params)).toString('utf8')); }
-  catch (e) { throw e instanceof SyntaxError ? new Error('응답 형식 오류') : e; }
-  const status = String(j?.status ?? '');
-  if (status === '013') return { ok: true, items: [] }; // 기간 안에 공시 없음
-  if (status !== '000') { const err = new DartError(status, String(j?.message ?? '')); noteFatal(err); throw err; }
-  const items = (Array.isArray(j.list) ? j.list : [])
-    .filter((x) => x && /^\d{14}$/.test(String(x.rcept_no)) && !String(x.rm ?? '').includes('철')) // 철회된 공시 제외
-    .map((x) => {
-      const title = String(x.report_nm ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
-      const no = String(x.rcept_no);
-      const date = /^\d{8}$/.test(String(x.rcept_dt)) ? String(x.rcept_dt) : no.slice(0, 8);
-      const tag = tagOf(title);
-      return KEY_TAGS.has(tag) ? { title, date, no, tag, key: true } : { title, date, no, tag };
-    })
-    .filter((x) => x.title)
+  const items = (await fetchList(params))
+    .map((x) => { const tag = tagOf(x.title); return KEY_TAGS.has(tag) ? { ...x, tag, key: true } : { ...x, tag }; })
     .sort((a, b) => (a.no < b.no ? 1 : a.no > b.no ? -1 : 0)) // 접수번호 = 날짜+순번 → 최신 먼저
     .slice(0, KEEP);
   return { ok: true, items };
+}
+
+// 공시 일정 달력용 — 한 회사의 기간 안 공시 목록(공시 유형 type: I 거래소·B 주요사항·A 정기 …, 최대 100건). 멈췄으면 null
+export async function listFilings(corp, bgn, end, type) {
+  if (halted || !dartEnabled()) return null;
+  return fetchList({ corp_code: corp, bgn_de: bgn, end_de: end, last_reprt_at: 'Y', page_count: '100', ...(type ? { pblntf_ty: type } : {}) });
+}
+
+// 공시서류원본(ZIP 속 XML) 본문 — 일정 날짜를 뽑는 데 쓴다. 멈췄으면 null
+export async function getDocumentXml(no) {
+  if (halted || !dartEnabled()) return null;
+  try {
+    const buf = await get('document.xml', { rcept_no: no }, 15000);
+    if (!(buf.length >= 4 && buf.readUInt32LE(0) === 0x04034b50)) throw errorOf(buf); // ZIP이 아니면 오류 응답(파일 없음 등)
+    return unzipXml(buf);
+  } catch (e) { noteFatal(e); throw e; }
 }

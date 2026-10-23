@@ -103,6 +103,7 @@ pages/
     fetch.mjs                    시세·뉴스 → docs/data/*.json 생성(급등락 기록·파일 지문 포함)
     sources.mjs                  시세·뉴스·수급 수집, 태깅, 분위기 산출, AI(Gemini)
     dart.mjs                     국내 종목 최근 공시(OpenDART, 키가 있을 때만)
+    calendar.mjs                 공시 일정 달력 — 국내 공시에 적힌 일정(실적 발표 예정·IR·배당·주총…) + 미국 실적·배당(나스닥), 3시간마다
     aibudget.mjs                 AI 무료 한도 하루 배분(장 시간 가중치·모델 배분)
     stocklist.mjs                검색용 국내·미국 전체 종목 목록 생성
     watchlist-apply.mjs          '종목 편집' 요청 검증·반영
@@ -115,6 +116,7 @@ pages/
     theme.js                     화면 밝기(밝게·어둡게 — 기기 설정 따름, 버튼으로 전환)
     editor.js                    종목 편집(검색·추가·삭제·저장)
     help.html                    사용설명서
+    calendar.html / calendar.js / calendar.css   공시 일정 달력(상단바 '일정')
     favicon.svg · icon-*.png · manifest.webmanifest   로고·홈 화면 아이콘·앱 설명
-    data/*.json                  봇이 생성 (시세·뉴스·분위기·급등락 기록·종목 목록, manifest.json = 파일별 지문)
+    data/*.json                  봇이 생성 (시세·뉴스·분위기·급등락 기록·종목 목록·공시 일정, manifest.json = 파일별 지문)
 ```

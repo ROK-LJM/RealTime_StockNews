@@ -413,6 +413,7 @@ input::placeholder { color: var(--muted); }
 .tag.key { background: rgba(var(--warn-rgb), .14); color: var(--warn); }
 .tag.risk { background: var(--bad); color: var(--on-ink); } /* 어둡게에선 밝은 빨강 위 검은 글자 */
 .disc-src { font-size: 11.5px; font-weight: 500; color: var(--muted); }
+.disc-src a { color: var(--text-2); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
 /* 지난 급등락 — 날짜 · 등락 · 그날의 이유 */
 .mv-item { display: grid; grid-template-columns: 38px 70px minmax(0, 1fr); align-items: baseline; gap: 8px; }
 .mv-d { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -534,9 +535,9 @@ input::placeholder { color: var(--muted); }
   .brand { gap: 8px; font-size: 15px; }
   .logo { width: 24px; height: 24px; }
   .brand-long, .refresh-l, .help-l, .clock-l { display: none; }
-  .controls { gap: 2px; }
+  .controls { gap: 0; } /* 아이콘 5개(새로고침·밝기·일정·설명서 등)와 제목이 한 줄에 들어가게 */
   .clock { margin-right: 4px; }
-  .icon-btn { min-width: 32px; padding: 0 6px; }
+  .icon-btn { min-width: 30px; padding: 0 5px; }
   /* 첫 화면에 '한눈에'가 더 보이게 시장 영역을 줄인다(524 → 약 350px).
      분위기는 점수 | 막대 두 칸(중간 폭과 같은 배치)에 요약만 아래 한 줄 */
   .mood { gap: 2px 16px; padding: 12px 14px 10px; }
