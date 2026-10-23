@@ -160,6 +160,9 @@ const DOCS = {
     docRow('6. 배당기준일', '2026-09-30'), docRow('7. 배당금지급 예정일자', '2026-11-20'), docRow('10. 이사회결의일(결정일)', '2026-10-30')])],
 };
 // 나스닥 응답(실제 형태, 2026-10-23 AAPL) — 실적 발표일 · 배당
+// 원본 ZIP에 함께 든 첨부(감사보고서 등 '{접수번호}_00760.xml') — 본문이 아니므로 여기 날짜를 쓰면 안 된다(ZIP에서 앞에 있고 더 크다)
+const ATTACH_DOC = docXml('첨부', [docRow('1. 일시', '2026-12-31', '10:00'), docRow('3. 결산실적 공시예정일', '2026-12-30'),
+  docRow('6. 배당기준일', '2026-12-28'), docRow('7. 배당금지급 예정일자', '2026-12-27'), docRow('비고', '첨부 서류 '.repeat(40))]);
 const NASDAQ_EARN = { data: { reportText: "Apple Inc. Common Stock is expected* to report earnings on  11/02/2026 after market close.  The report will be for the fiscal Quarter ending Sep 2026.", heading: 'AAPL Earnings Date', announcement: 'Earnings announcement* for AAPL: Nov 02, 2026' }, message: null, status: { rCode: 200 } };
 const NASDAQ_DIV = { data: { exDividendDate: '08/10/2026', dividends: { rows: [
   { exOrEffDate: '08/10/2026', type: 'Cash', amount: '$0.27', declarationDate: '07/30/2026', recordDate: '08/10/2026', paymentDate: '08/13/2026', currency: 'USD' },
@@ -180,8 +183,8 @@ function routes({ krPct = { '005930': 4.2, '000660': 0.3 }, krAt = null, usPct =
   dartList: listFn = (corp) => json(dartList(corp, dartRows[corp] || [])), dartDocs = {},
   nasdaq = (kind, sym) => (sym !== 'AAPL' ? text('not found', 404) : json(kind === 'earn' ? NASDAQ_EARN : NASDAQ_DIV)) } = {}) {
   return [
-    { re: /opendart\.fss\.or\.kr\/api\/document\.xml\?/, fn: (m, u) => { const d = dartDocs[new URL(u).searchParams.get('rcept_no')];
-      return d ? new Response(makeZip([['doc.xml', d]])) : json({ status: '014', message: '파일이 존재하지 않습니다' }); } },
+    { re: /opendart\.fss\.or\.kr\/api\/document\.xml\?/, fn: (m, u) => { const no = new URL(u).searchParams.get('rcept_no'), d = dartDocs[no];
+      return d ? new Response(makeZip([[`${no}_00760.xml`, ATTACH_DOC], [`${no}.xml`, d]])) : json({ status: '014', message: '파일이 존재하지 않습니다' }); } },
     { re: /api\.nasdaq\.com\/api\/(?:analyst\/([^/]+)\/earnings-date|quote\/([^/]+)\/dividends)/, fn: (m) => nasdaq(m[1] ? 'earn' : 'div', decodeURIComponent(m[1] || m[2])) },
     { re: /opendart\.fss\.or\.kr\/api\/corpCode\.xml\?/, fn: (m, u) => corpZip(u) },
     { re: /opendart\.fss\.or\.kr\/api\/list\.json\?/, fn: (m, u) => listFn(new URL(u).searchParams.get('corp_code'), u) },
@@ -1351,6 +1354,23 @@ await test('공시 일정(본문): 실적 발표 예정일·IR 일시·기준일
   assert.deepEqual(JSON.parse(JSON.stringify(cal.parseDocEvents('기업설명회(IR)개최(안내공시)', docXml('IR', [docRow('1. 일시', '2026년 11월 5일 오후 4시')])))),
     [{ d: '20261105', tm: '16:00', k: 'ir', t: '기업설명회(IR)' }], '한글 날짜·시각');
   assert.deepEqual(cal.parseDocEvents('단일판매ㆍ공급계약체결', DOCS.ir[1]), [], '일정이 없는 공시');
+  // 원본 형식이 달라도 — CDATA 속 HTML(닫는 칸 태그 없음) · 글자로 이스케이프된 표 · 닫는 줄 태그 없음 · 값이 속성에만 있는 칸 · 칸 안 줄바꿈 · 붙여 쓴 날짜
+  const pd = (t, x) => JSON.parse(JSON.stringify(cal.parseDocEvents(t, x)));
+  const IR_T = '기업설명회(IR)개최(안내공시)';
+  assert.deepEqual(pd(IR_T, '<DOCUMENT><BODY><![CDATA[<table><tr><td>1. 일시<td>2026-11-05<td>16:00</tr></table>]]></BODY></DOCUMENT>'),
+    [{ d: '20261105', tm: '16:00', k: 'ir', t: '기업설명회(IR)' }], 'CDATA 속 HTML');
+  assert.deepEqual(pd(IR_T, '<BODY>&lt;TABLE&gt;&lt;TR&gt;&lt;TD&gt;1. 일시&lt;/TD&gt;&lt;TD&gt;2026-11-05 16:00&lt;/TD&gt;&lt;/TR&gt;&lt;/TABLE&gt;</BODY>'),
+    [{ d: '20261105', tm: '16:00', k: 'ir', t: '기업설명회(IR)' }], '이스케이프된 표');
+  assert.deepEqual(pd(IR_T, '<table><tr><td>1. 일시<td>미정<tr><td>7. 결정일자<td>2026-10-22</table>'), [], '닫는 줄 태그가 없어도 다음 줄 날짜를 끌어오지 않음');
+  assert.deepEqual(pd('주주명부폐쇄기간또는기준일설정', docXml('기준일', ['<TR><TD>1. 기준일</TD><TU AUNIT="DATE" AUNITVALUE="20261029"/></TR>'])),
+    [{ d: '20261029', k: 'rec', t: '권리 기준일' }], '값이 속성에만 있는 칸');
+  assert.deepEqual(pd('결산실적공시예고(안내공시)', docXml('예고', ['<TR><TD>3. 결산실적 공시&cr;예정일</TD><TD>2026-10-29</TD></TR>'])).map((e) => e.d), ['20261029'], '칸 안 줄바꿈');
+  assert.deepEqual(pd(IR_T, docXml('IR', [docRow('1. 일시', '20261105 16:00')])).map((e) => [e.d, e.tm]), [['20261105', '16:00']], '붙여 쓴 날짜 뒤 시각');
+  assert.equal(cal.dateIn('20261022800612'), null, '접수번호는 날짜가 아님');
+  // 진단 고르기 — 공시 종류가 다른 것부터 최근 순으로 4건
+  const dl = [['20261001000001', '기업설명회(IR)개최'], ['20261003000003', '기업설명회(IR)개최'], ['20261002000002', '결산실적공시예고'], ['20261004000004', '기업설명회(IR)개최'],
+    ['20261001000005', '주주총회소집결의'], ['20261005000006', '기업설명회(IR)개최']].map(([no, t]) => ({ no, t }));
+  assert.deepEqual(cal.pickDiag(dl).map((d) => d.no), ['20261005000006', '20261002000002', '20261001000005', '20261004000004'], '종류가 다른 것부터 최근 순');
   // 미국 — 나스닥
   assert.deepEqual(cal.parseNasdaqEarnings(NASDAQ_EARN), { d: '20261102', when: 'amc', est: true });
   assert.deepEqual(cal.parseNasdaqEarnings({ data: { announcement: 'Earnings announcement for MSFT: Jan 28, 2027', reportText: 'scheduled before market open' } }), { d: '20270128', when: 'bmo', est: false });
@@ -1360,17 +1380,25 @@ await test('공시 일정(본문): 실적 발표 예정일·IR 일시·기준일
   // 다시 만들 때
   const items = [{ code: '005930' }, { code: 'AAPL' }];
   assert.equal(cal.calendarDue(null, items, NOW_KR), true);
-  assert.equal(cal.calendarDue({ at: NOW_KR - 2 * 3600e3, codes: ['005930', 'AAPL'] }, items, NOW_KR), false, '3시간 안');
-  assert.equal(cal.calendarDue({ at: NOW_KR - 3 * 3600e3, codes: ['005930', 'AAPL'] }, items, NOW_KR), true, '3시간 지남');
-  assert.equal(cal.calendarDue({ at: NOW_KR - 600e3, codes: ['005930'] }, items, NOW_KR), true, '종목이 바뀌면 바로');
+  const pv = cal.PARSER_V;
+  assert.equal(cal.calendarDue({ at: NOW_KR - 2 * 3600e3, codes: ['005930', 'AAPL'], pv }, items, NOW_KR), false, '3시간 안');
+  assert.equal(cal.calendarDue({ at: NOW_KR - 3 * 3600e3, codes: ['005930', 'AAPL'], pv }, items, NOW_KR), true, '3시간 지남');
+  assert.equal(cal.calendarDue({ at: NOW_KR - 600e3, codes: ['005930'], pv }, items, NOW_KR), true, '종목이 바뀌면 바로');
+  assert.equal(cal.calendarDue({ at: NOW_KR - 600e3, codes: ['005930', 'AAPL'], pv: pv - 1 }, items, NOW_KR), true, '본문 읽는 방식이 바뀌면 바로');
+  assert.equal(cal.calendarDue({ at: NOW_KR - 600e3, codes: ['005930', 'AAPL'] }, items, NOW_KR), true, '판이 없는 옛 파일도 바로');
 });
 await test('공시 일정(파이프라인): 국내 지난 공시·공시에 적힌 일정 + 미국 실적·배당 → calendar.json · 본문은 한 번만 · 3시간 안엔 다시 안 받음 · 실패하면 직전 일정 · 키 없으면 미국만', async () => {
+  const cal = await import('./calendar.mjs');
   await withDartKey(async () => {
     const rows = { ...DART_ROWS, '00126380': [...DART_ROWS['00126380'], ['20261011000300', '결산실적공시예고(안내공시)'],
-      ['20261008000111', '결산실적공시예고(안내공시)'], ['20261009000222', '기업설명회(IR)개최(안내공시)']] };
+      ['20261008000111', '결산실적공시예고(안내공시)'], ['20261009000222', '기업설명회(IR)개최(안내공시)'],
+      ['20261012000778', '유상증자결정(종속회사의주요경영사항)'], ['20261007000888', '기업설명회(IR)개최(안내공시)'],
+      ['20261001000999', '현금ㆍ현물배당결정'], ['20261015000998', '현금ㆍ현물배당결정']] };
     const notice1015 = DOCS.earnNotice[1].replace('2026-10-29', '2026-10-15'); // 실적을 실제로 낸 날(10/15)을 예고한 공시
     const dartDocs = { '20261013000200': DOCS.dividend[1], '20261010000050': DOCS.ir[1], '20261011000300': DOCS.earnNotice[1],
-      '20261008000111': notice1015, '20261009000222': DOCS.ir[1] };
+      '20261008000111': notice1015, '20261009000222': DOCS.ir[1],
+      '20261012000778': docXml('유상증자', [docRow('9. 신주의 상장 예정일', '2026-12-01')]), // 자회사 일정 — 받지 않아야 함
+      '20261007000888': docXml('IR', [docRow('1. 일시', '미정'), docRow('3. 개최목적', '기업 설명')]) }; // 날짜가 없는 본문 → 진단
     const root = workspace();
     await pipeline(root, { dartRows: rows, dartDocs }, NOW_KR, { calendar: true });
     const c = read(root, 'calendar.json');
@@ -1390,8 +1418,19 @@ await test('공시 일정(파이프라인): 국내 지난 공시·공시에 적�
     assert.equal(find({ d: '20260810', c: 'AAPL', k: 'div', t: '배당락', s: '주당 $0.27' }).length, 1);
     assert.equal(find({ c: 'AAPL', d: '20260511' }).length, 0, '90일보다 오래된 배당락은 뺌');
     assert.deepEqual(c.events.map((e) => e.d), [...c.events.map((e) => e.d)].sort(), '날짜순');
-    assert.deepEqual(Object.keys(c.docs).sort(), ['20261008000111', '20261009000222', '20261010000050', '20261011000300', '20261013000200'], '일정이 적힌 공시만 본문을 받아 기억');
-    assert.equal(NET.calls.filter((u) => /document\.xml/.test(u)).length, 5);
+    assert.deepEqual(Object.keys(c.docs).sort(), ['20261001000999', '20261007000888', '20261008000111', '20261009000222', '20261010000050', '20261011000300', '20261013000200'],
+      '일정이 적힌 공시만 본문을 받아 기억 — 원문 없음(014)은 이틀 지난 것만 빈 결과로 기억, 자회사 공시는 받지 않음');
+    assert.equal(NET.calls.filter((u) => /document\.xml/.test(u)).length, 8);
+    assert.ok(!NET.calls.some((u) => /document\.xml/.test(u) && /rcept_no=20261012000778/.test(u)), '자회사 공시는 본문을 받지 않음');
+    assert.equal(find({ no: '20261012000778', k: 'disc' }).length, 1, '자회사 공시도 공시한 날에는 둠');
+    assert.equal(find({ no: '20261012000778', k: 'cap' }).length, 0);
+    assert.deepEqual(c.docs['20261001000999'], [], '원문 없음 — 이틀 지난 공시는 다시 받지 않게 빈 결과로');
+    assert.equal(c.pv, cal.PARSER_V, '본문 읽는 방식의 판');
+    // 진단 — 일정을 못 찾은 본문의 생김새(받은 파일·고른 파일·인코딩·태그·앞부분 줄)
+    assert.equal(c.diag.length, 1, '일정을 못 찾은 본문만 진단');
+    const dg = c.diag[0];
+    assert.deepEqual([dg.no, dg.pick, dg.enc, dg.files.map((f) => f[0])], ['20261007000888', '20261007000888.xml', 'utf8', ['20261007000888_00760.xml', '20261007000888.xml']]);
+    assert.ok(dg.rows.includes('1. 일시 | 미정') && /TABLE 1/.test(dg.tags) && dg.head.startsWith('<BODY>') && dg.bad === 0, JSON.stringify(dg));
     assert.ok(NET.calls.filter((u) => /list\.json/.test(u) && /pblntf_ty=I/.test(u)).length >= 1, '유형별 목록');
     assert.ok(NET.calls.filter((u) => /pblntf_ty/.test(u)).every((u) => /last_reprt_at=Y/.test(u)), '정정 전 공시는 빼고 최종 보고서만');
     assert.match(read(root, 'manifest.json').files['calendar.json'], /^[0-9a-f]{10}$/, '파일 지문에 포함');
@@ -1402,7 +1441,9 @@ await test('공시 일정(파이프라인): 국내 지난 공시·공시에 적�
     assert.equal(NET.calls.filter((u) => /pblntf_ty|document\.xml|api\.nasdaq/.test(u)).length, 0);
     assert.equal(read(root, 'calendar.json').at, NOW_KR);
     await pipeline(root, { dartRows: rows, dartDocs }, NOW_KR + 3 * 3600e3, { calendar: true });
-    assert.equal(NET.calls.filter((u) => /document\.xml/.test(u)).length, 0, '본문 다시 안 받음');
+    assert.deepEqual(NET.calls.filter((u) => /document\.xml/.test(u)).map((u) => new URL(u).searchParams.get('rcept_no')), ['20261015000998'],
+      '본문 다시 안 받음 — 원문이 아직 없던 막 올라온 공시만 다시');
+    assert.equal(read(root, 'calendar.json').diag.length, 1, '진단은 다음 회차에도 유지');
     assert.equal(NET.calls.filter((u) => /api\.nasdaq/.test(u)).length, 2);
     assert.equal(read(root, 'calendar.json').events.filter((e) => e.k === 'ir').length, 1, '기억한 본문으로 일정 유지');
     // 나스닥 실패 — 직전 미국 일정 유지
@@ -1410,6 +1451,13 @@ await test('공시 일정(파이프라인): 국내 지난 공시·공시에 적�
     const c4 = read(root, 'calendar.json');
     assert.equal(c4.us, '받기 실패 — 직전 일정 유지');
     assert.equal(c4.events.filter((e) => e.c === 'AAPL' && e.k === 'earn' && e.d === '20261102').length, 1);
+    // 읽는 방식이 바뀌면(pv) 3시간을 기다리지 않고 바로, 기억한 본문 결과를 버리고 다시 받는다 — 옛 판에서 일정이 모두 0건이던 기억(20차 배포 직후 실제 상태)
+    writeData(root, 'calendar.json', { ...c4, pv: 1, docs: Object.fromEntries(Object.keys(c4.docs).map((k) => [k, []])), diag: undefined });
+    await pipeline(root, { dartRows: rows, dartDocs }, NOW_KR + 7 * 3600e3, { calendar: true });
+    const c5 = read(root, 'calendar.json');
+    assert.equal(c5.pv, cal.PARSER_V);
+    assert.equal(NET.calls.filter((u) => /document\.xml/.test(u)).length, 8, '기억한 본문을 모두 다시 받음');
+    assert.equal(c5.events.filter((e) => e.k === 'ir' && e.d === '20261029').length, 1, '다시 받은 본문으로 IR 일정 복구');
   });
   // 공시 키가 없으면 미국만
   const r2 = workspace();
@@ -1460,16 +1508,31 @@ await test('공시 일정 화면(calendar.js): 달 칸(일요일 시작·5~6주)
   assert.equal(f.sourceUrl({ m: 'US', c: 'javascript:alert(1)', k: 'earn' }), '', '이상한 코드는 주소를 만들지 않음');
   assert.deepEqual([...f.byDate(ev).keys()], ['20261029', '20261102', '20261015', '20261106']);
 });
-await test('공시 도구: ZIP(압축·무압축·데이터 설명자) 속 XML · 상장사만 표로 · 우선주는 보통주 회사 · 종류 판정 · 한국 날짜', () => {
+await test('공시 도구: ZIP(압축·무압축·데이터 설명자) 속 XML · 본문 파일 고르기 · 글자는 바이트로 판단 · 상장사만 표로 · 우선주는 보통주 회사 · 종류 판정 · 한국 날짜', () => {
   const xml = corpXml();
   for (const opt of [{}, { method: 0 }, { descriptor: true }]) {
     assert.equal(dartm.unzipXml(makeZip([['안내.txt', '설명'], ['CORPCODE.xml', xml]], opt)), xml, JSON.stringify(opt));
   }
   assert.throws(() => dartm.unzipXml(Buffer.from('<result><status>010</status></result>')), /ZIP 형식이 아님/);
   assert.throws(() => dartm.unzipXml(makeZip([['a.txt', 'x']])), /XML 없음/);
-  // 예전 공시 원본은 EUC-KR — '공시'(B0F8 BDC3)
-  const euckr = Buffer.concat([Buffer.from('<?xml version="1.0" encoding="euc-kr"?><P>'), Buffer.from([0xb0, 0xf8, 0xbd, 0xc3]), Buffer.from('</P>')]);
-  assert.match(dartm.unzipXml(makeZip([['doc.xml', euckr]])), /<P>공시<\/P>/, 'XML 선언의 인코딩대로');
+  // 글자는 바이트로 판단 — XML 선언이 없거나 실제와 달라도('공시' EUC-KR = B0F8 BDC3)
+  const euc = Buffer.from([0xb0, 0xf8, 0xbd, 0xc3]);
+  const eucDoc = (head) => makeZip([['doc.xml', Buffer.concat([Buffer.from(`${head}<P>`), euc, Buffer.from('</P>')])]]);
+  assert.match(dartm.unzipXml(eucDoc('<?xml version="1.0" encoding="euc-kr"?>')), /<P>공시<\/P>/, 'EUC-KR');
+  assert.match(dartm.unzipXml(eucDoc('')), /<P>공시<\/P>/, '선언 없는 EUC-KR');
+  assert.match(dartm.unzipXml(eucDoc('<?xml version="1.0" encoding="utf-8"?>')), /<P>공시<\/P>/, 'UTF-8이라고 선언한 EUC-KR');
+  assert.match(dartm.unzipXml(makeZip([['doc.xml', '<?xml version="1.0" encoding="euc-kr"?><P>공시</P>']])), /<P>공시<\/P>/, 'EUC-KR이라고 선언한 UTF-8');
+  assert.equal(dartm.decodeBytes(Buffer.from('<?xml version="1.0"?><A>2026-10-29</A>')).enc, 'utf8', '영문·숫자뿐이면 UTF-8');
+  assert.equal(dartm.decodeBytes(Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('<P>공시</P>', 'utf16le')])).text, '<P>공시</P>', 'BOM 있는 UTF-16');
+  const broken = dartm.decodeBytes(Buffer.concat([Buffer.from('<P>결산실적 공시예정일</P>'), Buffer.from([0xff]), Buffer.from('<P>기업설명회 일시</P>')]));
+  assert.deepEqual([broken.enc, /결산실적 공시예정일/.test(broken.text), /기업설명회 일시/.test(broken.text)], ['utf8(깨짐)', true, true], '한 바이트 깨진 UTF-8은 UTF-8로');
+  assert.match(dartm.decodeBytes(Buffer.concat([Buffer.from('<P>결과</P>'), Buffer.from([0xff])])).text, /<P>결과<\/P>/, '짧은 글도 — 잘못 읽어 한자가 쏟아지는 쪽은 감점');
+  // 본문 파일 고르기 — '{접수번호}.xml' · 첨부(번호 붙은 파일) 제외 · 그 밖엔 가장 큰 것
+  const no = '20261022000123', big = (w) => `<A>${w.repeat(50)}</A>`;
+  assert.equal(dartm.unzipXml(makeZip([[`${no}_00760.xml`, big('첨부 ')], [`${no}.xml`, '<A>본문</A>']]), no), '<A>본문</A>', '첨부가 앞에 있고 더 커도 본문');
+  assert.equal(dartm.unzipXml(makeZip([[`${no}.xml`, '<A>본문</A>'], ['cover.xml', big('표지 ')]]), no), '<A>본문</A>', '이름이 접수번호인 파일');
+  assert.equal(dartm.unzipXml(makeZip([['x_00760.xml', big('첨부 ')], ['y.xml', '<A>본문</A>']])), '<A>본문</A>', '접수번호를 몰라도 첨부는 피함');
+  assert.equal(dartm.unzipXml(makeZip([['cover.xml', '<A>표지</A>'], ['main.xml', big('본문 ')]])), big('본문 '), '그 밖엔 가장 큰 파일');
   const map = dartm.parseCorpXml(xml);
   assert.equal(Object.keys(map).length, 1102, '비상장사(종목코드 빈칸) 제외');
   assert.equal(map['005930'], '00126380');

@@ -9,19 +9,27 @@
 //   '1. 기준일 | 2026-10-29', '2. 일시 | 2026-12-11 | 09 : 00', '5. 소각을 위한 자기주식 취득 예정기간 | 시작일 | 2026-10-23' 다음 줄 '종료일 | 2027-01-22'.
 //   정정 공시는 앞에 '정정전 | 정정후' 표가 붙으므로 같은 항목이 여러 번이면 마지막(고친 본문)을 쓴다.
 //   본문은 접수번호마다 한 번만 받아 결과를 기억한다(공시는 바뀌지 않는다. 고치면 새 접수번호).
+//   원본은 형식·인코딩이 여러 가지라 너그럽게 읽는다 — 글자는 바이트로 판단(EUC-KR 원본), ZIP에서는 '{접수번호}.xml'(첨부 '…_00760.xml' 제외),
+//   표는 CDATA 속 HTML·글자로 이스케이프된 표·닫는 태그 없는 줄과 칸·값이 속성에만 있는 칸(AUNITVALUE)·붙여 쓴 날짜(20261029)도 읽는다.
+//   읽는 방식이 바뀌면 PARSER_V를 올린다 → 기억해 둔 본문 결과를 버리고 다시 받는다.
+//   일정을 못 찾은 본문은 생김새(파일·인코딩·태그·앞부분 줄)를 diag에 몇 건 남긴다 — 원본 형식이 예상과 다를 때 고칠 단서.
+//   자회사(종속회사) 공시는 그 회사의 일정이라 본문을 받지 않는다(공시한 날만 둔다).
 // · 미국(나스닥 공개 자료 — 키 없음): 다음 실적 발표일(장 시작 전·마감 후, '*'가 붙으면 예상일)과 배당(배당락·지급일)
-// · 3시간마다(종목이 바뀌면 바로) 다시 만든다. 받기에 실패한 종목은 직전 일정을 그대로 쓴다.
-import { dartEnabled, dartHalted, corpOf, tagOf, kstYmd, listFilings, getDocumentXml } from './dart.mjs';
+// · 3시간마다(종목이 바뀌거나 본문 읽는 방식의 판이 바뀌면 바로) 다시 만든다. 받기에 실패한 종목은 직전 일정을 그대로 쓴다.
+import { dartEnabled, dartHalted, corpOf, tagOf, kstYmd, listFilings, getDocument } from './dart.mjs';
 import { mapLimit } from './util.mjs';
 
 export const CAL_REFRESH_MS = 3 * 3600e3;
+export const PARSER_V = 2;  // 본문 읽는 방식의 판 — 바꾸면 기억한 본문 결과(docs)를 버리고 다시 받는다
 const BACK_DAYS = 90;       // 지난 공시·일정
 const AHEAD_DAYS = 400;     // 앞으로의 일정(자사주 매입 기간 끝 등)
 const DOCS_PER_RUN = 40;    // 한 번에 새로 받는 본문 수 — 나머지는 다음 갱신 때
 const TYPES = ['I', 'B', 'A']; // 공시 유형: 거래소 · 주요사항보고 · 정기(사업·분기보고서)
 // 본문에서 일정을 찾는 공시(제목)
 export const SCHEDULE_RE = /결산실적공시\s*예고|기업설명회|\(IR\)|주주명부폐쇄|기준일\s*설정|배당\s*결정|주주총회\s*소집|주식\s*소각\s*결정|자기주식\s*(?:취득|처분)\s*결정|증자\s*결정|주식\s*(?:분할|병합)\s*결정|감자\s*결정/;
+const SUB_RE = /종속회사|자회사/; // 자회사의 증자 등 — 내 종목의 일정이 아님
 const EARN_FILED_RE = /영업\(잠정\)실적|매출액또는손익구조/; // 실적 공시 — 그날이 곧 발표일
+const DIAG_MAX = 4;         // 진단으로 남기는 본문 수
 const KIND_ORDER = { earn: 0, ir: 1, meet: 2, div: 3, rec: 4, cap: 5, disc: 6 };
 const cut = (s, n = 80) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
 const ymd = (y, m, d) => (y >= 2000 && m >= 1 && m <= 12 && d >= 1 && d <= 31 ? `${y}${String(m).padStart(2, '0')}${String(d).padStart(2, '0')}` : null);
@@ -30,20 +38,29 @@ const dot = (d) => `${d.slice(0, 4)}.${d.slice(4, 6)}.${d.slice(6, 8)}`;
 // ---------- 국내 공시 본문 ----------
 // 본문(XML·HTML) → 표의 줄·칸 [['1. 기준일', '2026-10-29'], …] — 줄은 표의 줄(과 표 앞뒤)로만 나눈다(칸 안의 문단은 한 칸)
 export function docRows(xml) {
-  const s = String(xml ?? '')
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<\/TR\s*>|<\/?TABLE\b[^>]*>/gi, '\n')
-    .replace(/<\/(?:TD|TH|TE|TU)\s*>/gi, '\t')
+  let s = String(xml ?? '').replace(/<!--[\s\S]*?-->/g, ' ').replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1');
+  // 표가 글자로 이스케이프되어 들어 있으면(&lt;TR&gt;…) 먼저 푼다
+  for (let i = 0; i < 2 && /&lt;\s*\/?\s*(?:TABLE|TR|TD|TH|TE|TU)\b/i.test(s); i++) {
+    s = s.replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&amp;/gi, '&');
+  }
+  s = s
+    .replace(/<(TU|TE|TD)\b[^>]*?\bAUNITVALUE\s*=\s*"([^"]*)"[^>]*?(?:\/>|>\s*<\/\1\s*>)/gi, (_, t, v) => `<${t}>${v}</${t}>`) // 값이 속성에만 있는 칸
+    .replace(/<\/?TR\b[^>]*>|<\/?TABLE\b[^>]*>/gi, '\n')  // 여는 태그로도 나눈다(닫는 태그가 빠진 표)
+    .replace(/<\/?(?:TD|TH|TE|TU)\b[^>]*>/gi, '\t')
     .replace(/<[^>]*>/g, ' ')
+    .replace(/&cr;/gi, ' ') // 칸 안 줄바꿈
     .replace(/&nbsp;|&#160;/gi, ' ').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'")
     .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(+d)).replace(/&amp;/gi, '&');
   return s.split('\n').map((r) => r.split('\t').map((c) => c.replace(/\s+/g, ' ').trim()).filter(Boolean)).filter((r) => r.length);
 }
-// '2026-10-29' · '2026.10.29' · '2026/10/29' · '2026년 10월 29일' → '20261029'
-export function dateIn(s) {
-  const m = String(s ?? '').match(/(20\d{2})\s*(?:[-./]|년)\s*(\d{1,2})\s*(?:[-./]|월)\s*(\d{1,2})(?!\d)/);
-  return m ? ymd(+m[1], +m[2], +m[3]) : null;
+// 글 속 첫 날짜 → { d: 'YYYYMMDD', end: 날짜 다음 위치 } — '2026-10-29' · '2026.10.29' · '2026/10/29' · '2026년 10월 29일' · 붙여 쓴 '20261029'
+function findDate(s) {
+  const t = String(s ?? '');
+  const m = t.match(/(20\d{2})\s*(?:[-./]|년)\s*(\d{1,2})\s*(?:[-./]|월)\s*(\d{1,2})(?!\d)/) || t.match(/(?<!\d)(20\d{2})(\d{2})(\d{2})(?!\d)/);
+  const d = m && ymd(+m[1], +m[2], +m[3]);
+  return d ? { d, end: m.index + m[0].length } : null;
 }
+export function dateIn(s) { return findDate(s)?.d ?? null; }
 // '15:45' · '09 : 00' · '오후 3시 30분' → '15:45'
 export function timeIn(s) {
   const t = String(s ?? '');
@@ -66,10 +83,9 @@ function labeled(rows, re, { time = false } = {}) {
     if (i < 0) continue;
     for (let j = i; j < row.length; j++) {
       const cell = j === i ? row[i].replace(re, '') : row[j];
-      const d = dateIn(cell);
-      if (!d) continue;
-      const rest = cell.slice(cell.search(/20\d{2}/) + 10);
-      return { d, tm: time ? timeIn(rest) || timeIn(row[j + 1] || '') : null, r };
+      const f = findDate(cell);
+      if (!f) continue;
+      return { d: f.d, tm: time ? timeIn(cell.slice(f.end)) || timeIn(row[j + 1] || '') : null, r };
     }
     return { d: null, r };
   }
@@ -146,6 +162,32 @@ export function parseDocEvents(title, xmlOrRows) {
   return out;
 }
 
+// 일정을 못 찾은 본문의 생김새 — 받은 파일·고른 파일·인코딩·깨진 글자 수·많이 나온 태그·앞부분 줄·첫 날짜 근처 원문
+function diagOf(no, title, doc) {
+  const x = String(doc.xml ?? '');
+  const body = Math.max(0, x.search(/<BODY\b/i));
+  const at = x.slice(body).search(/20\d{2}\s*(?:[-./]|년)|(?<!\d)20\d{6}(?!\d)/);
+  const tags = {};
+  for (const m of x.matchAll(/<([A-Za-z][\w:.-]*)/g)) { const t = m[1].toUpperCase(); tags[t] = (tags[t] || 0) + 1; }
+  return {
+    no, t: cut(title), files: (doc.files || []).slice(0, 6), pick: doc.pick || '', enc: doc.enc || '', len: x.length,
+    bad: x.split('\uFFFD').length - 1,
+    tags: Object.entries(tags).sort((a, b) => b[1] - a[1]).slice(0, 16).map(([t, n]) => `${t} ${n}`).join(' · '),
+    rows: docRows(x).slice(0, 16).map((r) => cut(r.join(' | '), 100)),
+    head: x.slice(body, body + 400),
+    near: at < 0 ? '' : x.slice(body + Math.max(0, at - 250), body + at + 350),
+  };
+}
+// 진단은 공시 종류가 다른 것부터 최근 순으로 DIAG_MAX건
+export function pickDiag(list) {
+  const kind = (t) => String(t).match(/결산실적|기업설명회|\(IR\)|기준일|주주명부|배당|주주총회|소각|자기주식|증자|분할|병합|감자/)?.[0] || '';
+  const sorted = [...list].sort((a, b) => (a.no < b.no ? 1 : a.no > b.no ? -1 : 0));
+  const out = [], kinds = new Set();
+  for (const d of sorted) if (!kinds.has(kind(d.t))) { kinds.add(kind(d.t)); out.push(d); }
+  for (const d of sorted) if (!out.includes(d)) out.push(d);
+  return out.slice(0, DIAG_MAX);
+}
+
 // ---------- 미국(나스닥 공개 자료) ----------
 const NASDAQ = 'https://api.nasdaq.com/api';
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
@@ -193,9 +235,9 @@ export function parseNasdaqDividends(j) {
 
 // ---------- 달력 만들기 ----------
 const sameCodes = (prev, items) => Array.isArray(prev?.codes) && prev.codes.join(',') === items.map((it) => it.code).sort().join(',');
-// 다시 만들 때인가 — 없거나 3시간 지났거나 종목이 바뀜
+// 다시 만들 때인가 — 없거나 3시간 지났거나 종목이 바뀜, 또는 본문 읽는 방식의 판이 바뀜(고친 것을 바로 반영)
 export function calendarDue(prev, items, now) {
-  return !prev || !Number.isFinite(prev.at) || now - prev.at >= CAL_REFRESH_MS || now < prev.at || !sameCodes(prev, items);
+  return !prev || !Number.isFinite(prev.at) || now - prev.at >= CAL_REFRESH_MS || now < prev.at || !sameCodes(prev, items) || prev.pv !== PARSER_V;
 }
 
 // items: 추적 종목, corpMap: 종목코드→고유번호(없으면 국내 생략), prev: 직전 calendar.json
@@ -205,14 +247,15 @@ export async function buildCalendar({ items, corpMap = null, prev = null, now })
   const inRange = (d) => d >= from && d <= until;
   const prevEvents = Array.isArray(prev?.events) ? prev.events : [];
   const keepPrev = (code) => prevEvents.filter((e) => e && e.c === code && inRange(e.d));
-  const docs = {};
-  for (const [no, evs] of Object.entries(prev?.docs || {})) if (/^\d{14}$/.test(no) && no.slice(0, 8) >= from && Array.isArray(evs)) docs[no] = evs;
+  const sameV = prev?.pv === PARSER_V; // 읽는 방식이 바뀌었으면 기억한 본문 결과를 버린다
+  const docs = {}, diag = [];
+  for (const [no, evs] of Object.entries((sameV && prev?.docs) || {})) if (/^\d{14}$/.test(no) && no.slice(0, 8) >= from && Array.isArray(evs)) docs[no] = evs;
   const events = [];
   const base = (it) => ({ c: it.code, n: it.name || it.code, m: it.market });
 
   // 국내 — 회사(고유번호)마다 목록 한 번(우선주는 보통주 회사 공시를 같이 씀)
   const kr = items.filter((it) => it.market === 'KR');
-  let krState = 'off', krFail = 0, newDocs = 0;
+  let krState = 'off', krFail = 0, newDocs = 0, gotDocs = 0;
   if (kr.length && dartEnabled() && corpMap) {
     const lists = new Map(); // 고유번호 → [{ title, date, no }] | null(실패)
     const corps = [...new Set(kr.map((it) => corpOf(corpMap, it.code)).filter(Boolean))];
@@ -227,17 +270,26 @@ export async function buildCalendar({ items, corpMap = null, prev = null, now })
         lists.set(corp, [...seen.values()]);
       } catch (e) { lists.set(corp, null); console.error(`    공시 일정 목록 실패(${corp}):`, e.message); }
     });
-    // 일정이 적힌 공시 본문 — 처음 보는 것만, 한 번에 DOCS_PER_RUN건까지
-    const want = [...new Set([...lists.values()].filter(Boolean).flat().filter((f) => SCHEDULE_RE.test(f.title) && !docs[f.no]).map((f) => f.no))]
+    // 일정이 적힌 공시 본문 — 처음 보는 것만, 한 번에 DOCS_PER_RUN건까지(자회사 공시 제외)
+    const want = [...new Set([...lists.values()].filter(Boolean).flat()
+      .filter((f) => SCHEDULE_RE.test(f.title) && !SUB_RE.test(f.title) && !docs[f.no]).map((f) => f.no))]
       .sort().reverse().slice(0, DOCS_PER_RUN);
     const titleOf = new Map([...lists.values()].filter(Boolean).flat().map((f) => [f.no, f.title]));
+    const stale = kstYmd(now - 2 * 86400e3);
     await mapLimit(want, 4, async (no) => {
       try {
-        const xml = await getDocumentXml(no);
-        if (xml == null) return;
-        docs[no] = parseDocEvents(titleOf.get(no), xml).filter((e) => inRange(e.d));
+        const doc = await getDocument(no);
+        if (doc == null) return;
+        const evs = parseDocEvents(titleOf.get(no), doc.xml);
+        docs[no] = evs.filter((e) => inRange(e.d));
         newDocs++;
-      } catch (e) { console.error(`    공시 본문 실패(${no}):`, e.message); }
+        if (evs.length) gotDocs++;
+        else diag.push(diagOf(no, titleOf.get(no), doc));
+      } catch (e) {
+        // 원문 없음 — 이틀 지난 공시는 다시 받지 않는다(막 올라온 공시는 원문이 아직 준비 중일 수 있어 다음에 다시)
+        if (/^01[34]$/.test(e?.status || '') && no.slice(0, 8) < stale) docs[no] = [];
+        console.error(`    공시 본문 실패(${no}):`, e.message);
+      }
     });
     for (const it of kr) {
       const corp = corpOf(corpMap, it.code);
@@ -297,6 +349,8 @@ export async function buildCalendar({ items, corpMap = null, prev = null, now })
   }).sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : 0) || (KIND_ORDER[a.k] ?? 9) - (KIND_ORDER[b.k] ?? 9)
     || (a.m === b.m ? 0 : a.m === 'KR' ? -1 : 1) || String(a.n).localeCompare(String(b.n), 'ko') || String(a.tm || '').localeCompare(String(b.tm || '')));
   const usState = !us.length ? 'none' : usFail === us.length ? '받기 실패 — 직전 일정 유지' : usFail ? `일부 실패(${usFail}종목 — 직전 일정 유지)` : 'ok';
-  console.log(`  · 공시 일정: ${out.length}건(국내 ${krState}${newDocs ? ` · 본문 ${newDocs}건 새로` : ''} · 미국 ${usState})`);
-  return { v: 1, at: now, codes: items.map((it) => it.code).sort(), kr: krState, us: usState, events: out, docs };
+  // 진단 — 이번에 못 찾은 것 + 직전 진단 중 아직 기억에 있는 것
+  const keptDiag = sameV && Array.isArray(prev?.diag) ? prev.diag.filter((d) => d && Array.isArray(docs[d.no]) && !diag.some((x) => x.no === d.no)) : [];
+  console.log(`  · 공시 일정: ${out.length}건(국내 ${krState}${newDocs ? ` · 본문 ${newDocs}건 새로(일정 나온 것 ${gotDocs}건)` : ''} · 미국 ${usState})`);
+  return { v: 1, pv: PARSER_V, at: now, codes: items.map((it) => it.code).sort(), kr: krState, us: usState, events: out, docs, diag: pickDiag([...diag, ...keptDiag]) };
 }

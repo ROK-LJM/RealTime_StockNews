@@ -57,14 +57,28 @@ function errorOf(buf) {
   return status ? new DartError(status, message.trim()) : new Error('알 수 없는 응답');
 }
 
-// XML 선언의 인코딩대로 글자로 — 공시 원본 중 예전 것은 EUC-KR
-function decodeXml(b) {
-  const enc = b.toString('latin1', 0, Math.min(b.length, 200)).match(/encoding\s*=\s*["']([^"']+)["']/i)?.[1] || 'utf-8';
-  return /euc-?kr|ks_c_5601|cp949|windows-949/i.test(enc) ? new TextDecoder('euc-kr').decode(b) : b.toString('utf8');
+// 원본 바이트 → { text, enc } — XML 선언은 없거나 실제와 다를 수 있어 바이트로 판단한다(공시 원본은 EUC-KR인 것이 있다).
+// BOM이 있으면 UTF-16 · UTF-8로 깨짐 없이 읽히면 UTF-8 · 아니면 EUC-KR(CP949)과 UTF-8 중 한글이 제대로 많이 나오는 쪽
+const hangulScore = (t) => {
+  let n = 0;
+  for (const ch of t) {
+    const c = ch.codePointAt(0);
+    if (c >= 0xac00 && c <= 0xd7a3) n++;          // 한글 음절
+    else if (c === 0xfffd) n -= 2;                // 깨진 글자
+    else if (c >= 0x4e00 && c <= 0x9fff) n--;     // 한자 — 다른 인코딩으로 잘못 읽으면 한자가 쏟아진다
+  }
+  return n;
+};
+export function decodeBytes(b) {
+  if (b[0] === 0xff && b[1] === 0xfe) return { text: new TextDecoder('utf-16le').decode(b), enc: 'utf16le' };
+  if (b[0] === 0xfe && b[1] === 0xff) return { text: new TextDecoder('utf-16be').decode(b), enc: 'utf16be' };
+  try { return { text: new TextDecoder('utf-8', { fatal: true }).decode(b), enc: 'utf8' }; } catch { /* UTF-8이 아님 — 아래에서 고른다 */ }
+  const u = b.toString('utf8'), k = new TextDecoder('euc-kr').decode(b);
+  return hangulScore(k) >= hangulScore(u) ? { text: k, enc: 'euckr' } : { text: u, enc: 'utf8(깨짐)' };
 }
 
-// ZIP 안의 첫 .xml 파일 — 중앙 디렉터리 기준으로 읽어 로컬 헤더에 크기가 비어 있는 형식(데이터 설명자)도 처리
-export function unzipXml(buf) {
+// ZIP 항목 [{ name, size, read() }] — 중앙 디렉터리 기준으로 읽어 로컬 헤더에 크기가 비어 있는 형식(데이터 설명자)도 처리
+export function unzipEntries(buf) {
   if (buf.length < 22 || buf.readUInt32LE(0) !== 0x04034b50) throw new Error('ZIP 형식이 아님');
   let eocd = -1;
   for (let i = buf.length - 22; i >= Math.max(0, buf.length - 22 - 0xffff); i--) {
@@ -73,22 +87,40 @@ export function unzipXml(buf) {
   if (eocd < 0) throw new Error('ZIP 끝 정보 없음');
   const count = buf.readUInt16LE(eocd + 10);
   let p = buf.readUInt32LE(eocd + 16);
+  const out = [];
   for (let n = 0; n < count; n++) {
     if (buf.readUInt32LE(p) !== 0x02014b50) throw new Error('ZIP 목록 손상');
-    const method = buf.readUInt16LE(p + 10), size = buf.readUInt32LE(p + 20);
+    const method = buf.readUInt16LE(p + 10), size = buf.readUInt32LE(p + 20), full = buf.readUInt32LE(p + 24);
     const nameLen = buf.readUInt16LE(p + 28), extraLen = buf.readUInt16LE(p + 30), commentLen = buf.readUInt16LE(p + 32);
     const local = buf.readUInt32LE(p + 42);
     const name = buf.toString('utf8', p + 46, p + 46 + nameLen);
     p += 46 + nameLen + extraLen + commentLen;
-    if (!/\.xml$/i.test(name)) continue;
-    if (buf.readUInt32LE(local) !== 0x04034b50) throw new Error('ZIP 항목 손상');
-    const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
-    const data = buf.subarray(start, start + size);
-    if (method === 0) return decodeXml(data);
-    if (method === 8) return decodeXml(zlib.inflateRawSync(data));
-    throw new Error(`지원하지 않는 압축 방식(${method})`);
+    out.push({ name, size: full, read: () => {
+      if (buf.readUInt32LE(local) !== 0x04034b50) throw new Error('ZIP 항목 손상');
+      const start = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
+      const data = buf.subarray(start, start + size);
+      if (method === 0) return data;
+      if (method === 8) return zlib.inflateRawSync(data);
+      throw new Error(`지원하지 않는 압축 방식(${method})`);
+    } });
   }
-  throw new Error('ZIP 안에 XML 없음');
+  return out;
+}
+
+// 본문 XML 고르기 — '{접수번호}.xml'이 있으면 그것, 없으면 첨부('…_00760.xml'처럼 번호가 붙은 감사보고서 등)가 아닌 것 중 가장 큰 것
+export function pickXml(entries, no = '') {
+  const xs = entries.filter((e) => /\.xml$/i.test(e.name));
+  if (!xs.length) throw new Error('ZIP 안에 XML 없음');
+  const file = (e) => e.name.split('/').pop().toLowerCase();
+  const main = no ? xs.find((e) => file(e) === `${no}.xml`) : null;
+  if (main) return main;
+  const own = xs.filter((e) => !/_\d+\.xml$/.test(file(e)));
+  return (own.length ? own : xs).reduce((a, b) => (b.size > a.size ? b : a));
+}
+
+// ZIP 안의 본문 XML 글자(고유번호 목록·공시 원본)
+export function unzipXml(buf, no = '') {
+  return decodeBytes(pickXml(unzipEntries(buf), no).read()).text;
 }
 
 // 고유번호 XML → { 종목코드: 고유번호 } — 상장사만(비상장사는 종목코드가 빈칸)
@@ -203,12 +235,15 @@ export async function listFilings(corp, bgn, end, type) {
   return fetchList({ corp_code: corp, bgn_de: bgn, end_de: end, last_reprt_at: 'Y', page_count: '100', ...(type ? { pblntf_ty: type } : {}) });
 }
 
-// 공시서류원본(ZIP 속 XML) 본문 — 일정 날짜를 뽑는 데 쓴다. 멈췄으면 null
-export async function getDocumentXml(no) {
+// 공시서류원본(ZIP) — 일정 날짜를 뽑는 데 쓴다 → { xml: 본문 글자, files: [[이름, 크기]], pick: 고른 파일, enc: 글자 인코딩 }
+// 멈췄으면 null · 원문이 없으면(013·014) 상태 코드(status)가 붙은 오류
+export async function getDocument(no) {
   if (halted || !dartEnabled()) return null;
   try {
     const buf = await get('document.xml', { rcept_no: no }, 15000);
     if (!(buf.length >= 4 && buf.readUInt32LE(0) === 0x04034b50)) throw errorOf(buf); // ZIP이 아니면 오류 응답(파일 없음 등)
-    return unzipXml(buf);
+    const entries = unzipEntries(buf), pick = pickXml(entries, no);
+    const { text, enc } = decodeBytes(pick.read());
+    return { xml: text, files: entries.map((e) => [e.name, e.size]), pick: pick.name, enc };
   } catch (e) { noteFatal(e); throw e; }
 }
