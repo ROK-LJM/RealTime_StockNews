@@ -35,6 +35,10 @@
     { "code": "012450", "market": "KR", "name": "한화에어로스페이스" },
     { "code": "411080", "market": "KR", "name": "샌즈랩" },
     { "code": "267260", "market": "KR", "name": "HD현대일렉트릭" },
-    { "code": "006400", "market": "KR", "name": "삼성SDI" }
+    { "code": "006400", "market": "KR", "name": "삼성SDI" },
+    { "code": "298040", "market": "KR", "name": "효성중공업" },
+    { "code": "010060", "market": "KR", "name": "OCI홀딩스" },
+    { "code": "322000", "market": "KR", "name": "HD현대에너지솔루션" },
+    { "code": "112610", "market": "KR", "name": "씨에스윈드" }
   ]
 }
