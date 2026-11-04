@@ -34,6 +34,7 @@
     { "code": "079550", "market": "KR", "name": "LIG디펜스앤에어로스페이스" },
     { "code": "012450", "market": "KR", "name": "한화에어로스페이스" },
     { "code": "411080", "market": "KR", "name": "샌즈랩" },
-    { "code": "267260", "market": "KR", "name": "HD현대일렉트릭" }
+    { "code": "267260", "market": "KR", "name": "HD현대일렉트릭" },
+    { "code": "006400", "market": "KR", "name": "삼성SDI" }
   ]
 }
