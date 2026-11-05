@@ -1227,6 +1227,17 @@ await test('시세 안내 기사: 날짜·가격만 있는 자동 기사·"주�
   assert.equal(f.pickReasonNews([{ title: PRICE_ONLY_YES[1] }], -2.5, '', none), null);
   assert.equal(f.pickReasonNews(null, -2.5, '', none), null);
 });
+await test('급등락 기록(24차): 우선주는 기사 속 보통주 이름으로 방향을 봐 같은 방향 기사를 이유로', async () => {
+  const items = [{ code: '005935', market: 'KR', name: '삼성전자우' }, { code: 'AAPL', market: 'US', name: '애플' }];
+  const root = workspace(items);
+  const news = (m, u) => {
+    const name = queryName(u), now = Date.now();
+    const item = (t, ago) => `<item><title>${t} - 테스트일보</title><link>https://news.example.com/${ago}</link><pubDate>${new Date(now - ago).toUTCString()}</pubDate><source url="https://news.example.com">테스트일보</source></item>`;
+    return text(`<?xml version="1.0"?><rss><channel>${item(`${name} 반도체 업황 점검`, 600e3)}${item(`[특징주] ${name} 하락, SK하이닉스 상승`, 3600e3)}</channel></rss>`);
+  };
+  await pipeline(root, { gemini: () => text('upstream error', 500), krAt: NOW_KR, news, krPct: { '005935': -3.1 } });
+  assert.deepEqual(read(root, 'moves.json')['005935'][0], { d: '20261015', p: -3.1, r: '[특징주] 삼성전자 하락, SK하이닉스 상승', s: 'news' });
+});
 await test('급등락 기록(23차): 정정·자회사 공시는 맞는 뉴스가 없을 때만 이유 · 예전에 남긴 그런 공시 이유는 맞는 뉴스가 생기면 바꿈', async () => {
   await withDartKey(async () => {
     const rows = { ...DART_ROWS, '00126380': [['20261015000999', '[기재정정]타법인주식및출자증권취득결정']] };
@@ -1300,6 +1311,30 @@ await test('이유 고르기: 상품 상장 공지·방향이 반대인 기사 �
   assert.equal(pick(mixed, -3.25, ['SK하이닉스']), mixed[0].title, "SK하이닉스는 이름 뒤 '하락' — 같은 방향 [특징주]");
   assert.equal(pick([{ title: '[특징주] 반도체 대형주 약세 전환…삼성전자, 외국인 매도 확대', pubMs: at(13) }, mixed[1]], -2.9, ['삼성전자']),
     '[특징주] 반도체 대형주 약세 전환…삼성전자, 외국인 매도 확대', '이름 바로 뒤에 방향 말이 없으면 제목 전체(약세)로');
+});
+await test('이유 고르기(24차): "…2.80% 조정"·"조정세"는 내림 말("목표가 상향 조정"은 아님) · 우선주는 기사 속 보통주 이름으로 방향(화면 "왜 움직였나") · 봇과 화면 같음', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const why = appJs.slice(appJs.indexOf('function keyDiscToday('), appJs.indexOf('function tileHtml('));
+  const ctx = { state: { analysis: {}, news: {}, disc: {} }, kstYmd: (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '') };
+  const f = vm.runInNewContext(`${block}\n${why}; ({ pickReasonNews, whyOf })`, ctx);
+  const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const it = (title, tone = 'neutral', h = 14) => ({ title, pubMs: T(`2026-11-05T${h}:00:00+09:00`), sentiment: { tone } });
+  const pick = (list, pct, names = []) => {
+    const a = src.pickReasonNews(list, pct, '20261105', kst, names), b = f.pickReasonNews(list, pct, '20261105', kst, names);
+    assert.equal(b ? b.title : null, a ? a.title : null, '봇·화면 같은 선택');
+    return a ? a.title : null;
+  };
+  // 실제 제목(11/05) — LG전자우 -2.71%: '성장 기대' 호재 태그여도 '2.80% 조정'은 내린 기사
+  const adj = it('LG전자 14만2200원…전장·냉각 성장 기대 속 2.80% 조정', 'pos');
+  assert.equal(pick([adj, it('LG전자 주가, 11월 5일 142,800원 2.39% 하락')], -2.71, ['LG전자우', 'LG전자']), adj.title, "'…% 조정'은 내림 말");
+  assert.equal(pick([it('반도체주 조정세 이어져')], -2), '반도체주 조정세 이어져');
+  assert.equal(pick([it('삼성전자 목표가 상향 조정', 'pos')], -2), null, "'목표가 상향 조정'은 내림 말 아님 — 내린 날 호재 기사는 이유 아님");
+  // 우선주 — 이름 바로 뒤 말로 방향(보통주 이름으로)
+  const q = { code: '005935', name: '삼성전자우', market: 'KR', ok: true, changePct: -3.1, asOf: new Date().toISOString() };
+  ctx.state.news['005935'] = { items: [it('반도체 업황 점검', 'neutral', 15), it('[특징주] 삼성전자 하락, SK하이닉스 상승', 'neutral', 13)] };
+  assert.equal(f.whyOf(q).text, '[특징주] 삼성전자 하락, SK하이닉스 상승', '보통주 이름 뒤 내림 말 → 같은 방향 기사가 먼저');
 });
 await test('이유 고르기(23차): 물음표로 끝나는 제목은 맨 뒤 · 제목 꼬리(" : 경제")는 떼고 판단 · 시장 따라 종목은 같은 방향 기사가 아니면 시장 흐름 · 봇과 화면 같음', async () => {
   const vm = await import('node:vm');

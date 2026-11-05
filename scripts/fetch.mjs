@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis,
-  aiStatus, aiGate, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, pickReasonNews, tagSentiment,
+  aiStatus, aiGate, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, pickReasonNews, tagSentiment, krBaseName,
 } from './sources.mjs';
 import { startBudget, toStored, totalUsed, capacity, inSession, isKrSession, nextAllowanceAt, closedCheckDay, usExtWindow, usAfterPostSameDay } from './aibudget.mjs';
 import { validateWatchlist, writeJsonAtomic, analysisSig, sigMove } from './util.mjs';
@@ -328,17 +328,18 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
         const i = list.findIndex((x) => x.d === day);
         if (Math.abs(q.changePct) >= STOCK_ANALYSIS_THRESHOLD) {
           const a = an[it.code];
+          const names = [q.name, krBaseName(q.name, q.code)]; // 우선주는 기사 속 보통주 이름으로도 방향을 본다
           const discs = (disclosures[it.code]?.items || []).filter((x) => x && x.key && x.title && x.date <= day && x.date >= dayStart(3));
           const d = discs.find((x) => !MINOR_DISC_RE.test(x.title)), dMinor = d ? null : discs[0] || null;
           const n = pickReasonNews((news[it.code]?.items || []).filter((x) => x && Number.isFinite(x.pubMs) && ymdIn(x.pubMs, tz) >= dayStart(1)),
-            q.changePct, day, (ms) => ymdIn(ms, tz), [q.name]);
+            q.changePct, day, (ms) => ymdIn(ms, tz), names);
           const why = a && a.headline && Number.isFinite(a.at) && ymdIn(a.at, tz) >= day ? { r: a.headline, s: 'ai' }
             : d ? { r: `[${d.tag || '공시'}] ${d.title}`, s: 'disc' } : n ? { r: n.title, s: 'news' }
             : dMinor ? { r: `[${dMinor.tag || '공시'}] ${dMinor.title}`, s: 'disc' } : { r: '', s: '' };
           const old = i >= 0 ? list[i] : null;
           // 예전에 남긴 뉴스 이유도 지금 규칙으로 다시 본다 — 시세 안내·방향이 반대인 기사(내린 날의 호재 기사 등)면
           // 지킬 만한 이유가 아니다(더 나은 게 없으면 비운다). 호재·악재 태그는 제목만으로 정해져 다시 계산해도 같다
-          const oldNewsOk = old && old.s === 'news' && !!pickReasonNews([{ title: old.r, sentiment: tagSentiment(old.r) }], q.changePct, day, (ms) => ymdIn(ms, tz), [q.name]);
+          const oldNewsOk = old && old.s === 'news' && !!pickReasonNews([{ title: old.r, sentiment: tagSentiment(old.r) }], q.changePct, day, (ms) => ymdIn(ms, tz), names);
           const oldRank = old && !(old.s === 'news' && !oldNewsOk) ? rankOf(old) : 0;
           const keep = old && oldRank > rankOf(why);
           const entry = { d: day, p: Math.round(q.changePct * 100) / 100, r: cut(String(keep ? old.r : why.r)), s: keep ? old.s : why.s };

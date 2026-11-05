@@ -571,7 +571,8 @@ const priceOnly = (title) => { const t = coreTitle(title); return PRICE_ONLY.som
 // 같은 등급 안에서는 최신순. 방향은 제목의 오름·내림 말, 없으면 호재·악재 태그(내린 날의 '수주 1조 돌파' 같은 호재 기사는 이유 아님).
 const LISTING_RE = /(ELW|ETN|ETF|리츠|스팩)[^…]{0,30}상장|신규\s*상장/;
 const UP_RE = /상승|강세|급등|반등|↑|오름|올라|치솟|폭등|상한가|신고가/;
-const DOWN_RE = /하락|약세|급락|↓|내림|내려|떨어|폭락|하한가|신저가|주춤|추락/;
+// '…2.80% 조정'·'조정세'·'조정 국면'도 내림 말('목표가 상향 조정'처럼 방향이 붙은 조정은 아님)
+const DOWN_RE = /하락|약세|급락|↓|내림|내려|떨어|폭락|하한가|신저가|주춤|추락|[\d.]+%\s*조정|조정\s*(?:국면|장세|세|받)/;
 const roundupTitle = (t) => ((t.match(/[,，]/g) || []).length >= 3 && /등\s*$/.test(t)) || /^\[오늘의\s?[^\]]*\]/.test(t);
 const titleDir = (t) => (UP_RE.test(t) ? 1 : 0) - (DOWN_RE.test(t) ? 1 : 0); // 1 오름 말만 · -1 내림 말만 · 0 둘 다·없음
 // 그 종목의 방향 — 한 제목에 여러 종목이면('[특징주] 삼성전자 '상승' SK하이닉스 1%대 '하락'') 종목 이름 바로 뒤 10자 안의
@@ -640,6 +641,13 @@ function aiWaitText(ai, next = '') {
   return ['곧 분석', '한 번에 몇 종목씩, 약 5분 간격'];
 }
 
+// 우선주(코드 끝 5·7·9)는 기사에 보통주 이름으로 나온다 — 'LG전자우' → 'LG전자'(scripts/sources.mjs의 krBaseName과 같게)
+function krBaseName(name, code) {
+  const n = String(name ?? '').trim();
+  return /^\d{5}[579]$/.test(String(code ?? '')) ? n.replace(/\d?우[A-C]?$/, '') || n : n;
+}
+const reasonNames = (q) => [q.name, krBaseName(q.name, q.code)];
+
 // AI 종합분석이 지금 시세의 거래일(그 시장 현지 날짜)에 만든 것인지 — 장이 새로 열리면 전날 분석은 '지난 분석'.
 // 분석·시세 시각을 모르면 그대로 쓴다(예전 데이터)
 function aiFresh(q, a) {
@@ -651,7 +659,7 @@ function aiFresh(q, a) {
 
 // '시장 따라' 종목은 같은 방향을 말하는 기사가 아니면(나열·리포트·전망 글·방향 모를 기사) 시장 흐름이 더 나은 설명
 function preferMarket(q, w, vs) {
-  return !!(vs && vs.follows && w && w.src === '뉴스' && (weakTitle(w.text) || !w.item || newsDir(w.item, [q.name]) !== Math.sign(q.changePct || 0)));
+  return !!(vs && vs.follows && w && w.src === '뉴스' && (weakTitle(w.text) || !w.item || newsDir(w.item, reasonNames(q)) !== Math.sign(q.changePct || 0)));
 }
 // 정정 공시·자회사 공시 — 그날 움직임의 원인일 가능성이 낮아 이유로는 맞는 뉴스가 없을 때만(scripts/dart.mjs의 MINOR_DISC_RE와 같게)
 const MINOR_DISC_RE = /^\[(?:기재|첨부)정정\]|종속회사의주요경영사항|자회사의주요경영사항/;
@@ -768,7 +776,7 @@ function whyOf(q) {
   const d = keyDiscToday(q.code), disc = d && { src: '공시', label: '오늘 주요 공시', text: `[${d.tag || '공시'}] ${d.title}` };
   if (d && !MINOR_DISC_RE.test(d.title)) return disc;
   const m = marketOf(q), at = +new Date(q.asOf);
-  const n = pickReasonNews(state.news[q.code]?.items, q.changePct, Number.isFinite(at) ? marketYmd(at, m) : '', (ms) => marketYmd(ms, m), [q.name]);
+  const n = pickReasonNews(state.news[q.code]?.items, q.changePct, Number.isFinite(at) ? marketYmd(at, m) : '', (ms) => marketYmd(ms, m), reasonNames(q));
   if (n) return { src: '뉴스', label: '최근 뉴스', text: n.title, item: n };
   return disc || null; // 정정·자회사 공시는 맞는 뉴스가 없을 때만
 }
