@@ -274,6 +274,7 @@ const { run } = await import('./fetch.mjs');
 const stocklist = await import('./stocklist.mjs');
 const wl = await import('./watchlist-apply.mjs');
 const dartm = await import('./dart.mjs');
+const burst = await import('./burst.mjs');
 src.retryTiming.baseMs = 1; // 재시도 대기를 실제로 기다리지 않음
 
 console.log('[selftest] 오프라인 자체 테스트 — 외부 접속 없음\n');
@@ -1121,6 +1122,113 @@ await test('화면 지연 경고(app.js): 장중 45분 · 개장 30분 뒤 · �
   const mixed = [...q('OPEN', 50, KR_NOON), ...q('CLOSE', 5, KR_NOON)];
   assert.equal(s('KR', mixed, null, KR_NOON), '', '가장 최근 시세 기준');
 });
+await test('개장 직후 집중 갱신 계획(burst.mjs): 평일 08:54~09:10만 · 첫 눈금 09:00:10까지 기다림 · 매분 10초 · 끝 눈금 09:10:10 · 주말·휴장(국내 시세가 개장 전·장중 아님·오늘 휴장 기록)·국내 시세 없음이면 끝 · 워크플로가 되풀이 실행', async () => {
+  const at = (hms, d = '2026-11-05') => T(`${d}T${hms}+09:00`);
+  const q = (status = 'PREOPEN', extra = {}) => ({ quotes: [{ code: '005930', market: 'KR', ok: true, marketStatus: status }, { code: 'AAPL', market: 'US', ok: true, marketStatus: 'CLOSE' }], ...extra });
+  const plan = burst.burstPlan;
+  assert.deepEqual(plan(at('08:55:30'), q()), { at: at('09:00:10') }, '08:55 회차는 첫 눈금까지 기다림');
+  assert.deepEqual(plan(at('08:53:59'), q()), { stop: '창 밖' }, '08:54 전');
+  assert.deepEqual(plan(at('08:54:00'), q()), { at: at('09:00:10') });
+  assert.deepEqual(plan(at('09:00:10'), q('OPEN')), { at: at('09:00:10') }, '눈금 그 시각이면 바로');
+  assert.deepEqual(plan(at('09:00:25'), q('OPEN')), { at: at('09:01:10') }, '다음 눈금');
+  assert.deepEqual(plan(at('09:10:05'), q('OPEN')), { at: at('09:10:10') }, '끝 눈금');
+  assert.deepEqual(plan(at('09:10:20'), q('OPEN')), { stop: '창 끝' });
+  assert.deepEqual(plan(at('09:11:00'), q('OPEN')), { stop: '창 밖' });
+  assert.deepEqual(plan(at('08:56:00', '2026-11-07'), q()), { stop: '주말' }, '토요일');
+  assert.deepEqual(plan(at('08:56:00'), q('CLOSE')), { stop: '휴장' }, '휴장일 — 국내 시세가 마감');
+  assert.deepEqual(plan(at('09:03:00'), q('OPEN', { closed: { KR: '2026-11-05' } })), { stop: '휴장' }, '오늘 휴장 기록');
+  assert.deepEqual(plan(at('09:03:00'), q('OPEN', { closed: { KR: '2026-11-04', US: '2026-11-05' } })), { at: at('09:03:10') }, '다른 날·다른 시장 기록은 무관 — 다음 눈금은 10초 뒤');
+  assert.deepEqual(plan(at('09:03:00'), { quotes: [{ code: 'AAPL', market: 'US', ok: true, marketStatus: 'OPEN' }] }), { stop: '국내 시세 없음' });
+  assert.deepEqual(plan(at('09:03:00'), null), { stop: '국내 시세 없음' }, '파일 없음');
+  // 워크플로 — 마지막 단계가 0으로 끝나는 동안 되풀이(커밋·푸시), 회차 시간 제한은 08:55 회차의 집중 갱신(~09:10)보다 길게
+  const yml = fs.readFileSync(new URL('../.github/workflows/update.yml', import.meta.url), 'utf8');
+  assert.match(yml, /node scripts\/burst\.mjs \|\| break/, '되풀이 실행');
+  assert.ok(+(yml.match(/^ {4}timeout-minutes: (\d+)/m) || [])[1] >= 20, '회차 시간 제한');
+});
+await test('개장 직후 집중 갱신(burst.mjs): 국내 시세·코스피·코스닥만 새 값 · 해외·휴장 기록·상장 시장·AI 끔·내 별칭은 그대로 · 받기 실패한 종목·지수는 직전 값(야후 지연 값으로 대신 안 함) · 지수 브리핑·분위기도 같은 값 · 파일 지문 다시 계산', async () => {
+  const root = workspace();
+  const pre = (code, name, extra = {}) => ({ code, market: 'KR', name, currency: 'KRW', price: 70000, prevClose: 70000, change: 0, changePct: 0, open: null, high: null, low: null,
+    volume: null, marketStatus: 'PREOPEN', asOf: '2026-11-05T08:55:23+09:00', ok: true, exch: 'KOSPI', ...extra });
+  const aapl = { code: 'AAPL', market: 'US', name: '애플', currency: 'USD', price: 200, changePct: 1.2, marketStatus: 'CLOSE', asOf: '2026-11-04T16:00:00-05:00', ok: true, exch: 'NASDAQ',
+    ext: { session: 'post', price: 201, change: 1, changePct: 0.5, at: 1 } };
+  const q0 = { quotes: [pre('005930', '삼성전자', { ai: false }), pre('000660', 'SK하이닉스'), aapl], closed: { US: '2026-11-04' } };
+  writeData(root, 'quotes.json', q0);
+  const idx = (name, symbol, currency, price, changePct, marketStatus) => ({ name, symbol, currency, price, change: 0, changePct, marketStatus });
+  const m0 = { indices: [idx('코스피', '^KS11', 'KRW', 2650, 0, 'PREOPEN'), idx('코스닥', '^KQ11', 'KRW', 700, 0, 'PREOPEN'), idx('S&P 500', '^GSPC', 'USD', 7000, 1, 'CLOSE'), idx('VIX', '^VIX', 'USD', 17, 2, 'CLOSE')],
+    vix: idx('VIX', '^VIX', 'USD', 17, 2, 'CLOSE'), mood: { score: 50, label: '중립', tone: 'neutral', summary: '어제' }, forex: [{ name: '원/달러', symbol: 'KRW=X', price: 1340 }],
+    briefs: [{ key: 'KOSPI', name: '코스피', changePct: 0, price: 2650, flow: { f: 1 }, reason: { dir: 'flat' } }, { key: 'KOSDAQ', name: '코스닥', changePct: 0, price: 700, flow: null, reason: null }] };
+  writeData(root, 'market.json', m0);
+  writeData(root, 'news.json', { keep: 1 });
+  // SK하이닉스·코스닥 실시간은 실패 — 야후로 대신하면 안 된다(야후 주소도 열어 두고 부르지 않는지 본다)
+  NET.routes = [{ re: /domestic\/stock\/000660/, fn: () => text('upstream error', 500) }, { re: /domestic\/index\/KOSDAQ/, fn: () => text('upstream error', 500) },
+    ...routes({ krPct: { '005930': -2.5 }, idxPct: -1.8, krAt: T('2026-11-05T09:00:11+09:00') })];
+  NET.calls = []; NET.bodies = []; NET.blocked = [];
+  let now = T('2026-11-05T08:59:50+09:00');
+  const slept = [];
+  const r = await burst.burstOnce({ root, clock: () => now, sleep: async (ms) => { slept.push(ms); now += ms; } });
+  assert.equal(r, 'written');
+  assert.deepEqual(slept, [20000], '첫 눈금(09:00:10)까지 기다림');
+  assert.equal(callsTo(/yahoo/), 0, '야후 지연 값으로 대신하지 않음');
+  const q1 = read(root, 'quotes.json');
+  const s = q1.quotes.find((x) => x.code === '005930');
+  assert.equal(s.changePct, -2.5); assert.equal(s.marketStatus, 'OPEN'); assert.equal(s.name, '삼성전자', '내 별칭');
+  assert.equal(s.exch, 'KOSPI', '상장 시장'); assert.equal(s.ai, false, 'AI 끔 표시');
+  assert.deepEqual(q1.quotes.find((x) => x.code === '000660'), q0.quotes[1], '받기 실패한 종목은 직전 값');
+  assert.deepEqual(q1.quotes.find((x) => x.code === 'AAPL'), aapl, '해외 종목 그대로');
+  assert.deepEqual(q1.quotes.map((x) => x.code), ['005930', '000660', 'AAPL'], '순서 그대로');
+  assert.deepEqual(q1.closed, { US: '2026-11-04' }, '휴장 기록 그대로');
+  const m1 = read(root, 'market.json');
+  const kospi = m1.indices.find((i) => i.symbol === '^KS11');
+  assert.equal(kospi.changePct, -1.8); assert.equal(kospi.marketStatus, 'OPEN'); assert.equal(kospi.price, 2600);
+  assert.deepEqual(m1.indices.find((i) => i.symbol === '^KQ11'), m0.indices[1], '코스닥 실패 — 직전 값');
+  assert.deepEqual(m1.indices.slice(2), m0.indices.slice(2), '미국 지수·VIX 그대로');
+  assert.deepEqual(m1.briefs[0], { ...m0.briefs[0], changePct: -1.8, price: 2600 }, '브리핑은 등락·지수만');
+  assert.deepEqual(m1.briefs[1], m0.briefs[1]);
+  assert.deepEqual(m1.mood, src.computeMood(m1.indices.filter((i) => i.symbol !== '^VIX'), 17), '분위기 다시 계산');
+  assert.notDeepEqual(m1.mood, m0.mood);
+  assert.deepEqual(m1.forex, m0.forex); assert.deepEqual(m1.vix, m0.vix);
+  const man = read(root, 'manifest.json').files;
+  for (const f of ['quotes.json', 'market.json', 'news.json']) assert.equal(man[f], sha10(fs.readFileSync(file(root, f))), `${f} 지문`);
+  // 아직 첫 체결 전(수능일·새해 첫날처럼 늦게 여는 날, 9시 몇 초 안)이면 쓰지 않고 다음 눈금에 다시 — 종료 코드도 '계속'
+  const before0 = raw(root, 'quotes.json');
+  NET.routes = routes({ krStatus: 'PREOPEN', krPct: { '005930': 0, '000660': 0 } });
+  now = T('2026-11-05T09:01:10+09:00');
+  assert.equal(await burst.burstOnce({ root, clock: () => now, sleep: async () => {} }), '개장 전');
+  assert.equal(raw(root, 'quotes.json'), before0, '쓰지 않음');
+  assert.deepEqual(['written', '개장 전', '창 끝', '휴장', '시세 받기 실패'].map(burst.exitCodeOf), [0, 0, 3, 3, 3], '새 값·첫 체결 전은 계속, 그 밖은 끝');
+  // 국내 시세가 모두 실패하면 아무것도 쓰지 않고 끝
+  const before = raw(root, 'quotes.json');
+  NET.routes = [{ re: /domestic\/(?:stock|index)\//, fn: () => text('upstream error', 500) }, ...routes()];
+  now = T('2026-11-05T09:01:10+09:00');
+  assert.equal(await burst.burstOnce({ root, clock: () => now, sleep: async () => {} }), '시세 받기 실패');
+  assert.equal(raw(root, 'quotes.json'), before);
+});
+await test('화면 개장 직후·개장 전(app.js): 평일 08:59~09:12엔 20초마다 확인(설정이 더 짧거나 수동이면 그대로) · 국내 시세가 모두 개장 전이면 안내 한 줄 · 이름표 "개장 전"', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('// ---------- 데이터 지연 경고'), appJs.indexOf('// ---------- 내 종목 한눈에'));
+  const f = vm.runInNewContext(`${block}; ({ pollSec, preOpenNote, groupInfo })`, { lastTimeOf: () => '' });
+  const at = (hm, d = '2026-11-05') => T(`${d}T${hm}:00+09:00`);
+  assert.equal(f.pollSec(60, at('08:58')), 60, '창 전');
+  assert.equal(f.pollSec(60, at('08:59')), 20, '창 시작');
+  assert.equal(f.pollSec(300, at('09:05')), 20, '5분 설정도 이때만 20초');
+  assert.equal(f.pollSec(30, at('09:05')), 20);
+  assert.equal(f.pollSec(0, at('09:05')), 0, '수동은 그대로');
+  assert.equal(f.pollSec(0, at('08:00')), 0);
+  assert.equal(f.pollSec(60, at('09:11')), 20);
+  assert.equal(f.pollSec(60, at('09:12')), 60, '창 끝');
+  assert.equal(f.pollSec(60, at('09:05', '2026-11-07')), 60, '토요일');
+  const now = new Date().toISOString();
+  const pre = [{ ok: true, marketStatus: 'PREOPEN', changePct: 0, asOf: now }, { ok: true, marketStatus: 'PREOPEN', changePct: 0, asOf: now }];
+  assert.match(f.preOpenNote('KR', pre), /개장 전.*1분/);
+  assert.equal(f.preOpenNote('KR', [...pre, { ok: true, marketStatus: 'OPEN', asOf: now }]), '', '하나라도 장중이면 없음');
+  assert.equal(f.preOpenNote('US', pre), '', '해외 묶음은 해당 없음');
+  assert.equal(f.preOpenNote('KR', []), '');
+  const st = (list) => f.groupInfo({ key: 'KR' }, list, null).status;
+  assert.match(st(pre), /개장 전/);
+  assert.match(st([{ ok: true, marketStatus: 'OPEN', asOf: now }]), /장중/);
+  assert.match(st([{ ok: true, marketStatus: 'CLOSE', asOf: now }]), /마감/);
+});
 await test('바뀐 파일만 받기(app.js): 지문이 같으면 다시 안 받음 · 바뀌면 그 파일만 · 내용이 지문과 다르면 예전처럼 새로 받기 · 지문 파일이 없으면 예전 방식', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
@@ -1361,6 +1469,13 @@ await test('이유 고르기(23차): 물음표로 끝나는 제목은 맨 뒤 ·
   // 번호 붙은 연재·기획 기사(25차)
   for (const t of ['[한화에어로 해부⑤] 美 법인에 9964억 보증… 부담은 나눠도 책임은 연대', '[전자 3형제 경쟁 공식①] 삼성전자 우상향·LG전자 상고하저']) assert.equal(pick([it(t), other], -3), other.title, t);
   assert.equal(pick([it('[단독] 한화에어로, 美 법인 보증 확대'), other], -3), '[단독] 한화에어로, 美 법인 보증 확대', '번호 없는 꼭지([단독])는 그대로');
+  // 종목 추천·리포트·전망 칼럼 꼭지(26차) — 앞이든 끝이든. 실제 11/05 한화솔루션 -5%: 칼럼보다 '목표주가 하향' 기사
+  const col = it('단기 부진일뿐 방향성은 여전....“한화솔루션 4만원” [오늘, 이 종목]', 'neg'), cut = it('한화솔루션 주가 3.21% 하락…목표주가 3만3,000원 하향, 2027년 실적 반등 가능성은', 'neg');
+  assert.equal(pick([col, cut], -5, ['한화솔루션']), cut.title, '칼럼 꼭지는 맨 뒤');
+  assert.equal(pick([col], -5, ['한화솔루션']), col.title, '그것뿐이면 그것');
+  for (const t of ['[버핏 리포트] 한화솔루션, 4Q 영업익 640억 전망...美 태양광 판가 개선은 내년부터 - iM', '‘반도체 급락’에 고수는 삼성전자 팔고 삼성전기·한국콜마 담았다 [주식 초고수는 지금]',
+    '[ls일렉트릭 주가전망] 세력 원가 구간 터질 수밖에 없는 이유', '[클릭 e종목]삼성전기, 기판 업황 둔화 반영해 눈높이 낮춰']) assert.equal(pick([it(t), other], -3), other.title, t);
+  for (const t of ["삼성전자, 3개월 만에 장중 '20만전자' 붕괴…8% 급락[핫종목]", '효성중공업 10%대 급락…전력기기주 일제히 약세 [종목NOW]']) assert.equal(pick([it(t), other], -3), t, `사실을 전하는 꼭지는 그대로: ${t}`);
   // 시장 따라 — 같은 방향 기사만 종목 이유로, 방향 모를 기사·나열 기사는 시장 흐름
   const q = { name: '현대건설', changePct: -5.02 }, vs = { follows: true };
   const news = (title, tone) => ({ src: '뉴스', text: title, item: it(title, tone) });
@@ -1371,7 +1486,7 @@ await test('이유 고르기(23차): 물음표로 끝나는 제목은 맨 뒤 ·
   assert.equal(f.preferMarket(q, { src: 'AI', text: 'x' }, vs), false, 'AI 진단은 그대로');
   assert.equal(f.preferMarket(q, { src: '뉴스', text: '현대건설 하락' }, vs), true, '기사 정보가 없으면 시장 흐름');
 });
-await test('이유(23차): 정정·자회사 공시는 맞는 뉴스가 없을 때만 — 화면 "왜 움직였나"(그날 다른 주요 공시가 있으면 그것 먼저) · 등락 분포(칸 색 단계별 종목 수)', async () => {
+await test('이유(23차): 정정·자회사 공시는 맞는 뉴스가 없을 때만 — 화면 "왜 움직였나"(그날 다른 주요 공시가 있으면 그것 먼저)', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
   const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
@@ -1379,7 +1494,7 @@ await test('이유(23차): 정정·자회사 공시는 맞는 뉴스가 없을 �
   const kstYmd = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
   const today = kstYmd(Date.now());
   const ctx = { state: { analysis: {}, news: {}, disc: {} }, kstYmd };
-  const f = vm.runInNewContext(`${block}\n${why}; ({ whyOf, distOf })`, ctx);
+  const f = vm.runInNewContext(`${block}\n${why}; ({ whyOf })`, ctx);
   const q = { code: 'A', name: '가나', market: 'KR', ok: true, changePct: -15.3, asOf: new Date().toISOString() };
   const minor = { key: true, date: today, tag: 'M&A', title: '[기재정정]타법인주식및출자증권취득결정' };
   const sub = { key: true, date: today, tag: 'M&A', title: '영업양도결정(종속회사의주요경영사항)' };
@@ -1394,12 +1509,6 @@ await test('이유(23차): 정정·자회사 공시는 맞는 뉴스가 없을 �
   ctx.state.disc.A = { items: [minor, real] };
   ctx.state.news.A = { items: [{ title: '가나, 반도체주 폭락에 급락', pubMs: Date.now() - 600e3 }] };
   assert.equal(f.whyOf(q).text, '[계약] 단일판매ㆍ공급계약체결', '그날 다른 주요 공시가 있으면 그 공시가 먼저');
-  // 등락 분포 — '+5% 이상'은 5.0부터, 시세 실패·값 없는 종목은 빼고, 있는 단계만 급등 → 급락 순
-  const d = f.distOf([6, 5, 4, 2, 1, 0.2, -0.2, -0.7, -2, -4, -7, -12].map((p) => ({ ok: true, changePct: p })).concat([{ ok: false, changePct: -9 }, { ok: true, changePct: null }]));
-  assert.deepEqual(JSON.parse(JSON.stringify(d)).map((x) => `${x.cls}:${x.n}`), ['up h4:2', 'up h3:1', 'up h2:1', 'up h1:1', 'flat:2', 'down h1:1', 'down h2:1', 'down h3:1', 'down h4:2']);
-  assert.equal(d[0].label, '+5% 이상');
-  assert.deepEqual(JSON.parse(JSON.stringify(f.distOf([{ ok: true, changePct: -6 }]))), [{ cls: 'down h4', label: '−5% 이하', n: 1 }], '있는 단계만');
-  assert.equal(f.distOf(null).length, 0);
 });
 await test('이유 고르기(21차): 주가 전망·기술적 분석 글(지지선·저항선·과매도·RSI·기술적 분석·횡보·…할 수 있을까?·…지속될까?)은 맨 뒤 — 그것뿐이면 그것 · 봇과 화면 같음', async () => {
   const vm = await import('node:vm');
@@ -1460,6 +1569,8 @@ await test('이유 고르기(18차): 방향 말이 없으면 호재·악재 태�
   assert.equal(pick([rep], -5.32, ['심텍']), null, '내린 날: 나쁜 말 없는 리포트 요약은 이유 아님');
   assert.equal(pick([rep, pcb], -5.32, ['심텍']), pcb.title);
   assert.equal(pick([rep, pcb], 5.32, ['심텍']), pcb.title, '오른 날에도 리포트 요약은 맨 뒤');
+  const rep2 = it('심텍, 기판 수요 견조…목표가 180,000원 유지-교보', 14);
+  assert.equal(pick([rep2, pcb], 5.32, ['심텍']), pcb.title, "대괄호 꼭지 없는 리포트 요약('목표가 N원')도 맨 뒤");
   assert.equal(pick([rep], 5.32, ['심텍']), rep.title, '오른 날 리포트 요약밖에 없으면 그것');
   const cut = it("[리포트 브리핑]심텍, '수요 둔화' 목표가 150,000원으로 하향 - 교보증권", 13, 'neg');
   assert.equal(pick([cut], -5.32, ['심텍']), cut.title, '나쁜 말(하향) 리포트는 내린 날 이유로');

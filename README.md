@@ -87,7 +87,7 @@ node scripts/serve.mjs      # http://localhost:5175 에서 확인
 ---
 
 ## 한계
-- 깃허브 예약작업 특성상 **갱신은 약 5분 주기**(실시간 10~30초 아님). "왜 급등/급락했는지" 파악엔 충분합니다.
+- 깃허브 예약작업 특성상 **갱신은 약 5분 주기**(실시간 10~30초 아님 — 국내 장이 열리는 09:00~09:10만 1분마다). "왜 급등/급락했는지" 파악엔 충분합니다.
 - 야후·구글뉴스는 비공식 공개 데이터입니다(개인용).
 - 저장소가 60일간 활동이 없으면 예약작업이 자동 비활성화됩니다(봇이 매 5분 커밋하므로 보통 유지됨).
 - Gemini 무료 한도는 모델당 하루 수십 회뿐이라 무료 Flash-Lite 모델 3개(2.5·3.5·3.1)를 함께 쓰고 국내 장 시간에 우선 배분합니다(매일 16:00 KST, 겨울 17:00 초기화). 한도를 다 쓰면 그날 AI만 쉬고 요금은 없습니다(결제 계정 미연결). 사용량·상태는 화면 하단 'AI 상태'에서 확인.
@@ -97,7 +97,7 @@ node scripts/serve.mjs      # http://localhost:5175 에서 확인
 ## 구조
 ```
 pages/
-  .github/workflows/update.yml   5분마다 데이터 갱신 + 커밋
+  .github/workflows/update.yml   5분마다 데이터 갱신 + 커밋(평일 09:00~09:10은 1분마다 국내 시세·지수)
   .github/workflows/watchlist.yml  '종목 편집' 이슈 → watchlist.json 반영 → 시세 갱신 실행
   .github/workflows/stocklist.yml  매일 검색용 전체 종목 목록 갱신
   config/watchlist.json          추적 종목 목록(최대 60개 · "ai": false = AI 종합분석 끔)
@@ -109,7 +109,8 @@ pages/
     aibudget.mjs                 AI 무료 한도 하루 배분(장 시간 가중치·모델 배분)
     stocklist.mjs                검색용 국내·미국 전체 종목 목록 생성
     watchlist-apply.mjs          '종목 편집' 요청 검증·반영
-    util.mjs                     설정 검증·원자적 쓰기 등 공통 유틸
+    burst.mjs                    개장 직후 집중 갱신 — 국내 09:00~09:10 1분마다 시세·코스피·코스닥만(update.yml 마지막 단계)
+    util.mjs                     설정 검증·원자적 쓰기·파일 지문 등 공통 유틸
     selftest.mjs                 오프라인 자체 테스트(가짜 네트워크)
     mutate.mjs                   변이 검사(개발용 — 핵심 줄을 일부러 망가뜨려 자체 테스트가 잡는지)
     serve.mjs                    로컬 미리보기용(배포 미사용, --mock-github로 편집 저장 시험)

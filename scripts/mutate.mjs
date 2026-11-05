@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 
 const PAGES = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const S = 'scripts/sources.mjs', F = 'scripts/fetch.mjs', B = 'scripts/aibudget.mjs', W = 'scripts/watchlist-apply.mjs', U = 'scripts/util.mjs';
-const D = 'scripts/dart.mjs', C = 'scripts/calendar.mjs', A = 'docs/app.js', CJ = 'docs/calendar.js';
+const D = 'scripts/dart.mjs', C = 'scripts/calendar.mjs', A = 'docs/app.js', CJ = 'docs/calendar.js', BU = 'scripts/burst.mjs', Y = '.github/workflows/update.yml';
 const R = String.raw;
 
 // [이름, 파일, 찾을 글(그 파일에 정확히 한 번), 바꿀 글]
@@ -104,7 +104,7 @@ const MUTANTS = [
   ['[일정] 오래된 배당락도 남김', C, 'if (got) { for (const e of got) if (inRange(e.d)) events.push', 'if (got) { for (const e of got) if (true) events.push'],
   ['[일정] 실적 공시 날 발표 예정 남김', C, "if (e.k === 'earn' && /예정/.test(e.t) && filed.has(`${e.c}|${e.d}`)) return false;", ''],
   ['[일정] 같은 일정 둘', C, 'if (seen.has(key)) return false;', ''],
-  ['[일정] 지문 목록에서 빠짐', F, "'status.json', 'calendar.json'];", "'status.json'];"],
+  ['[일정] 지문 목록에서 빠짐', U, "'status.json', 'calendar.json'];", "'status.json'];"],
   ['[일정] 고유번호 표 안 넘김', F, 'if (corp.table.at) corpMap = corp.table.map;', ''],
   ['[일정] EUC-KR로 안 읽음', D, "const u = b.toString('utf8'), k = new TextDecoder('euc-kr').decode(b);", "const u = b.toString('utf8'), k = u;"],
   ['[일정] 깨진 UTF-8도 EUC-KR로', D, 'return hangulScore(k) >= hangulScore(u) ?', 'return true ?'],
@@ -197,11 +197,35 @@ const MUTANTS = [
   ["[시세틀] 급등·급락·거래 못 읽음", S, "(?:상승|하락|강세|약세|급등|급락)세?(?:하며|\\s*보이며)?…?\\s*[\\d만,.]+원선?\\s*(?:기록|거래)/,", "(?:상승|하락|강세|약세)(?:하며|\\s*보이며)?\\s*[\\d만,.]+원선?\\s*기록/,"],
   ["[시세틀] 마감분석 틀 없음", S, "  /^\\[마감분석\\][^…]*?[\\d.]+%\\s*(?:상승|하락|급등|급락|강세|약세)\\s*마감/,", ""],
   ["[시세틀] 동일업종 틀 없음", S, "  /주가,?\\s*\\d{1,2}월\\s*\\d{1,2}일\\s*(?:장중|장\\s?마감|오전|오후)?\\s*[\\d.]+%\\s*(?:상승|하락)\\s*동일업종/,", ""],
-  ["[이유] 연재 기사 맨 뒤 안 함", S, "|\\?\\s*$|^\\[[^\\]]*[①-⑳][^\\]]*\\]/;", "|\\?\\s*$/;"],
+  ["[이유] 연재 기사 맨 뒤 안 함", S, "|^\\[[^\\]]*[①-⑳][^\\]]*\\]", ""],
   ["[일정] 증자 납입일 빠짐", C, "    add(labeled(rows, /^(?:\\d+\\.\\s*)?(?:주금\\s*)?납입\\s*(?:기)?일$/), 'cap', `${what} 납입`);", ""],
-  ["[분포] 실패 종목도 셈", A, "(Array.isArray(list) ? list : []).filter((q) => q && q.ok &&", "(Array.isArray(list) ? list : []).filter((q) => q &&"],
-  ["[분포] 5% 경계", A, "['up h4', '+5% 이상', (p) => p >= 5]", "['up h4', '+5% 이상', (p) => p > 5]"],
-  ["[분포] 없는 단계도 보임", A, "({ cls, label, n: ps.filter(f).length })).filter((x) => x.n);", "({ cls, label, n: ps.filter(f).length }));"],
+  ["[이유] 칼럼 꼭지 맨 뒤 안 함(봇)", S, "|\\[[^\\]]*(?:이\\s?종목|[eE]종목|추천|전망|리포트|고수)[^\\]]*\\]", ""],
+  ["[이유] 칼럼 꼭지 맨 뒤 안 함(화면)", A, "|\\[[^\\]]*(?:이\\s?종목|[eE]종목|추천|전망|리포트|고수)[^\\]]*\\]", ""],
+  ["[이유] 끝에 붙은 칼럼 꼭지 못 읽음", S, "|\\[[^\\]]*(?:이\\s?종목|[eE]종목|추천|전망|리포트|고수)[^\\]]*\\]", "|^\\[[^\\]]*(?:이\\s?종목|[eE]종목|추천|전망|리포트|고수)[^\\]]*\\]"],
+  ["[이유] 리포트·전망 꼭지 못 읽음", S, "|추천|전망|리포트|고수)", "|추천|고수)"],
+  ["[개장] 첫 눈금 안 기다림", BU, "const at = Math.max(first, Math.ceil((now - off) / 60e3) * 60e3 + off);", "const at = Math.ceil((now - off) / 60e3) * 60e3 + off;"],
+  ["[개장] 주말에도 함", BU, "if (k.getUTCDay() === 0 || k.getUTCDay() === 6) return { stop: '주말' };", ""],
+  ["[개장] 휴장 확인 안 함", BU, "if (prevQuotes.closed?.KR === today || !kr.some((q) => q.marketStatus === 'PREOPEN' || q.marketStatus === 'OPEN')) return { stop: '휴장' };", ""],
+  ["[개장] 오늘 휴장 기록 안 봄", BU, "prevQuotes.closed?.KR === today || ", ""],
+  ["[개장] 끝 눈금 넘어도 받음", BU, "return at > last ? { stop: '창 끝' } : { at };", "return { at };"],
+  ["[개장] 받기 실패 종목도 덮어씀", BU, "(fresh || []).filter((q) => q && q.ok && q.market === 'KR')", "(fresh || []).filter((q) => q && q.market === 'KR')"],
+  ["[개장] 상장 시장 안 이어 붙임", BU, "if (q.exch) out.exch = q.exch;", ""],
+  ["[개장] AI 끔 표시 잃음", BU, "if (q.ai === false) out.ai = false;", ""],
+  ["[개장] 지수 야후 지연 값으로 대신함", BU, "getKrIndices(false)", "getKrIndices()"],
+  ["[개장] 종목 야후 지연 값으로 대신함", S, "catch (e) { return { code, market: 'KR', name: it.name || code, ok: false, error: String(e.message || e) }; }", "catch (e) { return getQuote({ ...it, market: 'KR' }); }"],
+  ["[개장] 내 별칭 잃음", S, "...(it.name ? { name: it.name } : {}) };", "};"],
+  ["[개장] 분위기 안 맞춤", BU, "mood: computeMood(indices.filter((i) => i && i.symbol !== '^VIX'), prev.vix?.price) };", "mood: prev.mood };"],
+  ["[개장] 브리핑 등락 안 맞춤", BU, "return i ? { ...b, changePct: i.changePct, price: i.price } : b;", "return b;"],
+  ["[개장] 지문 안 고침", BU, "writeJsonAtomic(path.join(dataDir, 'manifest.json'), manifestOf(dataDir));", ""],
+  ["[개장] 시세 실패해도 씀", BU, "if (!n) return '시세 받기 실패';", ""],
+  ["[개장] 워크플로 되풀이 없음", Y, "node scripts/burst.mjs || break", "node scripts/burst.mjs; break"],
+  ["[화면] 개장 직후 20초 확인 없음", A, "(burstWindow(ms) ? Math.min(sec, BURST_SEC) : sec)", "sec"],
+  ["[화면] 개장 직후 창 주말에도", A, "return !c.weekend && c.min >= 8 * 60 + 59", "return c.min >= 8 * 60 + 59"],
+  ["[화면] 개장 전 이름표 없음", A, "  else if (valid.some((q) => q.marketStatus === 'PREOPEN')) status = '<span class=\"sdot\"></span>개장 전';", ""],
+  ["[화면] 개장 전 안내 해외에도", A, "(key === 'KR' && valid.length", "(valid.length"],
+  ["[화면] 개장 전 안내 하나만 개장 전이어도", A, "valid.every((q) => q.marketStatus === 'PREOPEN')", "valid.some((q) => q.marketStatus === 'PREOPEN')"],
+  ["[개장] 첫 체결 전에도 씀", BU, "if (fresh.every((q) => !q || !q.ok || q.marketStatus === 'PREOPEN')) return '개장 전';", ""],
+  ["[개장] 첫 체결 전이면 반복 멈춤", BU, "(r === 'written' || r === '개장 전' ? 0 : 3)", "(r === 'written' ? 0 : 3)"],
 ];
 
 const args = process.argv.slice(2);

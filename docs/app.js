@@ -569,7 +569,7 @@ const coreTitle = (t) => String(t ?? '').trim().replace(/\s:\s\S{1,10}$/, '');
 const priceOnly = (title) => { const t = coreTitle(title); return PRICE_ONLY.some((re) => re.test(t)); };
 // 이유로 쓸 뉴스 고르기 — scripts/sources.mjs의 pickReasonNews와 같게 유지(자체 테스트가 비교).
 // 시세 안내·상품 상장 공지('…ELW 224종 상장')·방향이 반대인 기사('15% 급등' 기사인데 오늘은 하락 — 이유일 수 없음)는 빼고
-// ① 그날 나온 같은 방향의 [특징주] → ② 같은 방향 기사 → ③ 방향을 알 수 없는 기사 → ④ 여러 종목 나열·'[오늘의 …]' 모음·리포트 요약·주가 전망 글 순.
+// ① 그날 나온 같은 방향의 [특징주] → ② 같은 방향 기사 → ③ 방향을 알 수 없는 기사 → ④ 여러 종목 나열·'[오늘의 …]' 모음·리포트 요약·주가 전망 글·칼럼 꼭지 순.
 // 같은 등급 안에서는 최신순. 방향은 제목의 오름·내림 말, 없으면 호재·악재 태그(내린 날의 '수주 1조 돌파' 같은 호재 기사는 이유 아님).
 const LISTING_RE = /(ELW|ETN|ETF|리츠|스팩)[^…]{0,30}상장|신규\s*상장/;
 const UP_RE = /상승|강세|급등|반등|↑|오름|올라|치솟|폭등|상한가|신고가/;
@@ -595,7 +595,9 @@ const REPORT_RE = /^\[리포트\s?브리핑\]|목표가\s*[\d,]+\s*원/;
 // — 원인이 아니라 해설이라 나열·리포트 요약과 함께 맨 뒤로(사실이 섞인 제목도 있어 빼지는 않는다)
 // 물음표로 끝나는 제목('…급락한 이유는?'·'… Time to Sell?')도 원인을 말하지 않는 해설이라 같은 등급
 // 번호 붙은 연재·기획 기사('[한화에어로 해부⑤] …'·'[전자 3형제 경쟁 공식①] …')도 그날 움직임의 원인이 아닌 해설이라 같은 등급
-const SPEC_RE = /지지선|저항선|과매도|과매수|\bRSI\b|기술적\s*분석|횡보|(?:있을까|될까|갈까|할까)\s*\??\s*$|\?\s*$|^\[[^\]]*[①-⑳][^\]]*\]/;
+// 종목 추천·리포트·전망 칼럼 꼭지('… [오늘, 이 종목]'·'[버핏 리포트] …'·'… [주식 초고수는 지금]'·'[○○ 주가전망] …')도 앞이든 끝이든 같은 등급
+// — 사실을 전하는 꼭지('[핫종목]'·'[종목NOW]'·'[특징주]')는 그대로
+const SPEC_RE = /지지선|저항선|과매도|과매수|\bRSI\b|기술적\s*분석|횡보|(?:있을까|될까|갈까|할까)\s*\??\s*$|\?\s*$|^\[[^\]]*[①-⑳][^\]]*\]|\[[^\]]*(?:이\s?종목|[eE]종목|추천|전망|리포트|고수)[^\]]*\]/;
 const weakTitle = (t) => { const c = coreTitle(t); return roundupTitle(c) || REPORT_RE.test(c) || SPEC_RE.test(c); };
 // '소식에도'·'불구'처럼 거스르는 말이 있으면 호재·악재 낱말로 방향을 짐작하지 않는다
 const CONTRA_RE = /에도[\s,.…'"‘’“”]|에도$|불구|무색/;
@@ -666,16 +668,6 @@ function preferMarket(q, w, vs) {
 }
 // 정정 공시·자회사 공시 — 그날 움직임의 원인일 가능성이 낮아 이유로는 맞는 뉴스가 없을 때만(scripts/dart.mjs의 MINOR_DISC_RE와 같게)
 const MINOR_DISC_RE = /^\[(?:기재|첨부)정정\]|종속회사의주요경영사항|자회사의주요경영사항/;
-// 등락 분포 — '한눈에' 칸 색과 같은 단계(+5% 이상 … −5% 이하)별 종목 수, 있는 단계만(시세 실패 종목 제외)
-const DIST_STEPS = [
-  ['up h4', '+5% 이상', (p) => p >= 5], ['up h3', '+3~5%', (p) => p >= 3 && p < 5], ['up h2', '+1.5~3%', (p) => p >= 1.5 && p < 3],
-  ['up h1', '+0.5~1.5%', (p) => p >= 0.5 && p < 1.5], ['flat', '±0.5% 안', (p) => p > -0.5 && p < 0.5], ['down h1', '−0.5~1.5%', (p) => p <= -0.5 && p > -1.5],
-  ['down h2', '−1.5~3%', (p) => p <= -1.5 && p > -3], ['down h3', '−3~5%', (p) => p <= -3 && p > -5], ['down h4', '−5% 이하', (p) => p <= -5],
-];
-function distOf(list) {
-  const ps = (Array.isArray(list) ? list : []).filter((q) => q && q.ok && Number.isFinite(q.changePct)).map((q) => q.changePct);
-  return DIST_STEPS.map(([cls, label, f]) => ({ cls, label, n: ps.filter(f).length })).filter((x) => x.n);
-}
 
 // 다음 일정 — 공시 일정 달력(calendar.json)에서 그 종목의 오늘(그 시장 날짜)부터 2주 안 가장 가까운 날의 일정.
 // 지난 공시·이미 낸 실적 공시는 빼고, 그날 일정은 두 개까지(시각, 미국 실적은 장 전·후를 붙여). more = 2주 안 나머지 일정 수
@@ -705,6 +697,11 @@ function marketClock(timeZone, ms) {
   for (const x of f.formatToParts(new Date(ms))) p[x.type] = x.value;
   return { day: `${p.year}-${p.month}-${p.day}`, weekend: p.weekday === 'Sat' || p.weekday === 'Sun', min: +p.hour * 60 + +p.minute };
 }
+// 개장 직후(평일 08:59~09:12)엔 봇이 1분마다 국내 시세를 올린다(scripts/burst.mjs) — 그동안은 20초마다 확인해 올라온 값을 1분 안에 보이게.
+// 설정이 더 짧으면 그대로, '수동'(0)은 0 그대로(자동으로 받지 않음)
+const BURST_SEC = 20;
+const burstWindow = (ms) => { const c = marketClock('Asia/Seoul', ms); return !c.weekend && c.min >= 8 * 60 + 59 && c.min < 9 * 60 + 12; };
+const pollSec = (sec, ms = Date.now()) => (burstWindow(ms) ? Math.min(sec, BURST_SEC) : sec);
 function fmtAge(ms) {
   const m = Math.floor(ms / 60e3);
   return m < 60 ? `${m}분` : m < 48 * 60 ? `${Math.floor(m / 60)}시간` : `${Math.floor(m / 1440)}일`;
@@ -721,6 +718,9 @@ function staleOf(market, valid, closed, ms = Date.now()) {
   const regular = !c.weekend && c.min >= s[1] + 30 && c.min < s[2];
   return regular && closed?.[market] !== c.day ? '개장 후 갱신 없음' : '';
 }
+// 개장 전(국내 08:00~09:00 첫 체결 전) — 네이버 시세가 모두 '개장 전'·어제 종가(0%)라 칸이 모두 무채색이다. 비어 보이지 않게 까닭을 한 줄로
+const PREOPEN_NOTE = '9시 개장 전이라 모두 어제 종가(0%)예요 — 첫 체결 뒤 1분쯤 지나 바뀌고, 9시 10분까지는 1분마다 새로 받아요.';
+const preOpenNote = (key, valid) => (key === 'KR' && valid.length && valid.every((q) => q.marketStatus === 'PREOPEN') ? PREOPEN_NOTE : '');
 
 // 시장별 묶음: 헤더(종목수·상승/하락 개수·해당 시장 장상태·갱신시각) + 그 시장의 카드 그리드
 function renderGroup(g, list, closed) {
@@ -757,6 +757,7 @@ function groupInfo(g, list, closed) {
   if (!valid.length) status = '<span class="sdot warn"></span>수집 실패';
   else if (stale) status = `<span class="sdot warn"></span>${stale}`;
   else if (valid.some((q) => q.marketStatus === 'OPEN')) status = '<span class="sdot live"></span>장중';
+  else if (valid.some((q) => q.marketStatus === 'PREOPEN')) status = '<span class="sdot"></span>개장 전';
   else if (valid.some((q) => q.marketStatus)) status = '<span class="sdot"></span>마감';
   else status = '';
   return { valid, failed: list.length - valid.length, up, down, t: lastTimeOf(valid), stale, status };
@@ -816,27 +817,20 @@ function extRow(q) {
       <span class="ext-label">${x.label}</span> <b>${fmtPrice({ price: x.price, currency: q.currency })}</b>
       <span class="${dirClass(x.changePct)}-c">${arrow} ${fmtChange({ change: x.change, currency: q.currency })} (${fmtPct(x.changePct)})</span>${at ? ` <span class="muted">· ${esc(at)}</span>` : ''}</div>`;
 }
-// 등락 분포 막대 — 칸 색과 같은 단계로 종목 수(왼쪽 급등 → 오른쪽 급락), 종목이 많아도 전체 분위기를 한 줄로
-function distHtml(list) {
-  const d = distOf(list);
-  if (!d.length) return '';
-  return `<div class="bm-dist" role="img" aria-label="등락 분포: ${esc(d.map((x) => `${x.label} ${x.n}종목`).join(', '))}">`
-    + d.map((x) => `<span class="seg ${x.cls}" style="flex-grow:${x.n}" title="${esc(x.label)} ${x.n}종목">${x.n}</span>`).join('') + '</div>';
-}
 function renderBoard(groups, closed) {
   const el = $('#board');
   if (!el) return;
   const byPct = (a, b) => (b && b.ok ? b.changePct ?? 0 : -Infinity) - (a && a.ok ? a.changePct ?? 0 : -Infinity) || 0;
   const mkts = groups.map(({ g, list }) => {
     const { valid, up, down, t, stale, status } = groupInfo(g, list, closed);
-    const avg = avgPct(valid), bench = benchOf(g.key, state.market?.indices);
+    const avg = avgPct(valid), bench = benchOf(g.key, state.market?.indices), note = preOpenNote(g.key, valid);
     const cmp = avg == null ? '' : `<span class="bm-avg" title="내 종목 등락률의 단순 평균(종목마다 같은 무게) — 같은 시장 지수와 비교">평균 <b class="${dirClass(avg)}-c">${fmtPct(avg)}</b>`
       + `${bench.map((b) => `<span class="bm-idx">${esc(b.name)} <b class="${dirClass(b.pct)}-c">${fmtPct(b.pct)}</b></span>`).join('')}</span>`;
     return `<div class="bm" style="--n:${list.length}">
       <div class="bm-head"><span class="bm-title">${esc(g.label)}</span>
-        ${valid.length ? `<span class="mgroup-updown"><b class="up-c">▲ ${up}</b> <b class="down-c">▼ ${down}</b></span>` : ''}${cmp}${distHtml(valid)}
+        ${valid.length ? `<span class="mgroup-updown"><b class="up-c">▲ ${up}</b> <b class="down-c">▼ ${down}</b></span>` : ''}${cmp}
         <span class="bm-status${stale ? ' stale' : ''}"${stale ? ` title="${STALE_TIP}"` : ''}>${status}${t ? ` · ${t}` : ''}</span></div>
-      <div class="tiles">${[...list].sort(byPct).map(tileHtml).join('')}</div>
+      ${note ? `<p class="bm-note">${esc(note)}</p>` : ''}<div class="tiles">${[...list].sort(byPct).map(tileHtml).join('')}</div>
     </div>`;
   }).join('');
   // 왜 움직였나 — 시장 순서(국내 → 해외)대로, 그 안에서 많이 움직인 종목부터
@@ -1057,7 +1051,7 @@ function renderCard(q, hist, inv) {
   const mk = sixMonthMark(q, hist);
   if (mk) badge = `<span class="badge mark ${mk}" title="오늘 가격이 최근 6개월 종가 중 가장 ${mk === 'high' ? '높음' : '낮음'}">6개월 ${mk === 'high' ? '신고가' : '신저가'}</span>${badge}`;
   const arrow = q.changePct > 0 ? '▲' : q.changePct < 0 ? '▼' : '–';
-  const status = q.marketStatus === 'OPEN' ? '<span class="sdot live"></span>장중' : '<span class="sdot"></span>마감';
+  const status = q.marketStatus === 'OPEN' ? '<span class="sdot live"></span>장중' : q.marketStatus === 'PREOPEN' ? '<span class="sdot"></span>개장 전' : '<span class="sdot"></span>마감';
 
   const closes = hist && hist.closes;
   const retRow = closes
@@ -1200,6 +1194,8 @@ async function loadStatus() {
 }
 
 async function tick() {
+  // 개장 직후 창(pollSec)에 들어가거나 벗어나면 확인 간격을 바꾼다
+  if (state.timer && pollSec(state.intervalSec) !== state.timerSec) restartTimer();
   await loadManifest(); // 지문 먼저(작음) — 바뀐 파일만 받는다
   // AI 상태·지수를 먼저(작은 파일) — 카드의 'AI 분석 대기' 안내와 시장 대비가 같은 회차 값을 쓰게
   await Promise.all([loadStatus().catch(() => {}), loadMarket().catch((e) => console.warn('시장 갱신 실패:', e))]);
@@ -1208,8 +1204,9 @@ async function tick() {
 function restartTimer() {
   if (state.timer) clearInterval(state.timer);
   state.timer = null;
+  state.timerSec = pollSec(state.intervalSec);
   // 다른 탭·앱을 보는 동안엔 자동 새로고침을 쉰다(데이터·배터리 절약) — 돌아오면 아래 visibilitychange가 바로 갱신
-  if (state.intervalSec > 0 && !document.hidden) state.timer = setInterval(tick, state.intervalSec * 1000);
+  if (state.timerSec > 0 && !document.hidden) state.timer = setInterval(tick, state.timerSec * 1000);
 }
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { if (state.timer) clearInterval(state.timer); state.timer = null; }

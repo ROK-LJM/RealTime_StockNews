@@ -135,6 +135,14 @@ export async function getQuote(item) {
 // 종목이 많아도 한꺼번에 쏘지 않는다(차단·속도 제한 방지). 5개씩 동시 조회.
 const QUOTE_CONCURRENCY = 5;
 export async function getQuotes(items) { return mapLimit(items, QUOTE_CONCURRENCY, getQuote); }
+// 국내 종목 네이버 실시간만(야후 대체 없음) — 개장 직후 집중 갱신(burst.mjs)용. 실패한 종목은 ok:false(그 종목은 직전 값을 그대로 쓴다)
+export async function getKrQuotesLive(items) {
+  return mapLimit(items, QUOTE_CONCURRENCY, async (it) => {
+    const code = String(it.code).trim();
+    try { return { code, market: 'KR', ...(await krStockNaver(code)), ok: true, ...(it.name ? { name: it.name } : {}) }; }
+    catch (e) { return { code, market: 'KR', name: it.name || code, ok: false, error: String(e.message || e) }; }
+  });
+}
 
 // ---------- 미국 시간외(프리·애프터마켓) 가격 ----------
 // 정규장 밖에서 증권 앱은 시간외 가격을 보여주는데 대시보드는 정규장 종가뿐이라 '가격이 다르다'고 보이기 쉽다
@@ -177,19 +185,23 @@ export async function getHistory(item, range = '6mo') {
 }
 
 // ---------- 지수 + 분위기 ----------
-export async function getMarket() {
-  const cached = getCache('market', 8000);
-  if (cached) return cached;
-  // 한국 지수: 네이버 실시간 우선(야후 폴백) / 미국 지수·VIX: 야후
-  const krDefs = [['KOSPI', '^KS11', '코스피'], ['KOSDAQ', '^KQ11', '코스닥']];
-  const usDefs = [['^GSPC', 'S&P 500'], ['^IXIC', '나스닥'], ['^VIX', 'VIX']];
-  const krIdx = await Promise.all(krDefs.map(async ([naverSym, ySym, name]) => {
+// 한국 지수(코스피·코스닥) — 네이버 실시간, 실패하면 야후(20분 지연). fallback=false면 네이버만(개장 직후 집중 갱신 — 지연 값보다 직전 값이 낫다)
+export async function getKrIndices(fallback = true) {
+  return Promise.all([['KOSPI', '^KS11', '코스피'], ['KOSDAQ', '^KQ11', '코스닥']].map(async ([naverSym, ySym, name]) => {
     try { return { name, symbol: ySym, currency: 'KRW', ...(await krIndexNaver(naverSym)) }; }
     catch {
+      if (!fallback) return null;
       try { const n = normalize(ySym, await yahoo(ySym), name); return { name, symbol: ySym, currency: 'KRW', price: n.price, change: n.change, changePct: n.changePct, marketStatus: n.marketStatus }; }
       catch { return null; }
     }
   }));
+}
+export async function getMarket() {
+  const cached = getCache('market', 8000);
+  if (cached) return cached;
+  // 한국 지수: 네이버 실시간 우선(야후 폴백) / 미국 지수·VIX: 야후
+  const usDefs = [['^GSPC', 'S&P 500'], ['^IXIC', '나스닥'], ['^VIX', 'VIX']];
+  const krIdx = await getKrIndices();
   const usIdx = await Promise.all(usDefs.map(async ([sym, name]) => {
     try { const n = normalize(sym, await yahoo(sym), name); return { name, symbol: sym, currency: 'USD', price: n.price, change: n.change, changePct: n.changePct, marketStatus: n.marketStatus }; }
     catch { return null; }
@@ -215,7 +227,8 @@ export async function getMarket() {
   return setCache('market', { indices, vix: vix || null, mood, forex });
 }
 
-function computeMood(indices, vix) {
+// 시장 분위기(공포·탐욕) — 개장 직후 집중 갱신(burst.mjs)도 같은 식으로 다시 계산한다
+export function computeMood(indices, vix) {
   let score = 50;
   const pcts = indices.map((i) => i.changePct).filter((x) => Number.isFinite(x));
   if (pcts.length) { const avg = pcts.reduce((a, b) => a + b, 0) / pcts.length; score += clamp(avg, -4, 4) * 7; }
@@ -398,7 +411,7 @@ const coreTitle = (t) => String(t ?? '').trim().replace(/\s:\s\S{1,10}$/, '');
 export const priceOnly = (title) => { const t = coreTitle(title); return PRICE_ONLY.some((re) => re.test(t)); };
 // 이유로 쓸 뉴스 고르기(급등락 기록) — docs/app.js의 pickReasonNews와 같게 유지(자체 테스트가 비교).
 // 시세 안내·상품 상장 공지('…ELW 224종 상장')·방향이 반대인 기사('15% 급등' 기사인데 오늘은 하락 — 이유일 수 없음)는 빼고
-// ① 그날 나온 같은 방향의 [특징주] → ② 같은 방향 기사 → ③ 방향을 알 수 없는 기사 → ④ 여러 종목 나열·'[오늘의 …]' 모음·리포트 요약·주가 전망 글 순.
+// ① 그날 나온 같은 방향의 [특징주] → ② 같은 방향 기사 → ③ 방향을 알 수 없는 기사 → ④ 여러 종목 나열·'[오늘의 …]' 모음·리포트 요약·주가 전망 글·칼럼 꼭지 순.
 // 같은 등급 안에서는 최신순. 방향은 제목의 오름·내림 말, 없으면 호재·악재 태그(내린 날의 '수주 1조 돌파' 같은 호재 기사는 이유 아님).
 export const LISTING_RE = /(ELW|ETN|ETF|리츠|스팩)[^…]{0,30}상장|신규\s*상장/;
 const UP_RE = /상승|강세|급등|반등|↑|오름|올라|치솟|폭등|상한가|신고가/;
@@ -424,7 +437,9 @@ const REPORT_RE = /^\[리포트\s?브리핑\]|목표가\s*[\d,]+\s*원/;
 // — 원인이 아니라 해설이라 나열·리포트 요약과 함께 맨 뒤로(사실이 섞인 제목도 있어 빼지는 않는다)
 // 물음표로 끝나는 제목('…급락한 이유는?'·'… Time to Sell?')도 원인을 말하지 않는 해설이라 같은 등급
 // 번호 붙은 연재·기획 기사('[한화에어로 해부⑤] …'·'[전자 3형제 경쟁 공식①] …')도 그날 움직임의 원인이 아닌 해설이라 같은 등급
-const SPEC_RE = /지지선|저항선|과매도|과매수|\bRSI\b|기술적\s*분석|횡보|(?:있을까|될까|갈까|할까)\s*\??\s*$|\?\s*$|^\[[^\]]*[①-⑳][^\]]*\]/;
+// 종목 추천·리포트·전망 칼럼 꼭지('… [오늘, 이 종목]'·'[버핏 리포트] …'·'… [주식 초고수는 지금]'·'[○○ 주가전망] …')도 앞이든 끝이든 같은 등급
+// — 사실을 전하는 꼭지('[핫종목]'·'[종목NOW]'·'[특징주]')는 그대로
+const SPEC_RE = /지지선|저항선|과매도|과매수|\bRSI\b|기술적\s*분석|횡보|(?:있을까|될까|갈까|할까)\s*\??\s*$|\?\s*$|^\[[^\]]*[①-⑳][^\]]*\]|\[[^\]]*(?:이\s?종목|[eE]종목|추천|전망|리포트|고수)[^\]]*\]/;
 const weakTitle = (t) => { const c = coreTitle(t); return roundupTitle(c) || REPORT_RE.test(c) || SPEC_RE.test(c); };
 // '소식에도'·'불구'처럼 거스르는 말이 있으면 호재·악재 낱말로 방향을 짐작하지 않는다
 const CONTRA_RE = /에도[\s,.…'"‘’“”]|에도$|불구|무색/;

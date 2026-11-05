@@ -10,7 +10,6 @@
 //  - 파일은 원자적으로 쓴다(임시 파일 → 이름 변경) → 중간에 끊겨도 반쯤 쓴 JSON이 남지 않는다.
 //
 // `node scripts/fetch.mjs`로 실행하면 바로 1회 갱신한다. 다른 모듈(자체 테스트)은 run()을 가져다 쓴다.
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,7 +18,7 @@ import {
   aiStatus, aiGate, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, pickReasonNews, tagSentiment, krBaseName,
 } from './sources.mjs';
 import { startBudget, toStored, totalUsed, capacity, inSession, isKrSession, nextAllowanceAt, closedCheckDay, usExtWindow, usAfterPostSameDay } from './aibudget.mjs';
-import { validateWatchlist, writeJsonAtomic, analysisSig, sigMove } from './util.mjs';
+import { validateWatchlist, writeJsonAtomic, analysisSig, sigMove, manifestOf } from './util.mjs';
 import { dartEnabled, resetDart, dartHalted, ensureCorpTable, getDisclosures, MINOR_DISC_RE } from './dart.mjs';
 import { calendarDue, buildCalendar } from './calendar.mjs';
 
@@ -39,9 +38,7 @@ const MOVE_KEEP_DAYS = 120, MOVE_KEEP_N = 20, MOVE_REASON_MAX = 140;
 const MARKET_TZ = { KR: 'Asia/Seoul', US: 'America/New_York' };
 const ymdIn = (ms, timeZone) => new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(ms).replace(/-/g, '');
 
-// 화면이 1분마다 받는 파일 — 회차 끝에 파일별 내용 지문(sha1 앞 10자리)을 manifest.json에 남기면
-// 화면은 지문만 먼저 받고 바뀐 파일만 다시 받는다(평소 1분 갱신 약 220KB → 수 KB, 휴대폰 데이터 절약).
-const MANIFEST_FILES = ['quotes.json', 'market.json', 'news.json', 'history.json', 'investors.json', 'analysis.json', 'disclosures.json', 'moves.json', 'status.json', 'calendar.json'];
+// 화면이 받는 파일의 내용 지문(manifest.json)은 util.mjs의 manifestOf — 개장 직후 집중 갱신(burst.mjs)도 같은 것을 쓴다
 
 // 설정 검증: 고칠 수 있는 항목(앞자리 0 누락·소문자 티커)은 고치고, 틀린 항목은 빼며 이유를 로그로 남긴다.
 function readConfig(root) {
@@ -391,12 +388,8 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
   // 파일별 내용 지문(manifest.json) — 이번 회차에 쓴 파일이 있을 때만 다시 계산하고, 내용이 같으면 쓰지 않는다(불필요한 커밋 방지).
   // 데이터 파일과 같은 커밋·같은 배포로 나가므로 화면이 받은 지문과 파일 내용이 맞는다(어긋나면 화면이 예전처럼 새로 받음).
   if (written.length) try {
-    const files = {};
-    for (const f of MANIFEST_FILES) {
-      try { files[f] = crypto.createHash('sha1').update(fs.readFileSync(path.join(dataDir, f))).digest('hex').slice(0, 10); }
-      catch { /* 아직 없는 파일 — 화면은 그 파일만 예전처럼 받는다 */ }
-    }
-    if (JSON.stringify({ files }) !== JSON.stringify(readJson('manifest.json'))) write('manifest.json', { files });
+    const man = manifestOf(dataDir);
+    if (JSON.stringify(man) !== JSON.stringify(readJson('manifest.json'))) write('manifest.json', man);
   } catch (e) { console.error('  ✗ 파일 지문 기록 실패:', e.message); }
   console.log('[fetch] 완료');
   return { written, items: items.length, ai: st };

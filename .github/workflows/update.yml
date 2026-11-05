@@ -1,6 +1,7 @@
 name: 시세·뉴스 갱신
 
 # 5분마다 자동 실행 + 수동 실행 + 코드 푸시 시 실행
+# (평일 09:00~09:10은 마지막 단계가 1분마다 국내 시세·지수만 더 받는다 — scripts/burst.mjs)
 on:
   schedule:
     - cron: "*/5 * * * *"
@@ -21,7 +22,8 @@ jobs:
   update:
     runs-on: ubuntu-latest
     # 비정상적으로 오래 걸리면 끊는다 — 기본값(6시간) 동안 다음 회차가 줄줄이 막히는 것 방지
-    timeout-minutes: 15
+    # (평소 1~2분 · 개장 직후 집중 갱신이 붙는 08:55 무렵 회차만 15분 남짓)
+    timeout-minutes: 25
     steps:
       - name: 체크아웃
         uses: actions/checkout@v5
@@ -66,3 +68,22 @@ jobs:
             sleep $((i * 3))
           done
           echo "::warning::데이터 푸시 실패 — 이번 회차 데이터는 다음 회차에 다시 만들어집니다"
+
+      - name: 개장 직후 집중 갱신(국내 09:00~09:10 · 1분마다)
+        # 평일 08:54~09:10 사이에 여기 온 회차만 — 그 밖엔 burst.mjs가 바로 끝낸다(1초 안팎).
+        # 국내 시세·코스피·코스닥만 1분마다 받아 커밋·푸시한다(뉴스·AI·공시는 다음 정규 회차). 그동안 다음 회차는 대기했다가 이어서 돈다.
+        # 실패해도 회차는 성공으로 둔다 — 앞 단계 데이터는 이미 푸시됐다.
+        continue-on-error: true
+        timeout-minutes: 18
+        run: |
+          for n in $(seq 1 13); do
+            node scripts/burst.mjs || break
+            git add docs/data
+            if git diff --staged --quiet; then continue; fi
+            git commit -q -m "data(개장): $(date -u +%FT%TZ)"
+            for i in 1 2 3; do
+              if git pull -q --rebase --autostash origin main && git push -q origin HEAD:main; then break; fi
+              git rebase --abort 2>/dev/null || true
+              sleep 2
+            done
+          done

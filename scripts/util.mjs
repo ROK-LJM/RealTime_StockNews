@@ -1,6 +1,8 @@
 // pages/scripts/util.mjs — 파이프라인 공통 유틸 (외부 의존성·네트워크 접근 없음)
 // fetch.mjs와 selftest.mjs가 함께 쓴다. 여기 함수는 순수 로직이라 오프라인으로 검증할 수 있다.
+import crypto from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 
 export const MAX_ITEMS = 60;   // 추적 종목 최대 개수 — 5분 회차 시간(40종목 기준 가장 무거운 회차 약 1분)·무료 뉴스 요청을 생각한 안전장치
 const KR_RE = /^\d{6}$/;
@@ -53,6 +55,18 @@ export function writeJsonAtomic(file, obj) {
   fs.writeFileSync(tmp, JSON.stringify(obj));
   try { fs.renameSync(tmp, file); }
   catch (e) { try { fs.unlinkSync(tmp); } catch {} throw e; }
+}
+
+// 화면이 1분마다 받는 파일 — 파일별 내용 지문(sha1 앞 10자리)을 manifest.json에 남기면 화면은 지문만 먼저 받고 바뀐 파일만 다시 받는다
+// (평소 1분 갱신 약 220KB → 수 KB, 휴대폰 데이터 절약). fetch.mjs(회차 끝)와 burst.mjs(개장 직후 집중 갱신)가 함께 쓴다.
+export const MANIFEST_FILES = ['quotes.json', 'market.json', 'news.json', 'history.json', 'investors.json', 'analysis.json', 'disclosures.json', 'moves.json', 'status.json', 'calendar.json'];
+export function manifestOf(dataDir, files = MANIFEST_FILES) {
+  const out = {};
+  for (const f of files) {
+    try { out[f] = crypto.createHash('sha1').update(fs.readFileSync(path.join(dataDir, f))).digest('hex').slice(0, 10); }
+    catch { /* 아직 없는 파일 — 화면은 그 파일만 예전처럼 받는다 */ }
+  }
+  return { files: out };
 }
 
 // 동시 실행 개수를 제한한 map — 한꺼번에 수십 개를 쏘아 차단·속도 제한에 걸리는 것을 막는다. 결과 순서는 입력 순서.
