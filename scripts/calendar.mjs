@@ -4,7 +4,7 @@
 //   ① 공시한 날에 그 공시를 두고 ② 일정이 적힌 공시는 본문(공시서류원본, ZIP 속 XML)에서 날짜를 뽑아 그날에 일정을 둔다.
 //   결산실적공시 예고 → 실적 발표 예정일 · 기업설명회(IR) → 일시 · 기준일 설정 → 기준일(사유로 배당·주총 구분) ·
 //   배당 결정 → 배당 기준일·지급일 · 주총 소집 → 주총일·의결권 기준일 · 주식 소각·자기주식 취득/처분 → 기간·소각일 ·
-//   유·무상증자 → 배정 기준일·신주 상장일 · 분할·병합·감자 → 신주 상장일.
+//   유·무상증자 → 배정 기준일·납입일·신주 상장일 · 분할·병합·감자 → 신주 상장일.
 //   원본 꼴(2026-10-23 봇 진단 diag로 확인 — 둘 다 UTF-8, ZIP에 본문 하나): 거래소 공시는 XForms HTML(소문자 태그, 태그마다 CRLF 줄바꿈·들여쓰기,
 //   <style> 블록, 값은 span.xforms_input), 주요사항보고서는 DART XML(dart4 — TR·TD·TE·TU, LF 줄바꿈). 원본의 줄바꿈은 표의 줄이 아니다.
 //   본문 형식(실측 2026-10 공시 원문): '3. 결산실적 공시예정일 | 2026-10-29', '1. 일시 및 장소 | 일시 | 2026-10-29 | 15:45',
@@ -22,10 +22,10 @@ import { dartEnabled, dartHalted, corpOf, tagOf, kstYmd, listFilings, getDocumen
 import { mapLimit } from './util.mjs';
 
 export const CAL_REFRESH_MS = 3 * 3600e3;
-export const PARSER_V = 4;  // 본문 읽는 방식의 판 — 바꾸면 기억한 본문 결과(docs)를 버리고 다시 받는다
+export const PARSER_V = 5;  // 본문 읽는 방식의 판 — 바꾸면 기억한 본문 결과(docs)를 버리고 다시 받는다
 const BACK_DAYS = 90;       // 지난 공시·일정
 const AHEAD_DAYS = 400;     // 앞으로의 일정(자사주 매입 기간 끝 등)
-const DOCS_PER_RUN = 40;    // 한 번에 새로 받는 본문 수 — 나머지는 다음 갱신 때
+const DOCS_PER_RUN = 150;   // 한 번에 새로 받는 본문 수 — 판(PARSER_V)이 바뀌어 모아 둔 본문을 다시 받을 때도 한 번에 끝나게 넉넉히(나머지는 다음 갱신 때)
 const TYPES = ['I', 'B', 'A']; // 공시 유형: 거래소 · 주요사항보고 · 정기(사업·분기보고서)
 // 본문에서 일정을 찾는 공시(제목)
 export const SCHEDULE_RE = /결산실적공시\s*예고|기업설명회|\(IR\)|주주명부폐쇄|기준일\s*설정|배당\s*결정|주주총회\s*소집|주식\s*소각\s*결정|자기주식\s*(?:취득|처분)\s*결정|증자\s*결정|주식\s*(?:분할|병합)\s*결정|감자\s*결정/;
@@ -169,6 +169,7 @@ export function parseDocEvents(title, xmlOrRows) {
   } else if (/증자\s*결정/.test(T)) {
     const what = `${T.match(/유무상|유상|무상/)?.[0] || ''}증자`;
     add(labeled(rows, /신주\s*배정\s*기준일/), 'cap', `${what} 배정 기준일`);
+    add(labeled(rows, /^(?:\d+\.\s*)?(?:주금\s*)?납입\s*(?:기)?일$/), 'cap', `${what} 납입`); // 제3자 배정은 이게 핵심 날짜
     add(labeled(rows, /상장\s*예정\s*일/), 'cap', `${what} 신주 상장`);
   } else if (/주식\s*(?:분할|병합)\s*결정|감자\s*결정/.test(T)) {
     const what = T.match(/분할|병합|감자/)[0];
