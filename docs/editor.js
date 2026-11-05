@@ -6,6 +6,7 @@
 //    (토큰은 이 브라우저 localStorage에만 두고 api.github.com 말고는 보내지 않는다 — index.html CSP로도 제한)
 //  · 토큰 없이: 내용이 채워진 깃허브 이슈 작성 창이 열리고, 거기서 'Create'만 누르면 된다(깃허브 로그인 필요)
 // 검색 목록(data/stocklist.json)은 봇이 매일 만든다. 목록에 없거나 목록을 못 받았으면 코드·티커로 직접 추가할 수 있다.
+// 칩마다 'AI'를 눌러 그 종목의 AI 종합분석을 켜고 끈다(기본 켜짐) — 무료 AI 한도를 보고 싶은 종목에만 쓰게.
 // app.js의 $, esc, loadJson, tick을 함께 쓴다(같은 페이지의 일반 스크립트).
 'use strict';
 (() => {
@@ -13,7 +14,7 @@
   if (!dlg || !openBtn) return;
   if (typeof dlg.showModal !== 'function') { openBtn.hidden = true; return; } // 아주 오래된 브라우저 — 버튼을 숨기고 기존 방식(설명) 유지
 
-  const MAX = 40;
+  const MAX = 60; // scripts/util.mjs의 MAX_ITEMS와 같게
   const KR_RE = /^\d{6}$/, US_RE = /^[A-Z][A-Z0-9.\-]{0,9}$/; // scripts/util.mjs의 검증 규칙과 같게
   const TOKEN_KEY = 'stockdash.issueToken';
   // 저장소(owner/repo)는 주소에서 알아낸다: https://<owner>.github.io/<repo>/ — 주소가 다르면 기본 저장소
@@ -33,13 +34,15 @@
   const search = q('edSearch'), results = q('edResults'), list = q('edList'), count = q('edCount'), msgEl = q('edMsg');
   const saveBtn = q('edSave'), resetBtn = q('edReset'), closeBtn = q('edClose');
   const tokenBox = q('edTokenBox'), tokenIn = q('edToken'), tokenSave = q('edTokenSave'), tokenDel = q('edTokenDel'), tokenMsg = q('edTokenMsg');
+  const aiCount = q('edAiCount'), aiAllBtn = q('edAiAll'), aiNoneBtn = q('edAiNone');
   const statusEl = $('#editStatus');
   if (q('edRepoName')) q('edRepoName').textContent = REPO.split('/')[1];
 
-  let base = [], baseOk = false;  // 지금 목록(quotes.json 기준) [{code, market, name}]
+  let base = [], baseOk = false;  // 지금 목록(quotes.json 기준) [{code, market, name, ai}]
   const adds = new Map();         // 추가할 종목 code → {code, market, name}
   const removes = new Set();      // 삭제할 종목 code
-  let inflight = null;            // 보낸 뒤 반영을 기다리는 요청 { add, remove, timer, deadline }
+  const aiSet = new Map();        // AI 켜고 끄기 code → true(켬)/false(끔) — 지금 상태와 다른 것만
+  let inflight = null;            // 보낸 뒤 반영을 기다리는 요청 { add, remove, ai: Map, timer, deadline }
   let busy = false;
   let dir = null, dirLoading = null, dirFailed = false;
   let lastHits = new Map();
@@ -113,15 +116,22 @@
 
   // ---------- 상태 ----------
   // 화면에 보일 목록 = 지금 목록 − 삭제(보낸 것·고른 것) + 추가(보낸 것·고른 것)
+  // AI 상태 = 고른 것 > 보낸 것 > 지금 목록(새로 추가하는 종목은 켜짐)
+  const aiDefault = (code) => {
+    if (inflight && inflight.ai.has(code)) return inflight.ai.get(code);
+    const b = base.find((x) => x.code === code);
+    return b ? b.ai : true;
+  };
+  const aiOf = (code) => (aiSet.has(code) ? aiSet.get(code) : aiDefault(code));
   function effective() {
     const gone = new Set([...removes, ...(inflight ? inflight.remove : [])]);
-    const out = base.filter((b) => !gone.has(b.code)).map((b) => ({ ...b, tag: '' }));
+    const out = base.filter((b) => !gone.has(b.code)).map((b) => ({ ...b, ai: aiOf(b.code), tag: '' }));
     const have = new Set(out.map((x) => x.code));
-    for (const a of inflight ? inflight.add : []) if (!have.has(a.code)) { out.push({ ...a, tag: 'wait' }); have.add(a.code); }
-    for (const a of adds.values()) if (!have.has(a.code)) { out.push({ ...a, tag: 'new' }); have.add(a.code); }
+    for (const a of inflight ? inflight.add : []) if (!have.has(a.code)) { out.push({ ...a, ai: aiOf(a.code), tag: 'wait' }); have.add(a.code); }
+    for (const a of adds.values()) if (!have.has(a.code)) { out.push({ ...a, ai: aiOf(a.code), tag: 'new' }); have.add(a.code); }
     return out;
   }
-  const changes = () => adds.size + removes.size;
+  const changes = () => adds.size + removes.size + aiSet.size;
   const flag = (m) => (m === 'KR' ? '국내' : '미국');
   const shortName = (it) => String(it.name || it.en || '').trim().slice(0, 30);
 
@@ -141,6 +151,20 @@
   function remove(code) {
     if (adds.has(code)) adds.delete(code);
     else if (base.some((b) => b.code === code)) removes.add(code);
+    aiSet.delete(code);
+    render();
+  }
+  // AI 켜고 끄기 — 원래 상태로 돌아오면 바꿀 것에서 뺀다
+  function setAi(code, on) { if (on === aiDefault(code)) aiSet.delete(code); else aiSet.set(code, on); }
+  function toggleAi(code) {
+    const it = effective().find((x) => x.code === code);
+    if (!it || it.tag === 'wait' || busy) return;
+    setAi(code, !it.ai);
+    render();
+  }
+  function setAllAi(on) {
+    if (busy) return;
+    for (const it of effective()) if (it.tag !== 'wait') setAi(it.code, on);
     render();
   }
 
@@ -180,9 +204,12 @@
   function renderList() {
     const items = effective();
     count.textContent = `${items.length}/${MAX}`;
-    const chip = (x) => `<span class="ed-chip${x.tag ? ' ' + x.tag : ''}" title="${esc(x.code)}">${esc(x.name || x.code)}`
+    if (aiCount) aiCount.textContent = `${items.filter((x) => x.ai).length}/${items.length}`;
+    const chip = (x) => `<span class="ed-chip${x.tag ? ' ' + x.tag : ''}${x.ai ? '' : ' ai-off'}" title="${esc(x.code)}">${esc(x.name || x.code)}`
       + `${x.tag === 'new' ? ' <i>새로</i>' : x.tag === 'wait' ? ' <i>반영 중</i>' : ''}`
-      + `${x.tag === 'wait' ? '' : `<button type="button" data-rm="${esc(x.code)}" aria-label="${esc((x.name || x.code) + ' 삭제')}"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>`}</span>`;
+      + `${x.tag === 'wait' ? '' : `<button type="button" class="ed-ai" data-ai="${esc(x.code)}" aria-pressed="${x.ai}" `
+        + `title="${x.ai ? 'AI 종합분석 켜짐 — 누르면 끔' : 'AI 종합분석 꺼짐 — 누르면 켬'}" aria-label="${esc((x.name || x.code) + ' AI 종합분석 ' + (x.ai ? '켜짐' : '꺼짐'))}">AI</button>`
+        + `<button type="button" data-rm="${esc(x.code)}" aria-label="${esc((x.name || x.code) + ' 삭제')}"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>`}</span>`;
     const kr = items.filter((x) => x.market === 'KR'), us = items.filter((x) => x.market !== 'KR');
     let html = '';
     if (kr.length) html += `<div class="ed-group"><div class="ed-gl">국내 ${kr.length}</div>${kr.map(chip).join('')}</div>`;
@@ -194,6 +221,8 @@
     saveBtn.disabled = !n || busy || !baseOk;
     saveBtn.textContent = busy ? '저장 중…' : n ? `저장 (${n}건 변경)` : '저장';
     resetBtn.disabled = !n || busy;
+    if (aiAllBtn) aiAllBtn.disabled = busy || !items.some((x) => !x.ai && x.tag !== 'wait');
+    if (aiNoneBtn) aiNoneBtn.disabled = busy || !items.some((x) => x.ai && x.tag !== 'wait');
   }
   function render() { renderList(); renderResults(); }
 
@@ -210,12 +239,13 @@
       const d = await loadJson('quotes.json');
       base = (Array.isArray(d?.quotes) ? d.quotes : []).filter((x) => x && x.code).map((x) => {
         const code = String(x.code);
-        return { code, market: x.market === 'KR' || x.market === 'US' ? x.market : KR_RE.test(code) ? 'KR' : 'US', name: String(x.name || '') };
+        return { code, market: x.market === 'KR' || x.market === 'US' ? x.market : KR_RE.test(code) ? 'KR' : 'US', name: String(x.name || ''), ai: x.ai !== false };
       });
       baseOk = true;
       // 이미 반영된 변경은 고른 목록에서 정리
       for (const c of [...adds.keys()]) if (base.some((b) => b.code === c)) adds.delete(c);
       for (const c of [...removes]) if (!base.some((b) => b.code === c)) removes.delete(c);
+      for (const [c, on] of [...aiSet]) if (on === aiDefault(c)) aiSet.delete(c);
     } catch {
       if (!baseOk) msg('현재 종목 목록을 불러오지 못했어요. 잠시 후 다시 열어 주세요.', 'err');
     }
@@ -224,7 +254,9 @@
   // ---------- 저장 ----------
   const label = (x) => (x.name ? `${x.name}(${x.code})` : x.code);
   function buildIssue(req) {
-    const parts = [...req.add.map((a) => `+${label(a)}`), ...req.remove.map((c) => `−${label(base.find((b) => b.code === c) || { code: c })}`)];
+    const ai = Object.values(req.ai || {}), off = ai.filter((v) => !v).length, on = ai.length - off;
+    const parts = [...req.add.map((a) => `+${label(a)}`), ...req.remove.map((c) => `−${label(base.find((b) => b.code === c) || { code: c })}`),
+      ...(off ? [`AI끔 ${off}`] : []), ...(on ? [`AI켬 ${on}`] : [])];
     let title = `watchlist: ${parts.join(' ')}`;
     if (title.length > 180) title = title.slice(0, 177) + '…';
     const body = [
@@ -246,8 +278,10 @@
   }
 
   async function save() {
-    const req = { add: [...adds.values()], remove: [...removes] };
-    if (!req.add.length && !req.remove.length || busy) return;
+    const ai = {};
+    for (const [c, on] of aiSet) if (!removes.has(c)) ai[c] = on;
+    const req = { add: [...adds.values()], remove: [...removes], ...(Object.keys(ai).length ? { ai } : {}) };
+    if ((!req.add.length && !req.remove.length && !req.ai) || busy) return;
     const { title, body } = buildIssue(req);
     const token = getToken();
     if (token) {
@@ -275,8 +309,8 @@
   // 보낸 요청이 시세 파일에 나타날 때까지 지켜본다(15초 간격). 토큰 저장은 6분, 깃허브 창 경유는 15분까지.
   function sent(req, viaToken) {
     if (inflight) clearInterval(inflight.timer);
-    adds.clear(); removes.clear();
-    inflight = { add: req.add, remove: req.remove, deadline: Date.now() + (viaToken ? 6 : 15) * 60e3, timer: 0 };
+    adds.clear(); removes.clear(); aiSet.clear();
+    inflight = { add: req.add, remove: req.remove, ai: new Map(Object.entries(req.ai || {})), deadline: Date.now() + (viaToken ? 6 : 15) * 60e3, timer: 0 };
     setStatus('종목 변경 반영 대기 중…');
     const job = inflight;
     job.timer = setInterval(async () => {
@@ -285,7 +319,8 @@
       try { d = await loadJson('quotes.json'); } catch { return; }
       const qs = Array.isArray(d?.quotes) ? d.quotes : [];
       const codes = new Set(qs.map((x) => String(x.code)));
-      const done = job.add.every((a) => codes.has(a.code)) && job.remove.every((c) => !codes.has(c));
+      const done = job.add.every((a) => codes.has(a.code)) && job.remove.every((c) => !codes.has(c))
+        && [...job.ai].every(([c, on]) => { const x = qs.find((y) => String(y.code) === c); return !x || (x.ai !== false) === on; });
       if (done) {
         clearInterval(job.timer); inflight = null;
         const bad = job.add.filter((a) => qs.some((x) => String(x.code) === a.code && !x.ok));
@@ -334,11 +369,14 @@
     search.select();
   });
   list.addEventListener('click', (e) => {
-    const rm = e.target.closest('[data-rm]'), undo = e.target.closest('[data-undo]');
-    if (rm) remove(rm.dataset.rm);
+    const rm = e.target.closest('[data-rm]'), undo = e.target.closest('[data-undo]'), ai = e.target.closest('[data-ai]');
+    if (ai) toggleAi(ai.dataset.ai);
+    else if (rm) remove(rm.dataset.rm);
     else if (undo) { removes.delete(undo.dataset.undo); render(); }
   });
-  resetBtn.addEventListener('click', () => { adds.clear(); removes.clear(); msg(''); render(); });
+  resetBtn.addEventListener('click', () => { adds.clear(); removes.clear(); aiSet.clear(); msg(''); render(); });
+  if (aiAllBtn) aiAllBtn.addEventListener('click', () => setAllAi(true));
+  if (aiNoneBtn) aiNoneBtn.addEventListener('click', () => setAllAi(false));
   saveBtn.addEventListener('click', save);
 
   tokenSave.addEventListener('click', async () => {

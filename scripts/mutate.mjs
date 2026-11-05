@@ -1,0 +1,220 @@
+// pages/scripts/mutate.mjs — 변이 검사(개발용). 핵심 줄을 하나씩 일부러 망가뜨려 자체 테스트(selftest.mjs)가 실패하는지(= 잡아내는지) 본다.
+//
+// 사용: node scripts/mutate.mjs [이름 정규식]     예) node scripts/mutate.mjs "\[편집\]|\[AI\]"
+//       node scripts/mutate.mjs --check            찾을 글이 파일마다 정확히 한 번씩 있는지만 확인(테스트는 안 돌림)
+// · 변이마다 원본을 복구한다 — 도는 동안 scripts·docs 파일을 고치지 말 것(복구할 때 덮어쓴다).
+// · 테스트가 '결과:' 줄 없이 끝나면(문법 오류 등) 잡은 것으로 세지 않고 '실행 오류'로 따로 보인다.
+// · 봇·화면 동작과 무관한 개발 도구 — 자동 실행(워크플로) 대상이 아니다.
+// · 2026-11-05 다시 만듦: 예전 목록(약 300개)은 임시 폴더에 있다가 사라져, 대화에 남은 최근 범주(공시·일정·달력·21차)와 22차부터 다시 쌓는다.
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const PAGES = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const S = 'scripts/sources.mjs', F = 'scripts/fetch.mjs', B = 'scripts/aibudget.mjs', W = 'scripts/watchlist-apply.mjs', U = 'scripts/util.mjs';
+const D = 'scripts/dart.mjs', C = 'scripts/calendar.mjs', A = 'docs/app.js', CJ = 'docs/calendar.js';
+const R = String.raw;
+
+// [이름, 파일, 찾을 글(그 파일에 정확히 한 번), 바꿀 글]
+const MUTANTS = [
+  // ---------- AI 한도 배분 ----------
+  ['PerDay 429 즉시 반환 제거', S, "if (res.status === 429 && /per ?day|daily/i.test(body)) return { kind: 'quota' };", ''],
+  ['일일 한도 소진을 회차 한정으로', S, "markOut(model, 'quota'); continue;", "runOut[model] = 'quota'; continue;"],
+  ['사용 불가를 회차 한정으로', S, "markOut(model, 'unavailable'); continue;", "runOut[model] = 'unavailable'; continue;"],
+  ['분당 한도를 하루 제외로', S, "runOut[model] = 'rate'; continue;", "markOut(model, 'rate'); continue;"],
+  ['최종 429를 quota로', S, "return { kind: res.status === 429 ? 'rate' : 'http', status: res.status };", "return { kind: res.status === 429 ? 'quota' : 'http', status: res.status };"],
+  ['geminiJSON 배분 대기 제거', S, "if (aiGate() === 'wait') { ai.skipped++; return null; }", ''],
+  ['모델 균등 배분 제거', S, 'pickModel({ used: budget ? budget.used : {}, out: outNow() }, GEMINI_MODELS)', 'pickModel({ used: {}, out: outNow() }, GEMINI_MODELS)'],
+  ['브리핑 방향 확인 제거', S, 'const keep = prev && prev.dir === dir && prev.ai', 'const keep = prev && prev.ai'],
+  ['브리핑 90분 재사용 제거', S, 'const recent = ai && aiAt != null && now - aiAt >= 0 && now - aiAt < INDEX_AI_MIN_INTERVAL_MS;', 'const recent = false;'],
+  ['브리핑 실패 시 이전 판단 버림', S, 'if (fresh) { ai = fresh; aiAt = now; aiSig = sig; }', '{ ai = fresh; aiAt = now; aiSig = sig; }'],
+  ['브리핑 판단 당시 입력 대신 직전 회차 입력 비교', S, 'if (fresh) { ai = fresh; aiAt = now; aiSig = sig; }', 'if (fresh) { ai = fresh; aiAt = now; } aiSig = sig;'],
+  ['종목 루프 배분 확인 제거', F, "if (calls >= AI_CALLS_PER_RUN || gate !== 'go') {", 'if (calls >= AI_CALLS_PER_RUN) {'],
+  ['분석 시각 기록 제거', F, 'analysis[it.code] = { ...a, sig, at: now };', 'analysis[it.code] = { ...a, sig };'],
+  ['전부 제외 상태 판정 제거', F, 'else if (models.length && models.every((m) => budget.out[m])) {', 'else if (false) {'],
+  ['날 바뀜 quota→idle 해제 제거', F, "['quota', 'no-model', 'wait', 'off'].includes(prevState)", "['no-model', 'wait', 'off'].includes(prevState)"],
+  ['상태 파일 항상 쓰기', F, 'if (JSON.stringify(status) !== JSON.stringify(prevStatus)) {', 'if (true) {'],
+  ['예산 이어받기 안 함', F, 'const budget = startBudget(prevStatus?.budget, now);', 'const budget = startBudget(null, now);'],
+  ['리셋 1시간 전 무제한 제거', B, 'if (b.lastHour) return Infinity;', ''],
+  ['빠진 모델도 예산 전액', B, '(b.out[m] ? (b.used[m] || 0) : DAILY_PER_MODEL)', 'DAILY_PER_MODEL'],
+  ['국내장 가중치 3→1', B, 'isKrSession(ms) ? 3 :', 'isKrSession(ms) ? 1 :'],
+
+  // ---------- 뉴스·이유 고르기·비교 ----------
+  ['[과거시세] 겹치는 날 중복', F, '.filter(([d]) => d > last);', '.filter(([d]) => d >= last);'],
+  ['[뉴스] 기간 필터가 관련도 필터를 덮어씀', S, 'out = out.filter((it) => it.pubMs == null', 'out = items.filter((it) => it.pubMs == null'],
+  ['[뉴스] 같은 기사 하나만 제거', S, '  out = out.filter((it, i) => !out.slice(0, i).some((p) => sameStory(p.title, it.title, keys)));', ''],
+  ['[뉴스] 시세 안내 뒤로 제거', S, '  out = [...out.filter((it) => !priceOnly(it.title)), ...out.filter((it) => priceOnly(it.title))];', ''],
+  ['[비교] 실패 종목도 평균에', A, 'list.filter((q) => q && q.ok && Number.isFinite(q.changePct))', 'list.filter((q) => q && Number.isFinite(q.changePct))'],
+  ['[신고가] 오늘 봉 제외 제거', A, 'const prior = (lastIsToday ? closes.slice(0, -1) : closes).filter((v) => v > 0);', 'const prior = closes.filter((v) => v > 0);'],
+  ['[고르기] 나열 기사 미루기 제거', S, 'const weakTitle = (t) => roundupTitle(t) || REPORT_RE', 'const weakTitle = (t) => REPORT_RE'],
+  ['[고르기] 리포트 요약 뒤로 제거', S, 'const weakTitle = (t) => roundupTitle(t) || REPORT_RE.test(t) || SPEC_RE', 'const weakTitle = (t) => roundupTitle(t) || SPEC_RE'],
+  ['[이유] 전망 글 맨 뒤 안 함(봇)', S, 'const weakTitle = (t) => roundupTitle(t) || REPORT_RE.test(t) || SPEC_RE.test(t);', 'const weakTitle = (t) => roundupTitle(t) || REPORT_RE.test(t);'],
+  ['[이유] 전망 글 맨 뒤 안 함(화면)', A, 'const weakTitle = (t) => roundupTitle(t) || REPORT_RE.test(t) || SPEC_RE.test(t);', 'const weakTitle = (t) => roundupTitle(t) || REPORT_RE.test(t);'],
+  ['[이유] 물음 끝(…지속될까?) 못 봄', S, R`|횡보|(?:있을까|될까|갈까|할까)\s*\??\s*$/;`, '|횡보/;'],
+  ['[이유] 횡보 못 봄', S, R`|기술적\s*분석|횡보|`, R`|기술적\s*분석|`],
+
+  // ---------- 공시(OpenDART) ----------
+  ['[공시] 철회 제외 제거', D, " && !String(x.rm ?? '').includes('철'))", ')'],
+  ['[공시] 최신순 정렬 제거', D, '.sort((a, b) => (a.no < b.no ? 1 : a.no > b.no ? -1 : 0))', ''],
+  ['[공시] 5건 제한 제거', D, '.slice(0, KEEP);', ';'],
+  ['[공시] 공시 없음(013) 처리 제거', D, "if (status === '013') return []; // 기간 안에 공시 없음", ''],
+  ['[공시] 치명 오류 시 회차 중단 제거', D, "if (halted || !dartEnabled() || item?.market !== 'KR') return null;", "if (!dartEnabled() || item?.market !== 'KR') return null;"],
+  ['[공시] 우선주→보통주 회사 제거', D, R`return /^\d{5}[579]$/.test(c) ? map[c.slice(0, 5) + '0'] || null : null;`, 'return null;'],
+  ['[공시] 조회 기간 2주→1주', D, 'const LOOKBACK_DAYS = 14;', 'const LOOKBACK_DAYS = 7;'],
+  ['[공시] 최종 보고서만(last_reprt_at) 제거', D, "end_de: kstYmd(now), last_reprt_at: 'Y', ", 'end_de: kstYmd(now), '],
+  ['[공시] 표 7일 갱신 제거', D, ' || now - table.at > CORP_REFRESH_MS', ''],
+  ['[공시] 없음 목록 기억 제거', D, ' && !table.none.includes(c)', ''],
+  ['[공시] 새 종목 감지 제거', D, ' || unknown.length > 0;', ';'],
+  ['[공시] 재시도 간격 제거', D, 'if (!due || (table.tried && now - table.tried >= 0 && now - table.tried < retry)) return', 'if (!due) return'],
+  ['[공시] 첫 재시도 30분→6시간', D, 'const retry = table.at ? CORP_RETRY_MS : CORP_FIRST_RETRY_MS;', 'const retry = CORP_RETRY_MS;'],
+  ['[공시] 잘린 목록 검사 제거', D, 'if (n < MIN_LISTED) throw new Error(`고유번호 목록이 너무 적음(${n}개)`);', ''],
+  ['[공시] 오류 응답 상태 해석 제거', D, 'if (buf.length < 4 || buf.readUInt32LE(0) !== 0x04034b50) throw errorOf(buf);', ''],
+  ['[공시] 실패 시 시도 시각 남기기 제거', D, 'return { table, changed: true, error: e.message };', 'return { table, changed: false, error: e.message };'],
+  ['[공시] 표 이어받기 제거', D, 'map: ok ? prev.map : {},', 'map: {},'],
+  ['[공시] ZIP 크기를 로컬 헤더에서', D, 'const data = buf.subarray(start, start + size);', 'const data = buf.subarray(start, start + buf.readUInt32LE(local + 18));'],
+  ['[공시] 무압축 항목 처리 제거', D, 'if (method === 0) return data;', ''],
+  ['[공시] xml 아닌 항목 건너뛰기 제거', D, R`const xs = entries.filter((e) => /\.xml$/i.test(e.name));`, 'const xs = entries;'],
+  ['[공시] 배당을 중요 종류에서 제외', D, "'자사주', '배당', 'M&A', '주요사항']);", "'자사주', 'M&A', '주요사항']);"],
+  ['[공시] 예고 분류 제거', D, "['예고', /공시예고/], // 결산실적공시예고 = 발표 날짜 안내일 뿐 실적이 아님", ''],
+  ['[공시] 전환청구권 분류 제거', D, '|증권신고서|전환청구권행사|신주인수권행사|교환청구권행사/],', '|증권신고서/],'],
+  ['[공시] 키 없어도 실행', F, 'if (dartEnabled()) try {', 'if (true) try {'],
+  ['[공시] 상태 기록 제거', F, 'if (dartState) status.dart = dartState;', ''],
+  ['[공시] AI 입력에 공시 제거', F, 'history: history[it.code], disclosures: disclosures[it.code], schedule:', 'history: history[it.code], schedule:'],
+  ['[공시] 시그니처에 공시 제거', U, "${d ? `|d:${d}` : ''}`;", '`;'],
+  ['[공시] 프롬프트 오늘 표시 제거', S, "${ds === today ? '오늘' :", "${false ? '오늘' :"],
+
+  // ---------- 공시 일정 달력(봇) ----------
+  ['[일정] 최종 보고서만(last_reprt_at) 제거', D, "end_de: end, last_reprt_at: 'Y', ", 'end_de: end, '],
+  ['[일정] 설명 칸도 항목 이름으로', C, 'const isLabel = (c, re) => c.length <= 40 && re.test(c);', 'const isLabel = (c, re) => re.test(c);'],
+  ['[일정] 정정 전 표(앞쪽)를 씀', C, '    const row = rows[r];', '    const row = rows[rows.length - 1 - r];'],
+  ['[일정] 결산 분기 이름 빠짐', C, "{ '03': '1분기', '06': '2분기', '09': '3분기', '12': '4분기' }", '{}'],
+  ['[일정] IR 시각 빠짐', C, R`일\s*시(?:\s*및\s*장소)?$/, { time: true });`, R`일\s*시(?:\s*및\s*장소)?$/, { time: false });`],
+  ['[일정] 기준일 사유 구분 제거', C, "const k = /배당/.test(why) ? 'div' : /주주총회|주총/.test(why) ? 'meet' : 'rec';", "const k = 'rec';"],
+  ['[일정] 배당 지급일 빠짐', C, R`add(labeled(rows, /지급\s*예정\s*일/), 'div', '배당 지급', s);`, ''],
+  ['[일정] 주총 기준일 빠짐', C, R`add(labeled(rows, /의결권\s*행사\s*기준일/), 'meet'`, R`void (labeled(rows, /의결권\s*행사\s*기준일/), 'meet'`],
+  ['[일정] 매입 기간 끝 빠짐', C, 'if (!end && rows[a.r + 1] && /종료/.test(rows[a.r + 1][0]))', 'if (false)'],
+  ['[일정] 오후 시각 무시', C, "if (m[1] === '오후' && h < 12) h += 12;", ''],
+  ['[일정] 시각 콜론 공백 못 읽음', C, R`([01]?\d|2[0-3])\s*:\s*([0-5]\d)`, R`([01]?\d|2[0-3]):([0-5]\d)`],
+  ['[일정] 3시간 안에도 다시 만듦', C, 'now - prev.at >= CAL_REFRESH_MS', 'now - prev.at >= 0'],
+  ['[일정] 종목 바뀜 무시', C, ' || !sameCodes(prev, items) || prev.pv', ' || prev.pv'],
+  ['[일정] 판이 바뀌어도 3시간 기다림', C, ' || !sameCodes(prev, items) || prev.pv !== PARSER_V;', ' || !sameCodes(prev, items);'],
+  ['[일정] 본문 기억 안 함', C, ' && !docs[f.no]', ''],
+  ['[일정] 실패한 쪽 직전 일정 버림', C, 'else events.push(...keepPrev(it.code).filter((e) => e.k === k));', ''],
+  ['[일정] 오래된 배당락도 남김', C, 'if (got) { for (const e of got) if (inRange(e.d)) events.push', 'if (got) { for (const e of got) if (true) events.push'],
+  ['[일정] 실적 공시 날 발표 예정 남김', C, "if (e.k === 'earn' && /예정/.test(e.t) && filed.has(`${e.c}|${e.d}`)) return false;", ''],
+  ['[일정] 같은 일정 둘', C, 'if (seen.has(key)) return false;', ''],
+  ['[일정] 지문 목록에서 빠짐', F, "'status.json', 'calendar.json'];", "'status.json'];"],
+  ['[일정] 고유번호 표 안 넘김', F, 'if (corp.table.at) corpMap = corp.table.map;', ''],
+  ['[일정] EUC-KR로 안 읽음', D, "const u = b.toString('utf8'), k = new TextDecoder('euc-kr').decode(b);", "const u = b.toString('utf8'), k = u;"],
+  ['[일정] 깨진 UTF-8도 EUC-KR로', D, 'return hangulScore(k) >= hangulScore(u) ?', 'return true ?'],
+  ['[일정] 한자 감점 없음', D, 'else if (c >= 0x4e00 && c <= 0x9fff) n--;', ''],
+  ['[일정] UTF-16 BOM 무시', D, "if (b[0] === 0xff && b[1] === 0xfe) return { text: new TextDecoder('utf-16le').decode(b), enc: 'utf16le' };", ''],
+  ['[일정] 접수번호 파일 우선 안 함', D, 'const main = no ? xs.find((e) => file(e) === `${no}.xml`) : null;', 'const main = null;'],
+  ['[일정] 첨부도 본문 후보', D, R`const own = xs.filter((e) => !/_\d+\.xml$/.test(file(e)));`, 'const own = xs;'],
+  ['[일정] 가장 큰 파일 대신 첫 파일', D, 'return (own.length ? own : xs).reduce((a, b) => (b.size > a.size ? b : a));', 'return (own.length ? own : xs)[0];'],
+  ['[일정] CDATA 안 풂', C, R`.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')`, ''],
+  ['[일정] 이스케이프된 표 안 풂', C, 'for (let i = 0; i < 2 && /&lt;', 'for (let i = 0; i < 0 && /&lt;'],
+  ['[일정] 속성에만 있는 값 무시', C, R`.replace(/<(TU|TE|TD)\b[^>]*?\bAUNITVALUE`, R`.replace(/<(XX)\b[^>]*?\bAUNITVALUE`],
+  ['[일정] 여는 TR로 줄 안 나눔', C, R`.replace(/<\/?TR\b[^>]*>|`, R`.replace(/<\/TR\b[^>]*>|`],
+  ['[일정] 여는 칸 태그로 안 나눔', C, R`.replace(/<\/?(?:TD|TH|TE|TU)\b[^>]*>/gi, '\t')`, R`.replace(/<\/(?:TD|TH|TE|TU)\b[^>]*>/gi, '\t')`],
+  ['[일정] 칸 안 줄바꿈(&cr;) 그대로', C, ".replace(/&cr;/gi, ' ')", ''],
+  ['[일정] 원본 줄바꿈으로 줄 나눔', C, R`.replace(/[\r\n\t]+/g, ' ')`, ''],
+  ['[일정] 꾸밈(style) 글도 칸으로', C, R`.replace(/<(style|script)\b[\s\S]*?<\/\1\s*>/gi, ' ')`, ''],
+  ['[일정] 붙여 쓴 날짜 못 읽음', C, R` || t.match(/(?<!\d)(20\d{2})(\d{2})(\d{2})(?!\d)/)`, ''],
+  ['[일정] 날짜 뒤 시각 위치 틀림', C, 'timeIn(cell.slice(f.end))', R`timeIn(cell.slice(cell.search(/20\d{2}/) + 10))`],
+  ['[일정] 아래 줄 날짜 안 봄', C, '      for (let k = r + 1; k <= r + 2 && k < rows.length', '      for (let k = r + 1; k <= r && k < rows.length'],
+  ['[일정] 아래 줄을 다음 항목까지 넘어 봄', C, R` && !/^\d+\./.test(rows[k][0]); k++) {`, '; k++) {'],
+  ["[일정] 값이 '-'여도 아래 줄 봄", C, "    if (!row.slice(i + 1).includes('-')) {", '    if (true) {'],
+  ['[일정] 아래 줄 시각을 다음 칸에서만', C, ' || rows[k].slice(j + 1).map(timeIn).find(Boolean) || null', " || timeIn(rows[k][j + 1] || '') || null"],
+  ['[일정] 여러 날 IR 끝 날짜 빠짐', C, 'const until = hit?.d && rows[hit.r].map(dateIn).find((d) => d && d > hit.d);', 'const until = null;'],
+  ['[일정] IR 실시목적·방법 못 읽음', C, R`textOf(rows, /(?:개최|실시)\s*목적/), textOf(rows, /(?:개최|실시)\s*방법/)]`, R`textOf(rows, /개최\s*목적/), textOf(rows, /개최\s*방법/)]`],
+  ['[일정] 판(pv) 무시', C, 'const sameV = prev?.pv === PARSER_V;', 'const sameV = true;'],
+  ['[일정] 판(pv) 안 남김', C, 'return { v: 1, pv: PARSER_V, at: now,', 'return { v: 1, at: now,'],
+  ['[일정] 자회사 공시도 본문', C, ' && !SUB_RE.test(f.title)', ''],
+  ['[일정] 원문 없음 계속 다시 받음', C, "if (/^01[34]$/.test(e?.status || '') && no.slice(0, 8) < stale) docs[no] = [];", ''],
+  ['[일정] 막 올라온 원문 없음도 기억', C, ' && no.slice(0, 8) < stale) docs[no] = [];', ') docs[no] = [];'],
+  ['[일정] 진단 없음', C, 'else diag.push(diagOf(no, titleOf.get(no), doc));', ''],
+  ['[일정] 진단 다음 회차에 버림', C, 'diag: pickDiag([...diag, ...keptDiag])', 'diag: pickDiag(diag)'],
+  ['[일정] 진단 종류 섞기 없음', C, 'for (const d of sorted) if (!kinds.has(kind(d.t))) { kinds.add(kind(d.t)); out.push(d); }', ''],
+  ['[일정] 진단 수 제한 없음', C, 'return out.slice(0, DIAG_MAX);', 'return out;'],
+
+  // ---------- 공시 일정 달력(화면) ----------
+  ['[달력] 5주 줄이기 없음', CJ, 'return cells.slice(35).every((c) => !c.inMonth) ? cells.slice(0, 35) : cells;', 'return cells;'],
+  ['[달력] 올해가 아니어도 연도 없음', CJ, 'today && d.slice(0, 4) !== today.slice(0, 4)', 'false'],
+  ['[달력] 권리 기준일 묶음 빠짐', CJ, "rec: 'meet'", "rec: 'rec'"],
+  ['[달력] 이상한 코드로 주소', CJ, R`/^[A-Za-z.\-]{1,10}$/.test(e.c || '')`, "/./.test(e.c || '')"],
+  ['[달력] 한국 날짜 대신 UTC', CJ, 'ymdOfUtc(ms + 9 * 3600e3)', 'ymdOfUtc(ms)'],
+  ['[달력] 지난 공시 종류 빠짐', CJ, "tag && tag !== '기타' ? `${tag} 공시` : '공시'", "'공시'"],
+
+  // ---------- 21차 — 카드 다음 일정 · AI 입력에 일정 ----------
+  ['[다음 일정] 지난 공시도', A, "&& e.d >= today && e.d <= until && e.k !== 'disc' && e.t !== '실적 공시');", "&& e.d >= today && e.d <= until && e.t !== '실적 공시');"],
+  ['[다음 일정] 이미 낸 실적 공시도', A, "&& e.d >= today && e.d <= until && e.k !== 'disc' && e.t !== '실적 공시');", "&& e.d >= today && e.d <= until && e.k !== 'disc');"],
+  ['[다음 일정] 지난 날도', A, '&& e.d >= today && e.d <= until && e.k', '&& e.d <= until && e.k'],
+  ['[다음 일정] 2주 넘어도', A, '&& e.d >= today && e.d <= until && e.k', '&& e.d >= today && e.k'],
+  ['[다음 일정] 그날 모두', A, 'items: day.slice(0, 2).map(label)', 'items: day.map(label)'],
+  ['[다음 일정] 시각 빠짐', A, "${e.t}${e.tm ? ` ${e.tm}` : ''}${e.m === 'US'", "${e.t}${e.m === 'US'"],
+  ['[다음 일정] 미국 장 전후 빠짐', A, "${e.m === 'US' && e.k === 'earn' && e.s ? ` · ${e.s}` : ''}`;", '`;'],
+  ['[일정→AI] 일정 안 넘김', F, 'disclosures: disclosures[it.code], schedule: scheduleOf(it), now });', 'disclosures: disclosures[it.code], now });'],
+  ['[일정→AI] 지난 공시도', F, "e.c === it.code && e.k !== 'disc' && e.t !== '실적 공시' &&", "e.c === it.code && e.t !== '실적 공시' &&"],
+  ['[일정→AI] 이미 낸 실적 공시도', F, "e.c === it.code && e.k !== 'disc' && e.t !== '실적 공시' &&", "e.c === it.code && e.k !== 'disc' &&"],
+  ['[일정→AI] 기간 밖도', F, ' && e.d >= from && e.d <= to);', ');'],
+  ['[일정→AI] 기간을 서울 날짜로', F, 'const tz = MARKET_TZ[it.market] || MARKET_TZ.US, from', 'const tz = MARKET_TZ.KR, from'],
+  ['[일정→AI] 일정 줄 빠짐', S, '(sched.length ? `가까운 일정(', '(false ? `가까운 일정('],
+  ['[일정→AI] 상대 날짜를 서울 날짜로', S, "timeZone: us ? 'America/New_York' : 'Asia/Seoul', year", "timeZone: 'Asia/Seoul', year"],
+  ['[일정→AI] 오늘·어제·내일 없음', S, "return k === 0 ? '오늘' : k === -1 ? '어제' : k === 1 ? '내일' :", 'return'],
+
+  // ---------- 22차 — 종목 60개 · AI 종합분석 대상 고르기 ----------
+  ['[편집] 종목 상한 60→40', U, 'export const MAX_ITEMS = 60;', 'export const MAX_ITEMS = 40;'],
+  ['[편집] 삭제 처리 제거', W, 'const next = items.filter((x) => !removeSet.has(x.code.toUpperCase()));', 'const next = [...items];'],
+  ['[편집] AI 끔 표시 버림', U, '...(x.ai === false ? { ai: false } : {}) });', '});'],
+  ['[편집] AI만 바꾼 요청 거절', W, 'if (!add.length && !remove.length && !aiRaw.length)', 'if (!add.length && !remove.length)'],
+  ['[편집] 한 번에 바꿀 수 제한 없음', W, 'if (add.length + remove.length + aiRaw.length > MAX_CHANGES)', 'if (false)'],
+  ['[편집] AI 켜고 끄기 무시', W, 'for (const [code, on] of req.ai || []) {', 'for (const [code, on] of []) {'],
+  ['[편집] AI 켬이 표시를 안 지움', W, 'if (on && x.ai === false) { delete x.ai; aiOn.push(x); }', 'if (on && x.ai === false) { aiOn.push(x); }'],
+  ['[편집] 이미 꺼진 종목도 바뀜으로 셈', W, 'else if (!on && x.ai !== false) { x.ai = false; aiOff.push(x); }', 'else if (!on) { x.ai = false; aiOff.push(x); }'],
+  ['[편집] AI 끔을 파일에 안 씀', W, `\${x.ai === false ? ', "ai": false' : ''}`, ''],
+  ['[편집] AI 바뀜을 변경으로 안 셈', W, ' || r.aiOn.length > 0 || r.aiOff.length > 0;', ';'],
+  ['[AI] 꺼 둔 종목도 분석', F, '.filter(({ it, q }) => it.ai !== false && q && q.ok', '.filter(({ it, q }) => q && q.ok'],
+  ['[AI] 시세에 AI 끔 표시 안 함', F, 'for (const q of quotes) if (aiOff.has(q.code)) q.ai = false;', ''],
+  ['[AI] 왜 움직였나에 꺼 둔 종목 AI 진단', A, 'if (q.ai !== false && a && a.headline && aiFresh(q, a))', 'if (a && a.headline && aiFresh(q, a))'],
+];
+
+const args = process.argv.slice(2);
+const CHECK = args.includes('--check');
+const ONLY = args.find((a) => a !== '--check');
+const pick = ONLY ? new RegExp(ONLY) : null;
+const list = MUTANTS.filter(([name]) => !pick || pick.test(name));
+
+const cache = new Map();
+const original = (rel) => { if (!cache.has(rel)) cache.set(rel, fs.readFileSync(path.join(PAGES, rel), 'utf8')); return cache.get(rel); };
+const count = (s, find) => s.split(find).length - 1;
+
+// 찾을 글 점검 — 파일마다 정확히 한 번
+let bad = 0;
+for (const [name, rel, find] of list) {
+  const n = count(original(rel), find);
+  if (n !== 1) { bad++; console.log(`⚠️ ${n}개: ${name} (${rel})`); }
+}
+if (CHECK || bad) {
+  console.log(`변이 ${list.length}개 중 대상 문자열 문제 ${bad}개`);
+  process.exit(bad ? 1 : 0);
+}
+
+let caught = 0, broken = 0;
+for (const [name, rel, find, repl] of list) {
+  const file = path.join(PAGES, rel), src = original(rel);
+  let out = '', code = 0;
+  try {
+    fs.writeFileSync(file, src.replace(find, () => repl));
+    try { out = execFileSync(process.execPath, ['scripts/selftest.mjs'], { cwd: PAGES, encoding: 'utf8', timeout: 180000, stdio: ['ignore', 'pipe', 'pipe'] }); }
+    catch (e) { code = e.status ?? 1; out = `${e.stdout || ''}${e.stderr || ''}`; }
+  } finally { fs.writeFileSync(file, src); }
+  const ran = /결과: \d+개 중/.test(out);
+  const fails = out.split('\n').filter((l) => l.startsWith('  ❌')).map((l) => l.slice(4, 44).trim());
+  if (!ran) { broken++; console.log(`⚠️ 실행 오류  ${name}  — 테스트가 끝까지 돌지 않음(문법 오류 등, 잡은 것으로 안 셈)`); }
+  else if (code !== 0 || fails.length) { caught++; console.log(`✅ 잡음  ${name}  ← ${fails.join(' | ')}`); }
+  else console.log(`❌ 놓침  ${name}`);
+}
+console.log(`\n변이 ${list.length}개 중 ${caught}개 검출${broken ? ` · 실행 오류 ${broken}개` : ''}`);
+process.exitCode = caught === list.length ? 0 : 1;

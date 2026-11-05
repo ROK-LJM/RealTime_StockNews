@@ -2,7 +2,7 @@
 // fetch.mjs와 selftest.mjs가 함께 쓴다. 여기 함수는 순수 로직이라 오프라인으로 검증할 수 있다.
 import fs from 'node:fs';
 
-export const MAX_ITEMS = 40;   // 추적 종목 최대 개수
+export const MAX_ITEMS = 60;   // 추적 종목 최대 개수 — 5분 회차 시간(40종목 기준 가장 무거운 회차 약 1분)·무료 뉴스 요청을 생각한 안전장치
 const KR_RE = /^\d{6}$/;
 const US_RE = /^[A-Z][A-Z0-9.\-]{0,9}$/; // AAPL, BRK.B, BF-B …
 
@@ -36,7 +36,8 @@ export function validateWatchlist(cfg) {
     }
     if (seen.has(code)) { warnings.push(`${at} 중복 코드 ${code} — 제외`); return; }
     seen.add(code);
-    items.push({ code, market, name: typeof x.name === 'string' ? x.name.trim().slice(0, 30) : '' });
+    // ai: false = 이 종목은 AI 종합분석을 하지 않음(종목 편집에서 끔 — 무료 AI 한도를 고른 종목에만). 없으면 켜짐
+    items.push({ code, market, name: typeof x.name === 'string' ? x.name.trim().slice(0, 30) : '', ...(x.ai === false ? { ai: false } : {}) });
   });
   if (items.length > MAX_ITEMS) {
     warnings.push(`종목 ${items.length}개 — 최대 ${MAX_ITEMS}개만 사용, 제외: ${items.slice(MAX_ITEMS).map((x) => x.code).join(', ')}`);

@@ -279,6 +279,11 @@ src.retryTiming.baseMs = 1; // 재시도 대기를 실제로 기다리지 않음
 console.log('[selftest] 오프라인 자체 테스트 — 외부 접속 없음\n');
 
 // ===== 단위 =====
+await test('설정 검증: AI 끔 표시(ai: false)만 남김 — true·글자 등은 버림(기본 켜짐)', () => {
+  const r = util.validateWatchlist({ items: [{ code: '005930', ai: false }, { code: 'AAPL', ai: 'false' }, { code: 'MSFT', ai: true }, { code: '000660' }] });
+  assert.deepEqual(r.items.map((x) => x.ai), [false, undefined, undefined, undefined]);
+  assert.equal(r.warnings.length, 0);
+});
 await test('설정 검증: 숫자로 적은 국내 코드의 앞자리 0 보정', () => {
   const r = util.validateWatchlist({ items: [{ code: 5930, market: 'KR', name: '삼성' }] });
   assert.equal(r.items[0].code, '005930');
@@ -294,10 +299,10 @@ await test('설정 검증: 국내 6자리 코드를 US로 잘못 적으면 KR로
   assert.deepEqual(r.items[0], { code: '222800', market: 'KR', name: '심텍' });
   assert.ok(r.warnings[0].includes('KR로 보정'));
 });
-await test('설정 검증: 40개 초과분 제외 · items 누락', () => {
-  const r = util.validateWatchlist({ items: Array.from({ length: 45 }, (_, i) => ({ code: String(100000 + i) })) });
-  assert.equal(r.items.length, 40);
-  assert.ok(r.warnings.some((w) => w.includes('최대 40')));
+await test('설정 검증: 60개 초과분 제외 · items 누락', () => {
+  const r = util.validateWatchlist({ items: Array.from({ length: 65 }, (_, i) => ({ code: String(100000 + i) })) });
+  assert.equal(r.items.length, 60);
+  assert.ok(r.warnings.some((w) => w.includes('최대 60')));
   assert.equal(util.validateWatchlist({}).items.length, 0);
   assert.equal(util.validateWatchlist(null).warnings[0], 'items 배열이 없습니다');
 });
@@ -719,6 +724,20 @@ await test('휴장일: 장 시간이어도 시세가 마감이면 뉴스만 바�
   assert.equal(geminiCalls(), 0, '휴장 — 등락 그대로, 뉴스만 바뀜 → 재분석·재판단 없음');
   await pipeline(root, { newsTag: 'c' }, NOW_KR + 200 * MIN);                                    // 장이 열려 있으면 다시
   assert.ok(briefCalls() > 0 && geminiCalls() > briefCalls(), '지수 브리핑·종목 분석 모두 갱신');
+});
+await test('AI를 꺼 둔 종목(ai: false): 급등락이어도 종합분석 안 함(한도 안 씀) · 직전 분석 버림 · 시세에 ai: false · 급등락 기록은 뉴스·공시 이유', async () => {
+  const root = workspace([{ code: '005930', market: 'KR', name: '삼성전자', ai: false }, { code: '000660', market: 'KR', name: 'SK하이닉스' }, { code: 'AAPL', market: 'US', name: '애플' }]);
+  writeData(root, 'analysis.json', { '005930': { headline: '예전 분석', summary: '', factors: [], outlook: '', sig: 'x', at: NOW_KR - 3600e3 } });
+  await pipeline(root, { usPct: { AAPL: 3 } }); // 삼성전자 +4.2% · 애플 +3% 급등
+  const bodies = NET.bodies.filter((b, i) => isGemini(NET.calls[i]));
+  assert.ok(!bodies.some((b) => b.includes("'삼성전자'")), 'AI를 꺼 둔 종목은 요청하지 않음');
+  assert.ok(bodies.some((b) => b.includes("'애플'")), '켜 둔 종목은 그대로');
+  const an = read(root, 'analysis.json');
+  assert.ok(!an['005930'] && an.AAPL, '직전 분석도 버림');
+  const qs = read(root, 'quotes.json').quotes;
+  assert.equal(qs.find((q) => q.code === '005930').ai, false);
+  assert.ok(!('ai' in qs.find((q) => q.code === 'AAPL')), '켜 둔 종목엔 표시 없음');
+  assert.notEqual(read(root, 'moves.json')['005930'][0].s, 'ai', '급등락 기록 이유는 뉴스·공시');
 });
 await test('해외 종목 AI 분석: 미국 증시 관점 · 달러 소수 둘째 자리 · 수급 줄 없음(국내는 그대로)', async () => {
   const root = workspace();
@@ -1408,6 +1427,7 @@ await test('지난 AI 분석(app.js): 지금 시세의 거래일에 만든 분�
   assert.equal(f.whyOf(q).src, '뉴스', '전날 분석은 건너뛰고 오늘 뉴스');
   ctx.state.analysis.A = { headline: '오늘 이유', at: at('2026-10-23T09:03:00+09:00') };
   assert.equal(f.whyOf(q).text, '오늘 이유');
+  assert.equal(f.whyOf({ ...q, ai: false }).src, '뉴스', 'AI를 꺼 둔 종목은 AI 진단을 쓰지 않음(남아 있어도)');
 });
 await test('상장 시장(quotes.json exch): 검색 목록의 국내 KOSPI·KOSDAQ · 미국 거래소 · 목록에 없으면 없음 · 시세 안내 기사는 "시세" 표시·호재/악재 집계 제외', async () => {
   const root = workspace();
@@ -1942,16 +1962,35 @@ await test('종목 편집 반영: 추가·삭제 · 형식 오류·중복 건너
   assert.equal(crlf.changed, true);
   assert.ok(crlf.cfg.items.some((x) => x.code === 'NVDA'));
 });
-await test('종목 편집 반영: 최대 40개 · 소문자 티커·숫자 코드 보정 · 이름 속 @멘션·서식 순화', async () => {
-  const items = Array.from({ length: 39 }, (_, i) => ({ code: String(100000 + i), market: 'KR', name: `종목${i}` }));
+await test('종목 편집 반영: 최대 60개 · 소문자 티커·숫자 코드 보정 · 이름 속 @멘션·서식 순화', async () => {
+  const items = Array.from({ length: 59 }, (_, i) => ({ code: String(100000 + i), market: 'KR', name: `종목${i}` }));
   const root = workspace(items);
   const r = applyIn(root, issueBody({ add: [{ code: 'msft', name: '@everyone `x`' }, { code: 'AAPL' }, { code: 'TSLA' }] }));
-  assert.equal(r.cfg.items.length, 40);
-  assert.equal(r.cfg.items[39].code, 'MSFT', '소문자 티커 대문자로');
-  assert.ok(r.result.includes('AAPL(최대 40개)') && r.result.includes('TSLA(최대 40개)'));
+  assert.equal(r.cfg.items.length, 60);
+  assert.equal(r.cfg.items[59].code, 'MSFT', '소문자 티커 대문자로');
+  assert.ok(r.result.includes('AAPL(최대 60개)') && r.result.includes('TSLA(최대 60개)'));
   assert.ok(!r.result.includes('@everyone') && r.result.includes('＠everyone'), '멘션 알림 방지');
   const pad = applyIn(workspace(), issueBody({ add: [{ code: 5930 + 1, market: 'KR', name: '숫자코드' }] }));
   assert.ok(pad.cfg.items.some((x) => x.code === '005931'), '숫자로 온 국내 코드는 6자리로');
+});
+await test('종목 편집 반영: AI 켜고 끄기 — 끄면 "ai": false 한 줄 · 켜면 표시 지움 · 이미 그 상태면 바뀐 것 없음 · 목록에 없는 종목 알림 · 새로 추가하며 끄기', async () => {
+  const root = workspace(); // 삼성전자 · SK하이닉스 · 애플
+  const off = applyIn(root, issueBody({ ai: { '005930': false, aapl: false, ZZZZ: false, '000660': 'no' } }));
+  assert.equal(off.changed, true);
+  assert.equal(off.output, 'changed=true\n');
+  assert.deepEqual(off.cfg.items.map((x) => [x.code, x.ai]), [['005930', false], ['000660', undefined], ['AAPL', false]], '소문자 티커도 · 참·거짓이 아닌 값은 무시');
+  assert.ok(cfgRaw(root).includes('{ "code": "005930", "market": "KR", "name": "삼성전자", "ai": false }'), cfgRaw(root));
+  assert.ok(off.result.includes('AI 분석 끔: 삼성전자(005930), 애플(AAPL)') && off.result.includes('목록에 없어 AI 설정 안 함: ZZZZ'), off.result);
+  assert.ok(off.result.includes('총 3개 · AI 분석 1개'), off.result);
+  const on = applyIn(root, issueBody({ ai: { '005930': true, '000660': true } }));
+  assert.equal(on.changed, true);
+  assert.equal(on.cfg.items[0].ai, undefined, '켜면 표시를 지운다(기본 켜짐)');
+  assert.ok(on.result.includes('AI 분석 켬: 삼성전자(005930)') && !on.result.includes('SK하이닉스'), '이미 켜진 종목은 바뀐 것으로 안 셈');
+  const same = applyIn(root, issueBody({ ai: { '000660': true, AAPL: false } })); // 이미 켜짐 · 이미 꺼짐
+  assert.equal(same.changed, false);
+  assert.ok(same.result.startsWith('ℹ️ 바뀐 내용이 없습니다'));
+  const addOff = applyIn(root, issueBody({ add: [{ code: 'NVDA', market: 'US', name: '엔비디아' }], ai: { NVDA: false } }));
+  assert.deepEqual(addOff.cfg.items.find((x) => x.code === 'NVDA'), { code: 'NVDA', market: 'US', name: '엔비디아', ai: false }, '새로 추가하면서 끄기');
 });
 await test('종목 편집 반영: 잘못된 요청·읽을 수 없는 설정 파일이면 아무것도 바꾸지 않음', async () => {
   const bad = [
@@ -1959,7 +1998,8 @@ await test('종목 편집 반영: 잘못된 요청·읽을 수 없는 설정 파
     issueBody('{ 깨진 json'),
     issueBody({ add: [], remove: [] }),
     issueBody([1, 2]),
-    issueBody({ add: Array.from({ length: 61 }, (_, i) => ({ code: String(100000 + i) })) }),
+    issueBody({ add: Array.from({ length: 151 }, (_, i) => ({ code: String(100000 + i) })) }),
+    issueBody({ ai: {} }), // AI 켜고 끄기도 비어 있으면 바꿀 것 없음
     issueBody({ add: [{ code: 'NVDA' }] }) + 'x'.repeat(20001), // 요청은 멀쩡해도 본문이 너무 길면 거절
   ];
   for (const body of bad) {

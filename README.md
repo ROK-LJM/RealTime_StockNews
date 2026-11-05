@@ -5,7 +5,7 @@
 - **GitHub Actions 봇**이 약 5분마다 시세·뉴스를 받아 `docs/data/*.json`으로 저장 (공개 저장소는 Actions 무제한 무료)
 - **GitHub Pages**가 그 JSON을 정적으로 서빙 (무료)
 - 데이터: 네이버 금융(국내 실시간 시세·수급) · Yahoo Finance(해외 시세·과거 일봉·환율) · Google 뉴스 RSS · Google Gemini(선택, AI 요약 — `GEMINI_API_KEY` Secret, 무료 한도를 국내 장 시간 우선으로 배분) · 금융감독원 OpenDART(선택, 국내 종목 최근 공시 — `DART_API_KEY` Secret)
-- 추적 종목: `config/watchlist.json` 파일로 관리
+- 추적 종목: `config/watchlist.json` 파일로 관리(최대 60개, 종목별 `"ai": false`면 그 종목은 AI 종합분석을 하지 않음)
 
 > 무료 Pages는 **공개(public) 저장소**여야 합니다. 종목 코드 목록이 공개되니(수량·금액은 아님) 감안하세요.
 >
@@ -55,7 +55,8 @@ git push -u origin main
 ---
 
 ## 종목 추가/삭제
-대시보드의 **종목 편집**(연필) 버튼 → 종목명·코드·티커로 검색해 추가·삭제 → **저장**하면 1~2분 뒤 반영됩니다.
+대시보드의 **종목 편집**(연필) 버튼 → 종목명·코드·티커로 검색해 추가·삭제(최대 60개) → **저장**하면 1~2분 뒤 반영됩니다.
+- 칩마다 있는 **AI**로 종목별 AI 종합분석을 켜고 끌 수 있습니다(꺼 둔 종목은 무료 AI 한도를 쓰지 않음 · AI 모두 켜기/끄기).
 - 저장은 제목이 `watchlist:`인 깃허브 이슈로 변경 요청을 남기고, 봇(`.github/workflows/watchlist.yml`)이 저장소 주인의 요청만 반영합니다.
 - 토큰 없이: 저장 때 열리는 깃허브 창에서 **Create** 한 번 / 버튼 한 번으로: **이슈 쓰기(Issues: Read and write) 권한만 있는** Fine-grained 토큰을 편집 창에 넣어 두기(그 브라우저에만 저장).
 - 검색용 전체 종목 목록은 봇(`stocklist.yml`)이 매일 07:40 KST에 만듭니다.
@@ -78,6 +79,7 @@ git push -u origin main
 ```bash
 cd pages
 node scripts/selftest.mjs   # 오프라인 자체 테스트 (외부 접속 없음)
+node scripts/mutate.mjs     # 변이 검사(개발용 — 일부러 망가뜨려 테스트가 잡는지, 수십 분 · 도는 동안 코드 수정 금지 · --check는 대상만 점검)
 node scripts/fetch.mjs      # 데이터 JSON 생성 (외부 데이터 소스에 접속함)
 node scripts/serve.mjs      # http://localhost:5175 에서 확인
 ```
@@ -98,7 +100,7 @@ pages/
   .github/workflows/update.yml   5분마다 데이터 갱신 + 커밋
   .github/workflows/watchlist.yml  '종목 편집' 이슈 → watchlist.json 반영 → 시세 갱신 실행
   .github/workflows/stocklist.yml  매일 검색용 전체 종목 목록 갱신
-  config/watchlist.json          추적 종목 목록
+  config/watchlist.json          추적 종목 목록(최대 60개 · "ai": false = AI 종합분석 끔)
   scripts/
     fetch.mjs                    시세·뉴스 → docs/data/*.json 생성(급등락 기록·파일 지문 포함)
     sources.mjs                  시세·뉴스·수급 수집, 태깅, 분위기 산출, AI(Gemini)
@@ -109,6 +111,7 @@ pages/
     watchlist-apply.mjs          '종목 편집' 요청 검증·반영
     util.mjs                     설정 검증·원자적 쓰기 등 공통 유틸
     selftest.mjs                 오프라인 자체 테스트(가짜 네트워크)
+    mutate.mjs                   변이 검사(개발용 — 핵심 줄을 일부러 망가뜨려 자체 테스트가 잡는지)
     serve.mjs                    로컬 미리보기용(배포 미사용, --mock-github로 편집 저장 시험)
     make-icons.mjs               홈 화면 아이콘 PNG 생성(로고 모양을 직접 그림)
   docs/                          ← GitHub Pages가 서빙하는 폴더

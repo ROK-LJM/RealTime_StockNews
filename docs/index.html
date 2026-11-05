@@ -106,7 +106,7 @@
     <details class="help">
       <summary>종목 추가·삭제하는 법</summary>
       <div>
-        위의 <b>종목 편집</b> 버튼 → 종목명·코드·티커로 검색해 추가하거나 ✕로 삭제 → <b>저장</b>. 1~2분 뒤 자동 반영됩니다(최대 40개).
+        위의 <b>종목 편집</b> 버튼 → 종목명·코드·티커로 검색해 추가하거나 ✕로 삭제 → <b>저장</b>. 1~2분 뒤 자동 반영됩니다(최대 60개).
         직접 고치려면 저장소의 <code>config/watchlist.json</code> 파일을 깃허브에서 편집해도 됩니다. 예:
         <pre>{
   "items": [
@@ -143,7 +143,9 @@
       <input id="edSearch" type="search" autocomplete="off" spellcheck="false" enterkeyhint="search"
         placeholder="종목명·코드·티커 검색 (예: 엔비디아, 삼성전기, 005930, NVDA)" aria-label="종목 검색" />
       <div id="edResults" class="ed-results" aria-live="polite"></div>
-      <div class="ed-sec"><span>내 종목 <b id="edCount"></b></span><span class="muted">✕ 누르면 삭제 예정</span></div>
+      <div class="ed-sec"><span>내 종목 <b id="edCount"></b><span class="ed-aic">AI 분석 <b id="edAiCount"></b></span></span>
+        <span class="ed-aibtns"><button id="edAiAll" type="button">AI 모두 켜기</button><button id="edAiNone" type="button">AI 모두 끄기</button></span></div>
+      <div class="ed-hint ed-aihint">✕ 누르면 삭제 예정 · <b>AI</b>를 누르면 그 종목의 AI 종합분석을 켜고 꺼요(꺼 둔 종목은 무료 AI 한도를 쓰지 않아요)</div>
       <div id="edList" class="ed-list"></div>
       <div id="edMsg" class="ed-msg" role="status"></div>
       <div class="ed-actions">

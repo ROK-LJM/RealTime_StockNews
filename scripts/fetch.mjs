@@ -121,6 +121,9 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
     quotes.forEach((q) => { quotesByCode[q.code] = q; });
     // 상장 시장(검색 목록 기준: 국내 KOSPI·KOSDAQ, 미국 NASDAQ·NYSE 등) — 화면이 종목마다 같은 시장 지수와 비교한다
     for (const q of quotes) { const e = exchOf.get(q.code); if (e) q.exch = e; }
+    // AI를 꺼 둔 종목(종목 편집) — 화면이 그 카드에 AI 대기 안내를 띄우지 않고, 편집 창이 지금 상태를 알 수 있게
+    const aiOff = new Set(items.filter((it) => it.ai === false).map((it) => it.code));
+    for (const q of quotes) if (aiOff.has(q.code)) q.ai = false;
     if (quotes.some((q) => q.ok)) {
       const prevQuotesFile = readJson('quotes.json');
       // 미국 시간외 가격(ext) — 정규장 밖 종목에만. 시간외 시간대(프리 04:00~09:30·애프터 16:00~20:00 ET)에만 새로 받고,
@@ -258,6 +261,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
   //       한도에 걸린 종목은 이전 분석을 그대로 유지하고 다음 회차에 갱신되므로 화면에서 사라지지 않는다.
   //    ③ 하루 예산을 장 시간에 맞춰 나눠 쓴다(aibudget.mjs) — 지금 쓸 차례가 아니면 ②와 같이 다음 회차로 미룬다.
   //    ④ 시세를 하나도 못 받은 회차엔 손대지 않는다 — 급등락 대상이 '없음'으로 보여 기존 분석을 {}로 지우던 문제 방지.
+  //    ⑥ 종목 편집에서 AI를 꺼 둔 종목(ai: false)은 분석하지 않는다 — 무료 한도를 고른 종목에만(직전 분석도 버린다).
   //    ⑤ 공시 일정 달력의 가까운 일정(그 시장 날짜로 그제~7일 뒤 — 실적 발표 예정·IR·배당락 등)을 원인 후보로 함께 넘긴다.
   //       시그니처에는 넣지 않는다(일정만 바뀌었다고 다시 분석하지 않음 — 새 공시는 공시 쪽 시그니처로 이미 다시 분석된다).
   if (!Object.values(quotesByCode).some((q) => q && q.ok)) console.warn('  ! 시세 없음 — analysis.json 유지');
@@ -272,7 +276,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
     };
     const movers = items
       .map((it) => ({ it, q: quotesByCode[it.code] }))
-      .filter(({ q }) => q && q.ok && Math.abs(q.changePct ?? 0) >= STOCK_ANALYSIS_THRESHOLD)
+      .filter(({ it, q }) => it.ai !== false && q && q.ok && Math.abs(q.changePct ?? 0) >= STOCK_ANALYSIS_THRESHOLD)
       .sort((a, b) => Math.abs(b.q.changePct ?? 0) - Math.abs(a.q.changePct ?? 0));
     let calls = 0, deferred = 0, waited = 0;
     for (const { it, q } of movers) {

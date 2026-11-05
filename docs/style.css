@@ -488,7 +488,11 @@ input::placeholder { color: var(--muted); }
 .ed-act { margin-left: auto; font-size: 12.5px; font-weight: 700; white-space: nowrap; }
 .ed-row[disabled] .ed-act { color: var(--muted); }
 .ed-hint { padding: 4px 2px; font-size: 12.5px; color: var(--muted); }
-.ed-sec { display: flex; justify-content: space-between; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12.5px; }
+.ed-sec { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 12.5px; }
+.ed-aic { margin-left: 10px; color: var(--text-2); }
+.ed-aibtns { display: inline-flex; gap: 6px; }
+.editor .ed-aibtns button { min-height: 26px; padding: 0 8px; font-size: 12px; }
+.ed-aihint { margin-top: -6px; padding-top: 0; }
 .ed-list { display: flex; flex-direction: column; gap: 10px; max-height: 30vh; overflow-y: auto; }
 .ed-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .ed-gl { width: 100%; font-size: 12px; font-weight: 600; color: var(--muted); }
@@ -501,6 +505,13 @@ input::placeholder { color: var(--muted); }
 .editor .ed-chip button { min-width: 28px; min-height: 26px; padding: 0 5px; border: 0; background: transparent; color: var(--muted); }
 .editor .ed-chip button:hover { background: transparent; color: var(--bad); }
 .ed-chip .ic { width: 14px; height: 14px; }
+/* 칩의 AI 켜고 끄기 — 켜짐은 먹색 바탕, 꺼짐은 빈칸에 취소선 */
+.editor .ed-chip .ed-ai { min-width: 0; min-height: 20px; margin-left: 6px; padding: 0 5px; border: 1px solid var(--ink); border-radius: 4px;
+  background: var(--ink); color: var(--on-ink); font-size: 10.5px; font-weight: 700; line-height: 18px; }
+.editor .ed-chip .ed-ai:hover { background: var(--ink); color: var(--on-ink); opacity: .85; }
+.editor .ed-chip .ed-ai[aria-pressed="false"] { border-color: var(--line-2); background: transparent; color: var(--muted); text-decoration: line-through; }
+.editor .ed-chip .ed-ai[aria-pressed="false"]:hover { background: transparent; color: var(--text); opacity: 1; }
+.ed-chip.ai-off { color: var(--text-2); }
 .ed-removed { font-size: 12.5px; color: var(--muted); }
 .ed-removed span { margin-right: 8px; text-decoration: line-through; }
 .editor .ed-removed button { min-height: 24px; padding: 0 8px; font-size: 12px; text-decoration: none; }

@@ -722,7 +722,7 @@ function keyDiscToday(code) {
 }
 function whyOf(q) {
   const a = state.analysis[q.code];
-  if (a && a.headline && aiFresh(q, a)) return { src: 'AI', label: 'AI 진단', text: a.headline }; // 전날 분석이면 오늘 공시·뉴스로
+  if (q.ai !== false && a && a.headline && aiFresh(q, a)) return { src: 'AI', label: 'AI 진단', text: a.headline }; // 전날 분석·AI를 꺼 둔 종목이면 오늘 공시·뉴스로
   const d = keyDiscToday(q.code);
   if (d) return { src: '공시', label: '오늘 주요 공시', text: `[${d.tag || '공시'}] ${d.title}` };
   const m = marketOf(q), at = +new Date(q.asOf);
@@ -926,6 +926,7 @@ function renderDisc(q, data) {
 function renderAnalysis(q, data) {
   const el = document.getElementById('analysis-' + cssId(q.code));
   if (!el) return;
+  if (q.ai === false) { el.innerHTML = ''; return; } // 종목 편집에서 AI를 꺼 둔 종목 — 분석도 대기 안내도 없음
   if (!data || !data.headline) { // 분석은 변동 큰 종목(±2%)에만 생성됨 — 그런 종목인데 아직 없으면 왜 없는지 한 줄
     const ai = state.status?.ai, nx = ai && ai.state === 'wait' ? fmtNextAt(ai.next) : '';
     const w = q.ok && Math.abs(q.changePct ?? 0) >= WHY_MIN ? aiWaitText(ai, nx === '곧' ? '곧' : nx ? `${nx}부터` : '') : null;
