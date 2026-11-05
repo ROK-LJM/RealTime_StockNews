@@ -1204,11 +1204,15 @@ const PRICE_ONLY_YES = ['SK하이닉스 주가, 10월 22일 장중 1,281,000원 
   'SK텔레콤 주가, 10월 21일 애프터마켓 77,300원 0.00% 보합', 'LG에너지솔루션 주가, 10월 21일 411,500원 0.60% 하락', '현대중공업 주가 하락 중',
   '슈퍼 마이크로 컴퓨터 주가 상승 중', 'HD건설기계 장중 3%대 상승', '현대중공업 주가 2,000원 상승 후 장마감', '한화솔루션 주가 50원 하락 후 장마감',
   '[특징주] 한화솔루션 장중 2%대 강세 3만1450원 기록 : 기업주식정보', 'SK텔레콤 거래량 13.6% 감소…20일 65만2578주',
-  '[특징주] 한미반도체, 장중 1%대 상승하며 20만2000원 기록 : 기업주식정보', '두산에너빌리티 장중 1.57% 하락해 6만2500원', 'LG전자, 22일 장중 2%대 하락'];
+  '[특징주] 한미반도체, 장중 1%대 상승하며 20만2000원 기록 : 기업주식정보', '두산에너빌리티 장중 1.57% 하락해 6만2500원', 'LG전자, 22일 장중 2%대 하락',
+  '4일 한화오션 52,400원 2.60% 내려 하락률 동일업종 평균보다 1.08%p 커', '[특징주] 삼성SDI, 장중 5%대 약세 보이며 51만3000원선 기록 : 기업주식정보',
+  '한화솔루션 거래량 1342만주…2만7050원서 3.39% 약세', '[특징주] LG에너지솔루션 장중 2%대 하락세 : 기업주식정보',
+  'NVDA|NVIDIA Corp|Price:200.130|Chg%:-6.560'];
 const PRICE_ONLY_NO = ['영업이익 추정치 웃돈 파두…주가는 장중 6.75% 하락', '삼성전기 주가 3.08% 상승…엔비디아 기판 생산능력 확대에 공급 수혜 기대',
   '호실적에 자사주 소각까지…삼성E&A 15% 상승세 [특징주]', '[장중수급포착] 대덕전자, 기관 8일 연속 순매수행진... 주가 +4.24%',
   '[개장시황] 삼성전기 5.05% 급등…코스피 차익매물에 하락 출발', 'Why Super Micro Computer Stock Popped Today', '수주 기대감에 장중 3%대 상승',
-  '대덕전자, 장중 2.51% 하락…iM증권은 이익 전망 상향', '9개국 이상 거점 둔 한화에어로스페이스…주가 89만9000원으로 상승', '[특징주] SK텔레콤, 뚜렷한 공시 없이 장중 소폭 하락세 : 기업주식정보', '두산에너빌리티 장중 1.57% 하락해 6만2500원…원전 수주 지연 영향'];
+  '대덕전자, 장중 2.51% 하락…iM증권은 이익 전망 상향', '9개국 이상 거점 둔 한화에어로스페이스…주가 89만9000원으로 상승', '[특징주] SK텔레콤, 뚜렷한 공시 없이 장중 소폭 하락세 : 기업주식정보', '두산에너빌리티 장중 1.57% 하락해 6만2500원…원전 수주 지연 영향',
+  "[특징주] 현대차·기아, 트럼프 자동차 정책 후퇴 기대.. '강세'", 'LG전자 5.99% 하락…AI 데이터센터 냉각 수주 전환 주목', '4일 한화오션 수주 2조…주가 2.60% 올라'];
 await test('시세 안내 기사: 날짜·가격만 있는 자동 기사·"주가 상승 중"·"장중 3%대 상승"은 이유에서 제외 · 이유가 붙은 제목은 유지 · 봇과 화면 판정이 같음', async () => {
   for (const t of PRICE_ONLY_YES) assert.equal(src.priceOnly(t), true, t);
   for (const t of PRICE_ONLY_NO) assert.equal(src.priceOnly(t), false, t);
@@ -1222,6 +1226,19 @@ await test('시세 안내 기사: 날짜·가격만 있는 자동 기사·"주�
   assert.equal(f.pickReasonNews(items, -2.5, '', none).title, PRICE_ONLY_NO[0], '시세 안내 기사를 건너뛴 가장 최근 기사(방향이 반대인 기사는 제외)');
   assert.equal(f.pickReasonNews([{ title: PRICE_ONLY_YES[1] }], -2.5, '', none), null);
   assert.equal(f.pickReasonNews(null, -2.5, '', none), null);
+});
+await test('급등락 기록(23차): 정정·자회사 공시는 맞는 뉴스가 없을 때만 이유 · 예전에 남긴 그런 공시 이유는 맞는 뉴스가 생기면 바꿈', async () => {
+  await withDartKey(async () => {
+    const rows = { ...DART_ROWS, '00126380': [['20261015000999', '[기재정정]타법인주식및출자증권취득결정']] };
+    const item = (t) => `<item><title>${t} - 테스트일보</title><link>https://news.example.com/1</link><pubDate>${new Date(Date.now() - 600e3).toUTCString()}</pubDate><source url="https://news.example.com">테스트일보</source></item>`;
+    const noNews = () => text('<?xml version="1.0"?><rss><channel></channel></rss>');
+    const withNews = (m, u) => text(`<?xml version="1.0"?><rss><channel>${item(`${queryName(u)}, 대규모 수주 소식에 급등`)}</channel></rss>`);
+    const root = workspace();
+    await pipeline(root, { gemini: () => text('upstream error', 500), krAt: NOW_KR, news: noNews, dartRows: rows });
+    assert.deepEqual(read(root, 'moves.json')['005930'][0], { d: '20261015', p: 4.2, r: '[M&A] [기재정정]타법인주식및출자증권취득결정', s: 'disc' }, '맞는 뉴스가 없으면 정정 공시');
+    await pipeline(root, { gemini: () => text('upstream error', 500), krAt: NOW_KR, news: withNews, dartRows: rows }, NOW_KR + 5 * MIN);
+    assert.deepEqual(read(root, 'moves.json')['005930'][0], { d: '20261015', p: 4.2, r: '삼성전자, 대규모 수주 소식에 급등', s: 'news' }, '맞는 뉴스가 생기면 정정 공시 이유를 바꿈');
+  });
 });
 await test('급등락 기록: 이유로 쓸 뉴스는 시세 안내 기사를 건너뛴 가장 최근 기사', async () => {
   const root = workspace();
@@ -1283,6 +1300,64 @@ await test('이유 고르기: 상품 상장 공지·방향이 반대인 기사 �
   assert.equal(pick(mixed, -3.25, ['SK하이닉스']), mixed[0].title, "SK하이닉스는 이름 뒤 '하락' — 같은 방향 [특징주]");
   assert.equal(pick([{ title: '[특징주] 반도체 대형주 약세 전환…삼성전자, 외국인 매도 확대', pubMs: at(13) }, mixed[1]], -2.9, ['삼성전자']),
     '[특징주] 반도체 대형주 약세 전환…삼성전자, 외국인 매도 확대', '이름 바로 뒤에 방향 말이 없으면 제목 전체(약세)로');
+});
+await test('이유 고르기(23차): 물음표로 끝나는 제목은 맨 뒤 · 제목 꼬리(" : 경제")는 떼고 판단 · 시장 따라 종목은 같은 방향 기사가 아니면 시장 흐름 · 봇과 화면 같음', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(`${block}; ({ pickReasonNews, preferMarket })`, {});
+  const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const it = (title, tone = 'neutral') => ({ title, pubMs: T('2026-11-05T14:00:00+09:00'), sentiment: { tone } });
+  const pick = (list, pct, names = []) => {
+    const a = src.pickReasonNews(list, pct, '20261105', kst, names), b = f.pickReasonNews(list, pct, '20261105', kst, names);
+    assert.equal(b ? b.title : null, a ? a.title : null, '봇·화면 같은 선택');
+    return a ? a.title : null;
+  };
+  // 실제 제목(11/05) — 물음표 제목은 원인을 말하지 않는다
+  const other = it('반도체 업황 둔화 우려 확산');
+  for (const t of ['SK하이닉스 주가가 오늘 급락한 이유는?', 'NVIDIA (NASDAQ:NVDA) Stock Falls 3.2% - Time to Sell?', '삼성전자, 하락 이어갈까', '반도체주 하락 멈출까? : 경제']) {
+    assert.equal(pick([it(t), other], -3), other.title, t);
+  }
+  assert.equal(pick([it('SK하이닉스 주가가 오늘 급락한 이유는?')], -9.46), 'SK하이닉스 주가가 오늘 급락한 이유는?', '그것뿐이면 그것');
+  // 시장 따라 — 같은 방향 기사만 종목 이유로, 방향 모를 기사·나열 기사는 시장 흐름
+  const q = { name: '현대건설', changePct: -5.02 }, vs = { follows: true };
+  const news = (title, tone) => ({ src: '뉴스', text: title, item: it(title, tone) });
+  assert.equal(f.preferMarket(q, news('현대건설, AI·빅데이터 기반 품질관리 시스템 고도화'), vs), true, '방향 모를 기사 → 시장 흐름');
+  assert.equal(f.preferMarket(q, news('현대건설, 해외 수주 지연에 하락'), vs), false, '같은 방향 기사는 종목 이유');
+  assert.equal(f.preferMarket(q, news('현대건설, 원전 수주 기대에 급락 마감?'), vs), true, '물음표 제목 → 시장 흐름');
+  assert.equal(f.preferMarket(q, news('현대건설, 해외 수주 지연에 하락'), { follows: false }), false, '시장 따라가 아니면 그대로');
+  assert.equal(f.preferMarket(q, { src: 'AI', text: 'x' }, vs), false, 'AI 진단은 그대로');
+  assert.equal(f.preferMarket(q, { src: '뉴스', text: '현대건설 하락' }, vs), true, '기사 정보가 없으면 시장 흐름');
+});
+await test('이유(23차): 정정·자회사 공시는 맞는 뉴스가 없을 때만 — 화면 "왜 움직였나"(그날 다른 주요 공시가 있으면 그것 먼저) · 등락 분포(칸 색 단계별 종목 수)', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const why = appJs.slice(appJs.indexOf('function keyDiscToday('), appJs.indexOf('function tileHtml('));
+  const kstYmd = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const today = kstYmd(Date.now());
+  const ctx = { state: { analysis: {}, news: {}, disc: {} }, kstYmd };
+  const f = vm.runInNewContext(`${block}\n${why}; ({ whyOf, distOf })`, ctx);
+  const q = { code: 'A', name: '가나', market: 'KR', ok: true, changePct: -15.3, asOf: new Date().toISOString() };
+  const minor = { key: true, date: today, tag: 'M&A', title: '[기재정정]타법인주식및출자증권취득결정' };
+  const sub = { key: true, date: today, tag: 'M&A', title: '영업양도결정(종속회사의주요경영사항)' };
+  const real = { key: true, date: today, tag: '계약', title: '단일판매ㆍ공급계약체결' };
+  ctx.state.disc.A = { items: [minor] };
+  ctx.state.news.A = { items: [{ title: '가나, 반도체주 폭락에 급락', pubMs: Date.now() - 600e3 }] };
+  assert.deepEqual([f.whyOf(q).src, f.whyOf(q).text], ['뉴스', '가나, 반도체주 폭락에 급락'], '정정 공시보다 맞는 뉴스');
+  ctx.state.disc.A = { items: [sub] };
+  assert.equal(f.whyOf(q).src, '뉴스', '자회사 공시보다 맞는 뉴스');
+  ctx.state.news.A = { items: [] };
+  assert.equal(f.whyOf(q).text, '[M&A] 영업양도결정(종속회사의주요경영사항)', '맞는 뉴스가 없으면 그 공시');
+  ctx.state.disc.A = { items: [minor, real] };
+  ctx.state.news.A = { items: [{ title: '가나, 반도체주 폭락에 급락', pubMs: Date.now() - 600e3 }] };
+  assert.equal(f.whyOf(q).text, '[계약] 단일판매ㆍ공급계약체결', '그날 다른 주요 공시가 있으면 그 공시가 먼저');
+  // 등락 분포 — '+5% 이상'은 5.0부터, 시세 실패·값 없는 종목은 빼고, 있는 단계만 급등 → 급락 순
+  const d = f.distOf([6, 5, 4, 2, 1, 0.2, -0.2, -0.7, -2, -4, -7, -12].map((p) => ({ ok: true, changePct: p })).concat([{ ok: false, changePct: -9 }, { ok: true, changePct: null }]));
+  assert.deepEqual(JSON.parse(JSON.stringify(d)).map((x) => `${x.cls}:${x.n}`), ['up h4:2', 'up h3:1', 'up h2:1', 'up h1:1', 'flat:2', 'down h1:1', 'down h2:1', 'down h3:1', 'down h4:2']);
+  assert.equal(d[0].label, '+5% 이상');
+  assert.deepEqual(JSON.parse(JSON.stringify(f.distOf([{ ok: true, changePct: -6 }]))), [{ cls: 'down h4', label: '−5% 이하', n: 1 }], '있는 단계만');
+  assert.equal(f.distOf(null).length, 0);
 });
 await test('이유 고르기(21차): 주가 전망·기술적 분석 글(지지선·저항선·과매도·RSI·기술적 분석·횡보·…할 수 있을까?·…지속될까?)은 맨 뒤 — 그것뿐이면 그것 · 봇과 화면 같음', async () => {
   const vm = await import('node:vm');

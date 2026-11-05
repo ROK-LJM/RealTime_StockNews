@@ -20,7 +20,7 @@ import {
 } from './sources.mjs';
 import { startBudget, toStored, totalUsed, capacity, inSession, isKrSession, nextAllowanceAt, closedCheckDay, usExtWindow, usAfterPostSameDay } from './aibudget.mjs';
 import { validateWatchlist, writeJsonAtomic, analysisSig, sigMove } from './util.mjs';
-import { dartEnabled, resetDart, dartHalted, ensureCorpTable, getDisclosures } from './dart.mjs';
+import { dartEnabled, resetDart, dartHalted, ensureCorpTable, getDisclosures, MINOR_DISC_RE } from './dart.mjs';
 import { calendarDue, buildCalendar } from './calendar.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -312,6 +312,8 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
     const an = readJson('analysis.json') || {};
     const keepFrom = ymdIn(now - MOVE_KEEP_DAYS * 86400e3, MARKET_TZ.KR);
     const rank = { ai: 3, disc: 2, news: 1 };
+    // 정정·자회사 공시 이유는 뉴스보다 아래(0.5) — 맞는 뉴스가 생기면 그것으로 바꾼다. 이유 글은 '[종류] 제목'
+    const rankOf = (x) => (!x || !x.s ? 0 : x.s === 'disc' && MINOR_DISC_RE.test(String(x.r ?? '').replace(/^\[[^\]]*\]\s*/, '')) ? 0.5 : rank[x.s] || 0);
     const cut = (s) => (s.length > MOVE_REASON_MAX ? `${s.slice(0, MOVE_REASON_MAX - 1)}…` : s);
     const moves = {};
     let recorded = 0, removed = 0;
@@ -326,17 +328,19 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
         const i = list.findIndex((x) => x.d === day);
         if (Math.abs(q.changePct) >= STOCK_ANALYSIS_THRESHOLD) {
           const a = an[it.code];
-          const d = (disclosures[it.code]?.items || []).find((x) => x && x.key && x.title && x.date <= day && x.date >= dayStart(3));
+          const discs = (disclosures[it.code]?.items || []).filter((x) => x && x.key && x.title && x.date <= day && x.date >= dayStart(3));
+          const d = discs.find((x) => !MINOR_DISC_RE.test(x.title)), dMinor = d ? null : discs[0] || null;
           const n = pickReasonNews((news[it.code]?.items || []).filter((x) => x && Number.isFinite(x.pubMs) && ymdIn(x.pubMs, tz) >= dayStart(1)),
             q.changePct, day, (ms) => ymdIn(ms, tz), [q.name]);
           const why = a && a.headline && Number.isFinite(a.at) && ymdIn(a.at, tz) >= day ? { r: a.headline, s: 'ai' }
-            : d ? { r: `[${d.tag || '공시'}] ${d.title}`, s: 'disc' } : n ? { r: n.title, s: 'news' } : { r: '', s: '' };
+            : d ? { r: `[${d.tag || '공시'}] ${d.title}`, s: 'disc' } : n ? { r: n.title, s: 'news' }
+            : dMinor ? { r: `[${dMinor.tag || '공시'}] ${dMinor.title}`, s: 'disc' } : { r: '', s: '' };
           const old = i >= 0 ? list[i] : null;
           // 예전에 남긴 뉴스 이유도 지금 규칙으로 다시 본다 — 시세 안내·방향이 반대인 기사(내린 날의 호재 기사 등)면
           // 지킬 만한 이유가 아니다(더 나은 게 없으면 비운다). 호재·악재 태그는 제목만으로 정해져 다시 계산해도 같다
           const oldNewsOk = old && old.s === 'news' && !!pickReasonNews([{ title: old.r, sentiment: tagSentiment(old.r) }], q.changePct, day, (ms) => ymdIn(ms, tz), [q.name]);
-          const oldRank = old && !(old.s === 'news' && !oldNewsOk) ? rank[old.s] || 0 : 0;
-          const keep = old && oldRank > (rank[why.s] || 0);
+          const oldRank = old && !(old.s === 'news' && !oldNewsOk) ? rankOf(old) : 0;
+          const keep = old && oldRank > rankOf(why);
           const entry = { d: day, p: Math.round(q.changePct * 100) / 100, r: cut(String(keep ? old.r : why.r)), s: keep ? old.s : why.s };
           if (i >= 0) list[i] = entry; else list.push(entry);
           recorded++;

@@ -188,6 +188,8 @@ const TAGS = [
   ['IR', /기업설명회|\(IR\)/],
   ['주요사항', /주요경영사항|주요사항보고서/],
 ];
+// 정정 공시·자회사 공시 — 그날 움직임의 원인일 가능성이 낮아 '왜 움직였나'·급등락 기록 이유로는 맞는 뉴스가 없을 때만(docs/app.js와 같게)
+export const MINOR_DISC_RE = /^\[(?:기재|첨부)정정\]|종속회사의주요경영사항|자회사의주요경영사항/;
 const KEY_TAGS = new Set(['위험', '해명', '실적', '계약', '증자·사채', '자사주', '배당', 'M&A', '주요사항']);
 export function tagOf(title) {
   for (const [tag, re] of TAGS) if (re.test(title)) return tag;

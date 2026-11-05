@@ -445,25 +445,43 @@ function renderQuotes() {
     catch (e) { console.warn('그룹 렌더 실패:', g.key, e); return ''; }
   }).join('');
   hideTip(); // 카드를 통째로 교체하므로, 가리키던 종목의 툴팁이 화면에 남지 않게 먼저 지운다
+  const io = chartObserver();
+  if (io) io.disconnect(); // 교체될 예전 차트는 지켜보지 않는다(떨어져 나간 요소를 계속 붙잡지 않게)
   $('#grid').innerHTML = html || '<div class="muted">표시할 종목이 없습니다.</div>';
   if (html) state.loadedOnce = true; // 실제로 카드를 그린 뒤에만 '표시 중' 상태로 본다
   if (window.syncJump) window.syncJump(); // 그룹 수가 바뀌었을 수 있으므로 이동 버튼 상태를 다시 맞춘다
 
+  // 차트는 화면 가까이 온 카드만 그린다 — 종목이 많으면 1분마다 전부 다시 그리는 비용이 크다(특히 휴대폰).
+  // 간단히 보기처럼 차트가 숨겨져 있으면 보일 때 그린다. 지켜보기를 못 쓰는 브라우저는 예전처럼 바로 그린다
   for (const q of quotes) {
-    try {
-      const h = state.hist[q.code];
-      const cv = document.getElementById('chart-' + cssId(q.code));
-      if (cv) {
-        const fc = h && h.closes ? forecast(h.closes, FORECAST_DAYS) : null;
-        drawChart(cv, h && h.closes, fc, { dates: h && h.dates, currency: q.currency });
-        attachHover(cv);
-      }
-    } catch (e) { console.warn('차트 렌더 실패:', q && q.code, e); }
+    const cv = document.getElementById('chart-' + cssId(q.code));
+    if (!cv) continue;
+    cv.__q = q;
+    attachHover(cv);
+    if (io) io.observe(cv); else drawCardChart(cv);
   }
   for (const q of quotes) { try { renderAnalysis(q, state.analysis[q.code]); } catch (e) { console.warn('분석 렌더 실패:', q && q.code, e); } }
   for (const q of quotes) { try { renderDisc(q, state.disc[q.code]); } catch (e) { console.warn('공시 렌더 실패:', q && q.code, e); } }
   for (const q of quotes) { try { renderMoves(q, state.moves[q.code]); } catch (e) { console.warn('급등락 기록 렌더 실패:', q && q.code, e); } }
   for (const q of quotes) { try { renderNews(q, state.news[q.code]); } catch (e) { console.warn('뉴스 렌더 실패:', q && q.code, e); } }
+}
+
+let _chartIO = null;
+function chartObserver() {
+  if (typeof IntersectionObserver !== 'function') return null;
+  if (!_chartIO) _chartIO = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) { _chartIO.unobserve(e.target); drawCardChart(e.target); }
+  }, { rootMargin: '600px 0px' });
+  return _chartIO;
+}
+function drawCardChart(cv) {
+  const q = cv.__q;
+  if (!q) return;
+  try {
+    const h = state.hist[q.code];
+    const fc = h && h.closes ? forecast(h.closes, FORECAST_DAYS) : null;
+    drawChart(cv, h && h.closes, fc, { dates: h && h.dates, currency: q.currency });
+  } catch (e) { console.warn('차트 렌더 실패:', q && q.code, e); }
 }
 
 // ---------- 시장(국장·미장) 그룹 ----------
@@ -535,13 +553,18 @@ function pastMoves(q, list, n = 4) {
 const PRICE_ONLY = [
   /주가,?\s*\d{1,2}월\s*\d{1,2}일\s*(?:장중|장\s?마감|애프터마켓|프리마켓|시간외|오전|오후)?\s*[\d,.]+원\s*[\d.]+%\s*(?:상승|하락|보합)$/,
   /^\S+(?:\s\S+){0,3}\s주가\s*(?:상승|하락|강세|약세|보합)\s*중$/,
-  /^[^\s,…·]+,?\s(?:\d{1,2}일\s*)?(?:장중|장\s?초반|오전|오후)\s*[\d.]+%대?\s*(?:상승|하락|강세|약세|급등|급락)(?:\s*중|세)?$/,
+  /^(?:\[특징주\]\s*)?[^\s,…·]+,?\s(?:\d{1,2}일\s*)?(?:장중|장\s?초반|오전|오후)\s*[\d.]+%대?\s*(?:상승|하락|강세|약세|급등|급락)(?:\s*중|세)?$/,
   /^\S+(?:\s\S+){0,3}\s주가\s*[\d,]+원\s*(?:상승|하락|보합)\s*(?:후\s*)?장\s?마감$/,
-  /^(?:\[특징주\]\s*)?[^\s,…·]+(?:\s[^\s,…·]+)?,?\s장중\s*[\d.]+%대?\s*(?:상승|하락|강세|약세)(?:하며)?\s*[\d만,.]+원\s*기록/,
+  /^(?:\[특징주\]\s*)?[^\s,…·]+(?:\s[^\s,…·]+)?,?\s장중\s*[\d.]+%대?\s*(?:상승|하락|강세|약세)(?:하며|\s*보이며)?\s*[\d만,.]+원선?\s*기록/,
   /^[^\s,…·]+(?:\s[^\s,…·]+)?,?\s장중\s*[\d.]+%대?\s*(?:상승|하락)해\s*[\d만,.]+원$/,
   /^\S+(?:\s\S+){0,3}\s거래량\s*[\d.]+%\s*(?:증가|감소)/,
+  /^\d{1,2}일\s*[^\s,…·]+(?:\s[^\s,…·]+)?\s*[\d,]+원\s*[\d.]+%\s*(?:내려|올라)/,           // '4일 한화오션 52,400원 2.60% 내려 하락률 동일업종 평균보다…'
+  /거래량\s*[\d,]+만?주…?\s*[\d만,]+원서\s*[\d.]+%\s*(?:상승|하락|강세|약세)/,                   // '한화솔루션 거래량 1342만주…2만7050원서 3.39% 약세'
+  /\|\s*Price:\s*[\d.,]+\s*\|\s*Chg%:/i,                                                       // 'NVDA|NVIDIA Corp|Price:200.130|Chg%:-6.560'
 ];
-const priceOnly = (title) => PRICE_ONLY.some((re) => re.test(String(title ?? '').trim()));
+// 제목 끝에 붙는 매체의 꼭지 이름(' : 기업주식정보'·' : 경제')은 떼고 판단한다
+const coreTitle = (t) => String(t ?? '').trim().replace(/\s:\s\S{1,10}$/, '');
+const priceOnly = (title) => { const t = coreTitle(title); return PRICE_ONLY.some((re) => re.test(t)); };
 // 이유로 쓸 뉴스 고르기 — scripts/sources.mjs의 pickReasonNews와 같게 유지(자체 테스트가 비교).
 // 시세 안내·상품 상장 공지('…ELW 224종 상장')·방향이 반대인 기사('15% 급등' 기사인데 오늘은 하락 — 이유일 수 없음)는 빼고
 // ① 그날 나온 같은 방향의 [특징주] → ② 같은 방향 기사 → ③ 방향을 알 수 없는 기사 → ④ 여러 종목 나열·'[오늘의 …]' 모음·리포트 요약·주가 전망 글 순.
@@ -567,8 +590,9 @@ function nameDir(t, names) {
 const REPORT_RE = /^\[리포트\s?브리핑\]|목표가\s*[\d,]+\s*원/;
 // 주가 전망·기술적 분석 글(자동 생성 해설 — '…주가는 ₩370,322 지지선을 지킬 수 있을까?'·'과매도 RSI가 반전 가능성…'·'…상승세는 지속될까?'·'… 주가 횡보')
 // — 원인이 아니라 해설이라 나열·리포트 요약과 함께 맨 뒤로(사실이 섞인 제목도 있어 빼지는 않는다)
-const SPEC_RE = /지지선|저항선|과매도|과매수|\bRSI\b|기술적\s*분석|횡보|(?:있을까|될까|갈까|할까)\s*\??\s*$/;
-const weakTitle = (t) => roundupTitle(t) || REPORT_RE.test(t) || SPEC_RE.test(t);
+// 물음표로 끝나는 제목('…급락한 이유는?'·'… Time to Sell?')도 원인을 말하지 않는 해설이라 같은 등급
+const SPEC_RE = /지지선|저항선|과매도|과매수|\bRSI\b|기술적\s*분석|횡보|(?:있을까|될까|갈까|할까)\s*\??\s*$|\?\s*$/;
+const weakTitle = (t) => { const c = coreTitle(t); return roundupTitle(c) || REPORT_RE.test(c) || SPEC_RE.test(c); };
 // '소식에도'·'불구'처럼 거스르는 말이 있으면 호재·악재 낱말로 방향을 짐작하지 않는다
 const CONTRA_RE = /에도[\s,.…'"‘’“”]|에도$|불구|무색/;
 // 기사가 가리키는 그 종목의 방향 — ① 이름 뒤·제목의 오름·내림 말 ② 없으면 호재·악재 태그 ③ 리포트 요약은 좋은 쪽
@@ -623,6 +647,23 @@ function aiFresh(q, a) {
   if (!Number.isFinite(at) || at <= 0 || !Number.isFinite(qt)) return true;
   const m = marketOf(q);
   return marketYmd(at, m) >= marketYmd(qt, m);
+}
+
+// '시장 따라' 종목은 같은 방향을 말하는 기사가 아니면(나열·리포트·전망 글·방향 모를 기사) 시장 흐름이 더 나은 설명
+function preferMarket(q, w, vs) {
+  return !!(vs && vs.follows && w && w.src === '뉴스' && (weakTitle(w.text) || !w.item || newsDir(w.item, [q.name]) !== Math.sign(q.changePct || 0)));
+}
+// 정정 공시·자회사 공시 — 그날 움직임의 원인일 가능성이 낮아 이유로는 맞는 뉴스가 없을 때만(scripts/dart.mjs의 MINOR_DISC_RE와 같게)
+const MINOR_DISC_RE = /^\[(?:기재|첨부)정정\]|종속회사의주요경영사항|자회사의주요경영사항/;
+// 등락 분포 — '한눈에' 칸 색과 같은 단계(+5% 이상 … −5% 이하)별 종목 수, 있는 단계만(시세 실패 종목 제외)
+const DIST_STEPS = [
+  ['up h4', '+5% 이상', (p) => p >= 5], ['up h3', '+3~5%', (p) => p >= 3 && p < 5], ['up h2', '+1.5~3%', (p) => p >= 1.5 && p < 3],
+  ['up h1', '+0.5~1.5%', (p) => p >= 0.5 && p < 1.5], ['flat', '±0.5% 안', (p) => p > -0.5 && p < 0.5], ['down h1', '−0.5~1.5%', (p) => p <= -0.5 && p > -1.5],
+  ['down h2', '−1.5~3%', (p) => p <= -1.5 && p > -3], ['down h3', '−3~5%', (p) => p <= -3 && p > -5], ['down h4', '−5% 이하', (p) => p <= -5],
+];
+function distOf(list) {
+  const ps = (Array.isArray(list) ? list : []).filter((q) => q && q.ok && Number.isFinite(q.changePct)).map((q) => q.changePct);
+  return DIST_STEPS.map(([cls, label, f]) => ({ cls, label, n: ps.filter(f).length })).filter((x) => x.n);
 }
 
 // 다음 일정 — 공시 일정 달력(calendar.json)에서 그 종목의 오늘(그 시장 날짜)부터 2주 안 가장 가까운 날의 일정.
@@ -718,17 +759,18 @@ const WHY_MIN = 2;  // % — AI 종합분석 대상 기준과 같게
 const WHY_SHOW = 6; // 처음에 보여줄 줄 수(나머지는 '더 보기')
 function keyDiscToday(code) {
   const today = kstYmd(Date.now());
-  return (state.disc[code]?.items || []).find((x) => x && x.key && x.date === today && x.title) || null;
+  const list = (state.disc[code]?.items || []).filter((x) => x && x.key && x.date === today && x.title);
+  return list.find((x) => !MINOR_DISC_RE.test(x.title)) || list[0] || null; // 정정·자회사 공시보다 그 밖의 공시 먼저
 }
 function whyOf(q) {
   const a = state.analysis[q.code];
   if (q.ai !== false && a && a.headline && aiFresh(q, a)) return { src: 'AI', label: 'AI 진단', text: a.headline }; // 전날 분석·AI를 꺼 둔 종목이면 오늘 공시·뉴스로
-  const d = keyDiscToday(q.code);
-  if (d) return { src: '공시', label: '오늘 주요 공시', text: `[${d.tag || '공시'}] ${d.title}` };
+  const d = keyDiscToday(q.code), disc = d && { src: '공시', label: '오늘 주요 공시', text: `[${d.tag || '공시'}] ${d.title}` };
+  if (d && !MINOR_DISC_RE.test(d.title)) return disc;
   const m = marketOf(q), at = +new Date(q.asOf);
   const n = pickReasonNews(state.news[q.code]?.items, q.changePct, Number.isFinite(at) ? marketYmd(at, m) : '', (ms) => marketYmd(ms, m), [q.name]);
-  if (n) return { src: '뉴스', label: '최근 뉴스', text: n.title };
-  return null;
+  if (n) return { src: '뉴스', label: '최근 뉴스', text: n.title, item: n };
+  return disc || null; // 정정·자회사 공시는 맞는 뉴스가 없을 때만
 }
 function tileHtml(q) {
   if (!q || !q.ok) {
@@ -763,6 +805,13 @@ function extRow(q) {
       <span class="ext-label">${x.label}</span> <b>${fmtPrice({ price: x.price, currency: q.currency })}</b>
       <span class="${dirClass(x.changePct)}-c">${arrow} ${fmtChange({ change: x.change, currency: q.currency })} (${fmtPct(x.changePct)})</span>${at ? ` <span class="muted">· ${esc(at)}</span>` : ''}</div>`;
 }
+// 등락 분포 막대 — 칸 색과 같은 단계로 종목 수(왼쪽 급등 → 오른쪽 급락), 종목이 많아도 전체 분위기를 한 줄로
+function distHtml(list) {
+  const d = distOf(list);
+  if (!d.length) return '';
+  return `<div class="bm-dist" role="img" aria-label="등락 분포: ${esc(d.map((x) => `${x.label} ${x.n}종목`).join(', '))}">`
+    + d.map((x) => `<span class="seg ${x.cls}" style="flex-grow:${x.n}" title="${esc(x.label)} ${x.n}종목">${x.n}</span>`).join('') + '</div>';
+}
 function renderBoard(groups, closed) {
   const el = $('#board');
   if (!el) return;
@@ -774,7 +823,7 @@ function renderBoard(groups, closed) {
       + `${bench.map((b) => `<span class="bm-idx">${esc(b.name)} <b class="${dirClass(b.pct)}-c">${fmtPct(b.pct)}</b></span>`).join('')}</span>`;
     return `<div class="bm" style="--n:${list.length}">
       <div class="bm-head"><span class="bm-title">${esc(g.label)}</span>
-        ${valid.length ? `<span class="mgroup-updown"><b class="up-c">▲ ${up}</b> <b class="down-c">▼ ${down}</b></span>` : ''}${cmp}
+        ${valid.length ? `<span class="mgroup-updown"><b class="up-c">▲ ${up}</b> <b class="down-c">▼ ${down}</b></span>` : ''}${cmp}${distHtml(valid)}
         <span class="bm-status${stale ? ' stale' : ''}"${stale ? ` title="${STALE_TIP}"` : ''}>${status}${t ? ` · ${t}` : ''}</span></div>
       <div class="tiles">${[...list].sort(byPct).map(tileHtml).join('')}</div>
     </div>`;
@@ -785,8 +834,7 @@ function renderBoard(groups, closed) {
   const show = isNarrow() ? 4 : WHY_SHOW; // 휴대폰은 처음에 4줄
   const rows = movers.map((q, i) => {
     const p = q.changePct, vs = vsMarket(q, state.market?.indices), w0 = whyOf(q);
-    // 시장 따라 종목은 여러 종목 나열·리포트 요약·주가 전망 글보다 시장 흐름이 더 나은 설명
-    const w = vs && vs.follows && w0 && w0.src === '뉴스' && weakTitle(w0.text) ? null : w0;
+    const w = preferMarket(q, w0, vs) ? null : w0;
     return `<button type="button" class="why-row${i >= show && !state.whyAll ? ' more' : ''}" data-code="${esc(q.code)}">
       <span class="w-pct ${dirClass(p)}-c">${p > 0 ? '▲' : '▼'} ${Math.abs(p).toFixed(2)}%</span>
       <span class="w-nm">${esc(q.name)}</span>
