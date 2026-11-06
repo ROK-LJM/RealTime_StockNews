@@ -1227,6 +1227,104 @@ await test('매매 정지·첫 체결 전 시세(sources.mjs·burst.mjs): 정지
   assert.equal(file.quotes[0].exch, 'KOSPI'); assert.equal(file.quotes[0].ai, false);
   assert.equal(file.quotes[1].halt, 'stock');
 });
+await test('시장 조치(sources.mjs): 사이드카 속보 제목 — 방향·시장(사이드카 바로 앞 · 둘을 함께 쓰면 둘 다 · 해제·방향·시장 없으면 아님) · 같은 시장·방향 기사가 3분 안에 2건 이상 몰린 첫 시각(그날 09:00~15:40 기사만) · 기록 합치기(그날 것만·가장 이른 시각·시각순)', async () => {
+  const s = (t) => JSON.parse(JSON.stringify(src.sidecarOf(t))).map((e) => `${e.mk}:${e.dir}`);
+  // 실제 제목(2026-10~11월 구글 뉴스)
+  assert.deepEqual(s('[속보] 코스피 4%대 급락…매도 사이드카 발동 - 연합뉴스'), ['KOSPI:sell']);
+  assert.deepEqual(s("[속보] 코스피 이어 코스닥도 '매도 사이드카' - 메트로신문"), ['KOSDAQ:sell'], '사이드카 바로 앞 시장');
+  assert.deepEqual(s('[속보]코스피·코스닥 동반 매도 사이드카 발동 - 동행미디어 시대'), ['KOSPI:sell', 'KOSDAQ:sell'], '둘 다');
+  assert.deepEqual(s('삼성전자 7%·SK하이닉스 9% 급락…코스피·코스닥 잇따라 매도 사이드카 - JTBC'), ['KOSPI:sell', 'KOSDAQ:sell']);
+  assert.deepEqual(s('‘널뛰기’ 코스닥 5% 급등…어제는 매도, 오늘은 매수 사이드카 - 한겨레'), ['KOSDAQ:buy'], '사이드카 바로 앞 방향');
+  assert.deepEqual(s("코스피, 4% 이상 급등에 두달 만의 '매수' 사이드카…외국인 순매수세 - 연합뉴스"), ['KOSPI:buy'], '따옴표 안 방향');
+  assert.deepEqual(s('[속보] 코스피, 서킷 해제 후 매도 사이드카 발동 - 뉴스1'), ['KOSPI:sell'], '서킷 해제는 상관없음');
+  assert.deepEqual(s('코스피 5000선 붕괴·서킷브레이커…코스닥도 매도 사이드카[개장시황] - 뉴스1'), ['KOSDAQ:sell']);
+  assert.deepEqual(s('SK하이닉스·삼성전자 2.7조 투매에 사이드카 발동! 폭락장 속 연기금·외국인이 동시에 매수'), [], '방향 없음');
+  assert.deepEqual(s('코스피 매도 사이드카 해제…낙폭 축소'), [], '해제');
+  assert.deepEqual(s('반도체주 매도 사이드카?'), [], '시장 이름 없음');
+  // 시각 — 같은 시장·방향 기사가 3분 안에 2건 이상 몰린 첫 시각(혼자 일찍 찍힌 기사는 빼고), 그날 09:00~15:40 기사만
+  const at = (hm, d = '2026-11-06') => T(`${d}T${hm}:00+09:00`);
+  const iso = (ms) => new Date(ms).toISOString();
+  const items = [
+    { title: '[속보] 코스피 이어 코스닥도 매도 사이드카 - 메트로신문', pubMs: at('09:01') }, // 혼자 일찍
+    { title: '[속보] 코스닥, 매도 사이드카 발동 - 서울파이낸스', pubMs: at('09:07') },
+    { title: '[스팟] 코스닥 매도 사이드카 발동 - 머니투데이', pubMs: at('09:09') },
+    { title: '[속보] 코스피, 서킷 해제 후 매도 사이드카 발동 - 뉴스1', pubMs: at('09:36') },
+    { title: '[속보] 코스피, 서킷브레이커 이어 매도 사이드카 발동 - 한국경제', pubMs: at('09:37') },
+    { title: '[속보] 코스피 매도 사이드카 발동 - 장전일보', pubMs: at('08:40') }, // 장 전(잘못 찍힘)
+    { title: '[속보] 코스피 매도 사이드카 발동 - 장전신문', pubMs: at('08:41') },
+    { title: '[속보] 코스피 4%대 급락…매도 사이드카 발동 - 연합뉴스', pubMs: at('10:17', '2026-11-05') }, // 어제
+    { title: '[속보] 코스피 4%대 급락…매도 사이드카 발동 - YTN', pubMs: at('10:18', '2026-11-05') },
+    { title: '코스피 매수 사이드카 기대감 - 한 곳', pubMs: at('11:00') }, // 한 건뿐
+    { title: '날짜 없음 코스닥 매수 사이드카', pubMs: null },
+  ];
+  const ev = JSON.parse(JSON.stringify(src.sidecarEvents(items, at('09:40')))).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  assert.deepEqual(ev.map((e) => `${e.kind}:${e.mk}:${e.dir}@${e.at}`), [`sidecar:KOSDAQ:sell@${iso(at('09:07'))}`, `sidecar:KOSPI:sell@${iso(at('09:36'))}`]);
+  assert.equal(src.sidecarEvents([], at('09:40')).length, 0);
+  // 기록 합치기 — 그날 것만 · 같은 조치는 가장 이른 시각 · 시각순
+  const cb = { kind: 'cb', mk: 'KOSPI', at: '2026-11-06T09:04:03+09:00' };
+  let m = src.mergeMeasures(null, [cb], at('09:10'));
+  assert.equal(m.day, '2026-11-06'); assert.deepEqual(m.items, [cb]);
+  m = src.mergeMeasures(m, [{ ...cb, at: '2026-11-06T09:04:12+09:00' }, ...[...ev].reverse()], at('09:40'));
+  assert.deepEqual(m.items.map((x) => `${x.kind}:${x.mk}:${x.dir || ''}`), ['cb:KOSPI:', 'sidecar:KOSDAQ:sell', 'sidecar:KOSPI:sell'], '시각순');
+  assert.equal(m.items[0].at, cb.at, '같은 조치는 가장 이른 시각');
+  assert.deepEqual(src.mergeMeasures(m, [], at('15:00')), m, '그날 내내 유지');
+  assert.equal(src.mergeMeasures(m, [], at('09:10', '2026-11-09')), null, '날이 바뀌면 새로');
+  assert.equal(src.mergeMeasures(null, [{ kind: 'sidecar', mk: 'KOSPI', at: cb.at }], at('09:10')), null, '방향 없는 사이드카는 버림');
+  assert.equal(src.mergeMeasures(null, [{ ...cb, mk: 'NASDAQ' }], at('09:10')), null, '모르는 시장은 버림');
+  assert.equal(src.mergeMeasures(null, [{ ...cb, at: '2026-11-05T10:00:00+09:00' }], at('09:10')), null, '다른 날 시각은 버림');
+  // 구글 뉴스 받기 — 제목·발행 시각, 발행 시각 없는 기사는 뺌
+  NET.routes = [{ re: /news\.google\.com\/rss\/search\?q=%EC%82%AC%EC%9D%B4%EB%93%9C%EC%B9%B4/, fn: () => text('<?xml version="1.0"?><rss><channel><item><title><![CDATA[[속보] 코스닥, 매도 사이드카 발동 - 서울파이낸스]]></title><pubDate>Fri, 06 Nov 2026 00:07:00 GMT</pubDate></item><item><title>날짜 없는 기사</title></item></channel></rss>') }];
+  assert.deepEqual(await src.getSidecarNews(), [{ title: '[속보] 코스닥, 매도 사이드카 발동 - 서울파이낸스', pubMs: Date.parse('2026-11-06T00:07:00Z') }]);
+});
+await test('시장 조치 기록(fetch.mjs → quotes.json measures): 시장 전체 정지 종목 → 서킷브레이커(상장 시장·가장 이른 정지 시각) · 사이드카 뉴스는 국내 장 시간에만 받고 그 시장 지수가 같은 방향으로 2% 넘게 움직였을 때만 · 정지가 풀려도 그날 내내 유지 · 다음 날 새로', async () => {
+  const root = workspace();
+  writeData(root, 'stocklist.json', { v: 2, kr: [['005930', '삼성전자', 'KOSPI', 1], ['000660', 'SK하이닉스', 'KOSPI', 2]], us: [['AAPL', '애플', 'Apple Inc.', 'NASDAQ', 1]], meta: {} });
+  const HALT = { tradeStopType: { code: '2', text: '정지.Halted', name: 'HALTED' }, tradableStatusCode: 'marketOperationHalt' };
+  const at = (hm, d = '2026-11-06') => T(`${d}T${hm}:00+09:00`);
+  const hm = (s) => new Date(Date.parse(s) + 9 * 3600e3).toISOString().slice(11, 16);
+  const news = (list) => (mm, u) => (/사이드카/.test(queryName(u))
+    ? text(`<?xml version="1.0"?><rss><channel>${list.map(([t, h, d]) => `<item><title>${t}</title><pubDate>${new Date(at(h, d)).toUTCString()}</pubDate></item>`).join('')}</channel></rss>`)
+    : text(rss('', queryName(u))));
+  const SC = /news\.google\.com\/rss\/search\?q=사이드카/; // callsTo는 풀어 쓴 주소로 센다
+  // 09:10 — 코스피 종목 정지(서킷브레이커 09:04) · 코스닥 매도 사이드카 기사 2건 · 지수와 반대인 코스피 매수 사이드카 기사 2건
+  await pipeline(root, { idxPct: -8.5, krExtra: { '005930': { ...HALT, tradableStatusUpdatedAt: '2026-11-06T09:04:12+09:00' }, '000660': { ...HALT, tradableStatusUpdatedAt: '2026-11-06T09:04:03+09:00' } },
+    news: news([['[속보] 코스닥, 매도 사이드카 발동 - 서울파이낸스', '09:07'], ['[스팟] 코스닥 매도 사이드카 발동 - 머니투데이', '09:09'], ['코스피 매수 사이드카 발동 - 가짜일보', '09:08'], ['[속보] 코스피 매수 사이드카 - 가짜신문', '09:09']]) }, at('09:10'));
+  assert.equal(callsTo(SC), 1, '장 시간엔 사이드카 뉴스를 받음');
+  let m = read(root, 'quotes.json').measures;
+  assert.equal(m.day, '2026-11-06');
+  assert.deepEqual(m.items.map((x) => `${x.kind}:${x.mk}:${x.dir || ''}@${hm(x.at)}`), ['cb:KOSPI:@09:04', 'sidecar:KOSDAQ:sell@09:07'], '지수와 반대 방향 사이드카(매수)는 버림');
+  assert.equal(m.items[0].at, new Date(at('09:04') + 3000).toISOString(), '서킷브레이커는 가장 이른 정지 시각');
+  // 09:40 — 정지 풀림 · 코스피 매도 사이드카 기사 2건 · 코스닥 사이드카 기사는 더 늦은 시각
+  await pipeline(root, { idxPct: -5.9, news: news([['[속보] 코스피, 서킷 해제 후 매도 사이드카 발동 - 뉴스1', '09:36'], ['[속보] 코스피, 서킷브레이커 이어 매도 사이드카 발동 - 한국경제', '09:37'], ['코스닥 매도 사이드카 발동 이후 낙폭 확대 - 가', '09:20'], ['코스닥 매도 사이드카 발동… - 나', '09:21']]) }, at('09:40'));
+  m = read(root, 'quotes.json').measures;
+  assert.deepEqual(m.items.map((x) => `${x.kind}:${x.mk}:${x.dir || ''}@${hm(x.at)}`), ['cb:KOSPI:@09:04', 'sidecar:KOSDAQ:sell@09:07', 'sidecar:KOSPI:sell@09:36'], '정지가 풀려도 서킷브레이커 유지 · 같은 조치는 가장 이른 시각');
+  // 16:30 — 장 시간 밖엔 사이드카 뉴스를 받지 않고 그날 기록 유지
+  await pipeline(root, { idxPct: -5.9, news: news([['[속보] 코스피 매수 사이드카 발동 - 가', '15:10'], ['[속보] 코스피 매수 사이드카 발동 - 나', '15:11']]) }, at('16:30'));
+  assert.equal(callsTo(SC), 0, '장 시간 밖엔 받지 않음');
+  assert.equal(read(root, 'quotes.json').measures.items.length, 3, '그날 기록 유지');
+  // 다음 날 — 지수가 2% 안쪽이면 같은 방향 기사라도 믿지 않음, 조치가 없으면 칸 없음
+  await pipeline(root, { idxPct: -1.0, news: news([['[속보] 코스피 매도 사이드카 발동 - 가', '09:20', '2026-11-09'], ['[속보] 코스피 매도 사이드카 발동 - 나', '09:21', '2026-11-09']]) }, at('09:30', '2026-11-09'));
+  assert.equal(read(root, 'quotes.json').measures, undefined, '다음 날 새로 · 지수 2% 안쪽이면 사이드카 기사를 믿지 않음');
+});
+await test('화면 오늘 시장 조치(app.js): 그날 기록만 · 서킷브레이커 주황·매도 사이드카 파랑·매수 사이드카 빨강 · 시각순 · 지금 그 시장 전체가 멈춰 있으면 그 서킷브레이커는 안내 줄이 대신', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const a = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const b = appJs.slice(appJs.indexOf('// ---------- 데이터 지연 경고'), appJs.indexOf('// ---------- 내 종목 한눈에'));
+  const f = vm.runInNewContext(`${a}${b}; ({ measuresOf })`, { lastTimeOf: () => '' });
+  const m = { day: '2026-11-06', items: [{ kind: 'sidecar', mk: 'KOSPI', dir: 'buy', at: '2026-11-06T05:10:00.000Z' }, { kind: 'cb', mk: 'KOSPI', at: '2026-11-06T00:04:03.000Z' }, { kind: 'sidecar', mk: 'KOSDAQ', dir: 'sell', at: '2026-11-06T00:07:00.000Z' }] };
+  const now = T('2026-11-06T15:00:00+09:00');
+  const r = JSON.parse(JSON.stringify(f.measuresOf(m, [], now)));
+  assert.deepEqual(r.map((x) => `${x.cls}|${x.text}`), ['cb|코스피 서킷브레이커 09:04', 'sell|코스닥 매도 사이드카 09:07', 'buy|코스피 매수 사이드카 14:10'], '시각순·색 구분');
+  assert.match(r[0].tip, /8%.*20분.*거래소 정지 시각/);
+  assert.match(r[1].tip, /코스닥150 선물.*6%.*떨어져.*프로그램 매도.*5분.*종목 거래는 계속.*뉴스 속보/);
+  assert.match(r[2].tip, /코스피200 선물.*5%.*올라.*프로그램 매수/);
+  const halted = [{ ok: true, market: 'KR', exch: 'KOSPI', marketStatus: 'OPEN', halt: 'market' }];
+  assert.deepEqual(JSON.parse(JSON.stringify(f.measuresOf(m, halted, now))).map((x) => x.cls), ['sell', 'buy'], '정지 중인 시장의 서킷브레이커는 안내 줄이 대신');
+  assert.equal(f.measuresOf(m, [], T('2026-11-09T09:30:00+09:00')).length, 0, '다른 날 기록은 안 보임');
+  assert.equal(f.measuresOf(null, [], now).length, 0);
+  assert.equal(f.measuresOf({ day: '2026-11-06', items: [{ kind: 'sidecar', mk: 'KOSPI', at: '2026-11-06T00:07:00Z' }, { kind: 'cb', mk: 'NASDAQ', at: '2026-11-06T00:07:00Z' }, { kind: 'cb', mk: 'KOSDAQ', at: 'x' }] }, [], now).length, 0, '방향 없는 사이드카·모르는 시장·시각 없음은 뺌');
+});
 await test('화면 첫 체결 전·매매 정지·예상 지수(app.js): 장중인데 오늘 거래량 없는 국내 종목은 체결 전(평균·시장 대비에서 빼고 칸 맨 뒤) · 시장 전체 정지면 안내 한 줄 · 개장 전 예상 지수는 표시하고 비교 안 함 · 안내는 하나만', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');

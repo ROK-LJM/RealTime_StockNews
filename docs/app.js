@@ -436,7 +436,7 @@ function renderQuotes() {
   $('#updated').textContent = `총 ${quotes.length}종목`;
 
   const ordered = orderedGroups(quotes);
-  try { renderBoard(ordered, data.closed); } catch (e) { console.warn('한눈에 렌더 실패:', e); }
+  try { renderBoard(ordered, data.closed, data.measures); } catch (e) { console.warn('한눈에 렌더 실패:', e); }
   // '등락 큰 순'이면 그룹 안에서 움직임이 큰 종목부터(같으면 원래 순서 유지, 수집 실패는 맨 뒤)
   const move = (q) => (q && q.ok ? Math.abs(q.changePct ?? 0) : -1);
   const html = ordered.map(({ g, list }) => {
@@ -758,6 +758,22 @@ function pendingNote(key, valid, ms = Date.now()) {
 }
 // '한눈에' 시장 안내 한 줄 — 개장 전 → 시장 전체 매매 정지 → 첫 체결 전 순으로 하나만
 const boardNote = (key, valid, ms) => preOpenNote(key, valid) || haltNote(key, valid) || pendingNote(key, valid, ms);
+// 오늘 시장 조치(봇 기록 quotes.json measures) — 서킷브레이커(주황 cb)·매도 사이드카(파랑 sell)·매수 사이드카(빨강 buy), 시각순.
+// 사이드카는 시장 전체의 프로그램 주문만 멈추는 조치라(종목 거래는 계속) 칸이 아니라 이 줄에. 지금 그 시장 전체가 멈춰 있으면 그 서킷브레이커는 안내 줄이 대신
+const MK_KO = { KOSPI: '코스피', KOSDAQ: '코스닥' };
+function measuresOf(m, valid, ms = Date.now()) {
+  if (!m || m.day !== marketClock('Asia/Seoul', ms).day || !Array.isArray(m.items)) return [];
+  const halted = new Set((valid || []).filter((q) => haltOf(q) === 'market').map((q) => q.exch));
+  return m.items.filter((x) => x && MK_KO[x.mk] && hmKst(x.at) && (x.kind === 'cb' ? !halted.has(x.mk) : x.kind === 'sidecar' && (x.dir === 'buy' || x.dir === 'sell')))
+    .sort((p, q) => Date.parse(p.at) - Date.parse(q.at))
+    .map((x) => {
+      const nm = MK_KO[x.mk], buy = x.dir === 'buy';
+      if (x.kind === 'cb') return { cls: 'cb', text: `${nm} 서킷브레이커 ${hmKst(x.at)}`, tip: `${nm} 지수가 전날보다 8% 넘게 떨어져 1분 넘게 이어지면 거래소가 시장 전체 매매를 20분 멈추고 10분 동안 단일가로 다시 시작해요 — 시각은 거래소 정지 시각` };
+      const rule = x.mk === 'KOSPI' ? '코스피200 선물이 5%' : '코스닥150 선물이 6%(코스닥150 지수 3%)';
+      return { cls: buy ? 'buy' : 'sell', text: `${nm} ${buy ? '매수' : '매도'} 사이드카 ${hmKst(x.at)}`,
+        tip: `${rule} 넘게 ${buy ? '올라' : '떨어져'} 1분 넘게 이어지면 거래소가 프로그램 ${buy ? '매수' : '매도'} 주문을 5분 동안 멈춰요(종목 거래는 계속 · 하루 한 번) — 시각은 뉴스 속보 기준이라 1~2분 늦을 수 있어요` };
+    });
+}
 
 // 시장별 묶음: 헤더(종목수·상승/하락 개수·해당 시장 장상태·갱신시각) + 그 시장의 카드 그리드
 function renderGroup(g, list, closed) {
@@ -834,7 +850,7 @@ function tileHtml(q) {
   const vs = vsMarket(q, state.market?.indices);
   const tip = pend ? `${q.name} — ${PENDING_TIP}${disc ? ` · 오늘 주요 공시: ${disc.title}` : ''}`
     : `${q.name} ${fmtPct(p)}${halt ? ` · 매매 정지${since ? `(${since}부터)` : ''} — 값은 멈추기 직전 가격` : ''}${vs ? ` · ${vs.name} 대비 ${fmtPctP(vs.diff)}${vs.follows ? '(시장 따라)' : ''}` : ''}${x ? ` · ${x.label} ${fmtPct(x.changePct)}` : ''}${mk ? ` · 6개월 ${mk === 'high' ? '신고가' : '신저가'}` : ''}${disc ? ` · 오늘 주요 공시: ${disc.title}` : ''}`;
-  return `<button type="button" class="tile ${dirClass(p)} h${lv}${pend ? ' pend' : ''}" data-code="${esc(q.code)}" title="${esc(tip)}">
+  return `<button type="button" class="tile ${dirClass(p)} h${lv}${pend ? ' pend' : ''}${halt ? ' halt' : ''}" data-code="${esc(q.code)}" title="${esc(tip)}">
     <span class="t-nm">${esc(q.name)}</span><span class="t-pct">${pend ? '체결 전' : fmtPct(p)}</span>${halt ? '<span class="t-ext">매매 정지</span>' : x ? `<span class="t-ext">${x.short} ${fmtPct(x.changePct)}</span>` : ''}${disc ? '<span class="t-dot" role="img" aria-label="오늘 주요 공시"></span>' : ''}</button>`;
 }
 
@@ -856,20 +872,21 @@ function extRow(q) {
       <span class="ext-label">${x.label}</span> <b>${fmtPrice({ price: x.price, currency: q.currency })}</b>
       <span class="${dirClass(x.changePct)}-c">${arrow} ${fmtChange({ change: x.change, currency: q.currency })} (${fmtPct(x.changePct)})</span>${at ? ` <span class="muted">· ${esc(at)}</span>` : ''}</div>`;
 }
-function renderBoard(groups, closed) {
+function renderBoard(groups, closed, measures) {
   const el = $('#board');
   if (!el) return;
   const byPct = (a, b) => tileRank(b) - tileRank(a) || 0;
   const mkts = groups.map(({ g, list }) => {
     const { valid, up, down, t, stale, status } = groupInfo(g, list, closed);
     const avg = avgPct(valid), bench = benchOf(g.key, state.market?.indices), note = boardNote(g.key, valid);
+    const meas = g.key === 'KR' ? measuresOf(measures, valid) : [];
     const cmp = avg == null ? '' : `<span class="bm-avg" title="내 종목 등락률의 단순 평균(종목마다 같은 무게) — 같은 시장 지수와 비교">평균 <b class="${dirClass(avg)}-c">${fmtPct(avg)}</b>`
       + `${bench.map((b) => `<span class="bm-idx"${b.exp ? ` title="${EST_TIP}"` : ''}>${esc(b.name)}${b.exp ? ' <span class="est">예상</span>' : ''} <b class="${dirClass(b.pct)}-c">${fmtPct(b.pct)}</b></span>`).join('')}</span>`;
     return `<div class="bm" style="--n:${list.length}">
       <div class="bm-head"><span class="bm-title">${esc(g.label)}</span>
         ${valid.length ? `<span class="mgroup-updown"><b class="up-c">▲ ${up}</b> <b class="down-c">▼ ${down}</b></span>` : ''}${cmp}
         <span class="bm-status${stale ? ' stale' : ''}"${stale ? ` title="${STALE_TIP}"` : ''}>${status}${t ? ` · ${t}` : ''}</span></div>
-      ${note ? `<p class="bm-note">${esc(note)}</p>` : ''}<div class="tiles">${[...list].sort(byPct).map(tileHtml).join('')}</div>
+      ${meas.length ? `<p class="bm-meas"><span>오늘 시장 조치</span>${meas.map((x) => `<b class="mc-${x.cls}" title="${esc(x.tip)}">${esc(x.text)}</b>`).join('')}</p>` : ''}${note ? `<p class="bm-note">${esc(note)}</p>` : ''}<div class="tiles">${[...list].sort(byPct).map(tileHtml).join('')}</div>
     </div>`;
   }).join('');
   // 왜 움직였나 — 시장 순서(국내 → 해외)대로, 그 안에서 많이 움직인 종목부터

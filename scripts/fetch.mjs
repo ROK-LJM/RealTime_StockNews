@@ -15,6 +15,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis,
+  getSidecarNews, sidecarEvents, mergeMeasures,
   aiStatus, aiGate, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, pickReasonNews, tagSentiment, krBaseName,
 } from './sources.mjs';
 import { startBudget, toStored, totalUsed, capacity, inSession, isKrSession, nextAllowanceAt, closedCheckDay, usExtWindow, usAfterPostSameDay } from './aibudget.mjs';
@@ -52,6 +53,27 @@ function readConfig(root) {
     console.error('  ✗ config 읽기 실패 — 기존 데이터 유지:', e.message);
     return null;
   }
+}
+
+// 그날 시장 조치(quotes.json measures — 화면 '한눈에' 국내 칸 위 한 줄). 서킷브레이커는 시세의 시장 전체 정지(halt 'market') 종목의
+// 상장 시장·정지 시각, 사이드카는 뉴스 속보(국내 장 시간에만 받음 — 그 시장 지수가 같은 방향으로 2% 넘게 움직였을 때만 믿는다)
+async function marketMeasures(prev, quotes, indices, now) {
+  const found = [];
+  for (const q of quotes) {
+    if (!q.ok || q.market !== 'KR' || q.halt !== 'market' || (q.exch !== 'KOSPI' && q.exch !== 'KOSDAQ')) continue;
+    const t = Date.parse(q.haltAt);
+    found.push({ kind: 'cb', mk: q.exch, at: new Date(Number.isFinite(t) ? t : now).toISOString() });
+  }
+  if (isKrSession(now)) {
+    try {
+      const sym = { KOSPI: '^KS11', KOSDAQ: '^KQ11' };
+      for (const e of sidecarEvents(await getSidecarNews(), now)) {
+        const p = (indices || []).find((i) => i && i.symbol === sym[e.mk])?.changePct;
+        if (Number.isFinite(p) && Math.abs(p) >= 2 && Math.sign(p) === (e.dir === 'sell' ? -1 : 1)) found.push(e);
+      }
+    } catch (e) { console.error('    사이드카 뉴스 실패:', e.message); }
+  }
+  return mergeMeasures(prev, found, now);
 }
 
 // 1회 갱신. root/dataDir를 바꿔 임시 폴더에서도 돌릴 수 있다(자체 테스트용). 쓴 파일 목록을 돌려준다.
@@ -92,8 +114,10 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
 
   // 1) 지수 + 분위기 + 급등락 핵심 이유/수급 브리핑
   const prevBriefs = (readJson('market.json') || {}).briefs || []; // 지수 AI 재사용용(직전 reason)
+  let marketNow = null; // 2) 시장 조치에서 지수 방향 확인용
   try {
     const market = await getMarket();
+    marketNow = market;
     if (market?.indices?.length) {
       try {
         const briefs = [];
@@ -156,7 +180,10 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
         const list = quotes.filter((q) => q.ok && q.market === m);
         if (day && list.length && !list.some((q) => q.marketStatus === 'OPEN')) closed[m] = day;
       }
-      write('quotes.json', Object.keys(closed).length ? { quotes, closed } : { quotes });
+      // 그날 시장 조치(서킷브레이커·사이드카) — 그날 내내 남는다
+      const idxNow = marketNow?.indices?.length ? marketNow.indices : readJson('market.json')?.indices;
+      const measures = await marketMeasures(prevQuotesFile?.measures, quotes, idxNow, now);
+      write('quotes.json', { quotes, ...(Object.keys(closed).length ? { closed } : {}), ...(measures ? { measures } : {}) });
     } else console.warn('  ! 시세 전부 실패 — quotes.json 유지');
   } catch (e) { console.error('  ✗ 시세 실패 — quotes.json 유지:', e.message); }
 

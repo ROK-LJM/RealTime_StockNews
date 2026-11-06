@@ -329,6 +329,67 @@ async function googleNews(query, ko, recentDays = 0, keep = null, keys = []) {
   return out.slice(0, 8);
 }
 
+// ---------- 시장 조치(사이드카) — 뉴스 속보로 ----------
+// 사이드카(프로그램매매 호가 효력정지 — 코스피200 선물 ±5%, 코스닥은 코스닥150 선물 ±6%·지수 ±3%가 1분 넘게 이어지면 프로그램 매수/매도 주문 5분 정지,
+// 하루 한 번)는 시장 전체 조치라 종목 시세엔 표시가 없고, 무료 실시간 출처도 없다(네이버 지수 응답엔 칸이 없고, 네이버 PC·모바일 페이지는
+// robots.txt가 모든 수집을 막고, 거래소 KIND는 방화벽이 막음 — 2026-11-06 확인). → 구글 뉴스 속보 제목으로 그날 시장·방향·시각을 찾는다.
+// 방향은 '사이드카' 바로 앞 매수/매도, 시장은 그 앞의 가장 가까운 시장 이름('코스피 이어 코스닥도 매도 사이드카' → 코스닥),
+// '코스피·코스닥 동반'처럼 둘을 함께 쓰면 둘 다. 방향이 없거나 '사이드카 해제'면 아님
+const SIDECAR_RE = /(매수|매도)\s*['‘’"“”]?\s*사이드카/;
+export function sidecarOf(title) {
+  const t = String(title ?? '');
+  const m = t.match(SIDECAR_RE);
+  if (!m || /사이드카\S*\s*(?:해제|종료)/.test(t)) return [];
+  const dir = m[1] === '매수' ? 'buy' : 'sell';
+  const head = t.slice(0, m.index);
+  if (!/이어/.test(head) && /코스피\s*[·ㆍ,]\s*코스닥|코스닥\s*[·ㆍ,]\s*코스피|코스피와\s*코스닥|코스닥과\s*코스피/.test(head)) return [{ mk: 'KOSPI', dir }, { mk: 'KOSDAQ', dir }];
+  const i = Math.max(head.lastIndexOf('코스피'), head.lastIndexOf('코스닥'));
+  return i < 0 ? [] : [{ mk: head.startsWith('코스닥', i) ? 'KOSDAQ' : 'KOSPI', dir }];
+}
+// 그날(한국시간) 09:00~15:40 기사에서 시장·방향마다 시각 하나 — 같은 시장·방향 기사가 3분 안에 2건 이상 몰린 첫 시각
+// (기사 하나만 일찍 찍힌 언론사가 있다 — 실측 11/06 09:04 서킷브레이커 기사가 08:40·08:54로 찍힘)
+const KST_OFF = 9 * 3600e3;
+const kstDay = (ms) => new Date(ms + KST_OFF).toISOString().slice(0, 10);
+const kstMinOf = (ms) => { const d = new Date(ms + KST_OFF); return d.getUTCHours() * 60 + d.getUTCMinutes(); };
+export function sidecarEvents(items, now = Date.now()) {
+  const day = kstDay(now), by = new Map();
+  for (const it of Array.isArray(items) ? items : []) {
+    if (!it || !Number.isFinite(it.pubMs) || kstDay(it.pubMs) !== day || kstMinOf(it.pubMs) < 9 * 60 || kstMinOf(it.pubMs) > 15 * 60 + 40) continue;
+    for (const e of sidecarOf(it.title)) { const k = `${e.mk}|${e.dir}`; if (!by.has(k)) by.set(k, []); by.get(k).push(it.pubMs); }
+  }
+  const out = [];
+  for (const [k, ts] of by) {
+    ts.sort((a, b) => a - b);
+    const i = ts.findIndex((t, j) => j + 1 < ts.length && ts[j + 1] - t <= 3 * 60e3);
+    if (i >= 0) { const [mk, dir] = k.split('|'); out.push({ kind: 'sidecar', mk, dir, at: new Date(ts[i]).toISOString() }); }
+  }
+  return out;
+}
+// 구글 뉴스 '사이드카' 최근 하루 기사 [{ title, pubMs }] — 발행 시각 없는 기사는 뺀다
+export async function getSidecarNews() {
+  const xml = await http(`https://news.google.com/rss/search?q=${encodeURIComponent('사이드카 when:1d')}&hl=ko&gl=KR&ceid=KR:ko`, { as: 'text' });
+  return xml.split('<item>').slice(1).map((b) => {
+    const pick = (tag) => { const m = b.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`)); return m ? decodeEntities(m[1].replace(/<!\[CDATA\[|\]\]>/g, '').trim()) : ''; };
+    const pub = Date.parse(pick('pubDate'));
+    return { title: pick('title'), pubMs: Number.isFinite(pub) ? pub : null };
+  }).filter((it) => it.title && it.pubMs != null);
+}
+// 그날 시장 조치 기록 { day: 'YYYY-MM-DD'(한국), items[{ kind: 'cb'(서킷브레이커)|'sidecar', mk: 'KOSPI'|'KOSDAQ', dir?: 'buy'|'sell', at: ISO }] }
+// — 그날 시각인 것만(날이 바뀌면 새로), 같은 조치(종류·시장·방향)는 가장 이른 시각 하나, 시각순. 없으면 null
+export function mergeMeasures(prev, found, now = Date.now()) {
+  const day = kstDay(now);
+  const ok = (x) => !!x && (x.kind === 'cb' || (x.kind === 'sidecar' && (x.dir === 'buy' || x.dir === 'sell'))) && (x.mk === 'KOSPI' || x.mk === 'KOSDAQ')
+    && Number.isFinite(Date.parse(x.at)) && kstDay(Date.parse(x.at)) === day;
+  const items = (Array.isArray(prev?.items) ? prev.items : []).filter(ok).map((x) => ({ ...x }));
+  for (const e of (Array.isArray(found) ? found : []).filter(ok)) {
+    const same = items.find((x) => x.kind === e.kind && x.mk === e.mk && x.dir === e.dir);
+    if (!same) items.push({ kind: e.kind, mk: e.mk, ...(e.kind === 'sidecar' ? { dir: e.dir } : {}), at: e.at });
+    else if (Date.parse(e.at) < Date.parse(same.at)) same.at = e.at;
+  }
+  items.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  return items.length ? { day, items } : null;
+}
+
 // ---------- 종목 뉴스 관련도 ----------
 // 구글 뉴스 검색은 느슨해서 도박·카지노 광고, 다른 종목이 주인공인 시황·상장 공지 기사가 섞인다
 // (실측 2026-10-21: 238건 중 93건(39%)이 제목에 종목 이름 없음 — '토토미 쌀국수', 'a1 카지노', 'ELW 224종목 신규 상장' 등).

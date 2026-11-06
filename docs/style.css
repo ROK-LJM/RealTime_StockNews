@@ -196,6 +196,13 @@ input::placeholder { color: var(--muted); }
 .bm-idx::before { content: '·'; margin-right: 8px; }
 .bm-note { margin: -2px 0 8px; font-size: 12.5px; color: var(--muted); } /* 안내 한 줄 — 개장 전 · 시장 전체 매매 정지 · 첫 체결 전 */
 .est { font-size: 11px; font-weight: 600; color: var(--muted); } /* 개장 전 예상 지수 */
+/* 오늘 시장 조치 한 줄 — 서킷브레이커 주황 · 매도 사이드카 파랑 · 매수 사이드카 빨강(그날 내내) */
+.bm-meas { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; margin: -2px 0 6px; font-size: 12.5px; color: var(--muted); }
+.bm-meas b { font-weight: 700; cursor: help; }
+.bm-meas b + b::before { content: '·'; margin-right: 8px; color: var(--muted); font-weight: 400; }
+.mc-cb { color: var(--warn); }
+.mc-sell { color: var(--down-deep); }
+.mc-buy { color: var(--up-deep); }
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 6px; }
 .tile { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; min-height: 60px;
   padding: 9px 11px 8px; border: 0; border-radius: 10px; background: var(--surface-2); color: var(--text); text-align: left; }
@@ -214,6 +221,7 @@ input::placeholder { color: var(--muted); }
 .tile.down .t-pct { color: var(--down-deep); }
 .tile.flat .t-pct { color: var(--muted); }
 .tile.pend .t-pct { font-size: 13px; font-weight: 600; } /* 첫 체결 전 — 등락률 대신 '체결 전' */
+.tile.halt { box-shadow: inset 0 0 0 2px var(--warn); } /* 매매 정지 — 칸 테두리 주황 */
 .tile.h3 .t-pct, .tile.h4 .t-pct { color: #fff; }
 .tile.h3 .t-ext, .tile.h4 .t-ext { opacity: 1; } /* 진한 칸에선 흐리게 하면 글자가 묻힘 */
 .tile.err { background: transparent; color: var(--muted); box-shadow: inset 0 0 0 1px var(--line-2); }
