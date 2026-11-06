@@ -890,8 +890,9 @@ function tileHtml(q) {
 function extOf(q) {
   const x = q && q.ok && q.marketStatus !== 'OPEN' ? q.ext : null;
   if (!x || !Number.isFinite(x.price) || !Number.isFinite(x.changePct)) return null;
-  const pre = x.session === 'pre';
-  return { ...x, label: pre ? '프리마켓' : '애프터마켓', short: pre ? '프리' : '애프터' };
+  // 국내는 정규장 뒤 시간외 단일가 가격(34차 — 봇이 정규장 종가를 지키고 붙임)
+  const pre = x.session === 'pre', kr = marketOf(q) === 'KR';
+  return { ...x, label: kr ? '시간외' : pre ? '프리마켓' : '애프터마켓', short: kr ? '시간외' : pre ? '프리' : '애프터' };
 }
 function extRow(q) {
   const x = extOf(q);

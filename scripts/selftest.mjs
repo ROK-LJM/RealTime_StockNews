@@ -2052,6 +2052,48 @@ await test('급등락 기록(33차): 지난날 기록의 이유도 지금 규칙
   await pipeline(r3, { krAt: NOW_KR, gemini: () => text('upstream error', 500), news: () => text('<?xml version="1.0"?><rss><channel></channel></rss>') });
   assert.deepEqual(read(r3, 'moves.json')['005930'][0], { d: '20261015', p: 4.2, r: '', s: '' }, '방향이 뒤집힌 날의 공시 이유는 버림');
 });
+await test('국내 정규장 뒤(34차): 지수가 마감이면 상태 마감 · 시간외 체결 전 값에 closeFix · 뒤 회차는 정규장 종가를 지키고 시간외 가격은 ext · 놓쳤으면 야후 일봉 종가 · 지수가 장중(수능일)·개장 전이면 그대로 · 화면 "시간외"', async () => {
+  const at = (hm) => T('2026-10-15T' + hm + ':00+09:00');
+  const kr = (root) => read(root, 'quotes.json').quotes.find((q) => q.code === '005930');
+  const close = { market: 'KR', code: '005930', name: '삼성전자', ok: true, currency: 'KRW', price: 70000, prevClose: 67178, change: 2822, changePct: 4.2, open: 69000, high: 71000, low: 68000, volume: 1234567, marketStatus: 'CLOSE', asOf: '2026-10-15T15:30:00+09:00', closeFix: 1 };
+  // ① 종가 뒤 첫 회차(15:30 시각, 시간외 체결 전) — 상태 마감 · closeFix
+  const r1 = workspace();
+  await pipeline(r1, { idxStatus: 'CLOSE', krAt: at('15:30') });
+  assert.deepEqual([kr(r1).marketStatus, kr(r1).closeFix, 'ext' in kr(r1)], ['CLOSE', 1, false]);
+  // ② 시간외 체결(17:00 · 71,000원) — 정규장 종가를 지키고 시간외 가격은 ext
+  const r2 = workspace();
+  writeData(r2, 'quotes.json', { quotes: [close] });
+  await pipeline(r2, { idxStatus: 'CLOSE', krAt: at('17:00'), krExtra: { '005930': { closePrice: '71,000' } } });
+  const q2 = kr(r2);
+  assert.deepEqual([q2.price, q2.changePct, q2.prevClose, q2.volume, q2.asOf, q2.marketStatus, q2.closeFix], [70000, 4.2, 67178, 1234567, close.asOf, 'CLOSE', 1]);
+  assert.deepEqual(q2.ext, { session: 'post', price: 71000, change: 1000, changePct: 1.43, at: at('17:00') });
+  assert.equal(read(r2, 'moves.json')['005930'][0].p, 4.2, '급등락 기록도 정규장 등락');
+  // ③ 종가 회차를 놓쳤으면(배포 직후) 야후 일봉의 그날 종가
+  const r3 = workspace();
+  writeData(r3, 'quotes.json', { quotes: [{ ...close, closeFix: undefined, price: 70800, asOf: '2026-10-15T17:55:00+09:00' }] });
+  writeData(r3, 'history.json', { '005930': { dates: [T('2026-10-14T00:00:00Z'), T('2026-10-15T00:00:00Z')], closes: [67000, 69000] } });
+  await pipeline(r3, { idxStatus: 'CLOSE', krAt: at('18:00'), krExtra: { '005930': { closePrice: '71,000' } } });
+  const q3 = kr(r3), prev = 71000 - Math.round(70000 * 4.2 / 100);
+  assert.deepEqual([q3.price, q3.changePct, q3.asOf, 'closeFix' in q3], [69000, Math.round(((69000 - prev) / prev) * 10000) / 100, '2026-10-15T15:30:00+09:00', false]);
+  assert.deepEqual([q3.ext.price, q3.ext.change], [71000, 2000]);
+  // ④ 지수가 아직 장중(수능일처럼 늦게 닫는 날 15:35) · 개장 전 시세는 그대로
+  const r4 = workspace();
+  writeData(r4, 'quotes.json', { quotes: [close] });
+  await pipeline(r4, { idxStatus: 'OPEN', krAt: at('15:35'), krExtra: { '005930': { closePrice: '71,000' } } });
+  assert.deepEqual([kr(r4).price, kr(r4).marketStatus, 'closeFix' in kr(r4)], [71000, 'OPEN', false]);
+  const r5 = workspace();
+  await pipeline(r5, { idxStatus: 'CLOSE', krStatus: 'PREOPEN', krAt: at('08:30') });
+  assert.deepEqual([kr(r5).marketStatus, 'closeFix' in kr(r5)], ['PREOPEN', false]);
+  // 화면 — 국내 ext는 '시간외'(미국은 애프터마켓·프리마켓 그대로)
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const mo = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('\n', appJs.indexOf('function marketOf(')));
+  const g = vm.runInNewContext(mo + '\n' + appJs.slice(appJs.indexOf('function extOf('), appJs.indexOf('function extRow(')) + '; ({ extOf })', {});
+  const ext = { session: 'post', price: 71000, change: 1000, changePct: 1.43, at: 1 };
+  assert.deepEqual([g.extOf({ ok: true, market: 'KR', marketStatus: 'CLOSE', ext }).label, g.extOf({ ok: true, market: 'KR', marketStatus: 'CLOSE', ext }).short], ['시간외', '시간외']);
+  assert.deepEqual([g.extOf({ ok: true, market: 'US', marketStatus: 'CLOSE', ext }).label, g.extOf({ ok: true, market: 'US', marketStatus: 'CLOSE', ext: { ...ext, session: 'pre' } }).short], ['애프터마켓', '프리']);
+  assert.equal(g.extOf({ ok: true, market: 'KR', marketStatus: 'OPEN', ext }), null, '장중엔 안 보임');
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');

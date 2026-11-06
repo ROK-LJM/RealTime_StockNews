@@ -170,6 +170,47 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
           changePct: Math.round((change / q.price) * 10000) / 100, at: ext.at };
       }
       if (win || extKept) console.log(`  · 미국 시간외: 새로 ${extFresh}건 · 직전 값 ${extKept}건${win ? ` (${win === 'pre' ? '프리마켓' : '애프터마켓'} 시간대)` : ''}`);
+      // 국내 정규장 뒤 시세(34차) — 네이버 종목 시세는 정규장이 끝난 뒤에도 '장중'으로 오고, 16시부터는 시간외 단일가 체결이 섞여 가격·등락이 바뀐다
+      // (11/06 18시 삼성전자가 정규장 종가 188,700원 -6.35% 대신 190,900원 -5.26% — 지수는 정규장 종가라 비교도 어긋남, 설명서는 '큰 가격 = 정규장 종가').
+      // 정규장이 끝났는지는 지수(코스피·코스닥 모두 '마감')로 본다(수능일처럼 늦게 닫는 날도 맞게). 끝났으면 ① 상태 '마감' ② 정규장 종가를 지킨다 —
+      // 종가 뒤 시간외 체결 전(16시 전) 값에 closeFix를 남겨 이어 쓰고, 그 회차를 놓쳤으면(배포 직후 등) 야후 일봉의 그날 종가 ③ 정규장 뒤 가격은 ext(화면 '시간외' 줄)
+      const krIdx = ((marketNow?.indices?.length ? marketNow.indices : readJson('market.json')?.indices) || []).filter((i) => i && (i.symbol === '^KS11' || i.symbol === '^KQ11'));
+      if (krIdx.length && krIdx.every((i) => i.marketStatus === 'CLOSE')) {
+        const prevKr = new Map((prevQuotesFile?.quotes || []).filter((q) => q && q.market === 'KR').map((q) => [q.code, q]));
+        const hist = readJson('history.json') || {};
+        const kstMin = (ms) => { const d = new Date(ms + 9 * 3600e3); return d.getUTCHours() * 60 + d.getUTCMinutes(); };
+        const REG = ['price', 'prevClose', 'change', 'changePct', 'open', 'high', 'low', 'volume', 'asOf'];
+        let fixed = 0, after = 0;
+        for (const q of quotes) {
+          if (!q.ok || q.market !== 'KR' || !(q.price > 0) || q.marketStatus === 'PREOPEN') continue;
+          const at = +new Date(q.asOf);
+          if (!Number.isFinite(at)) continue;
+          q.marketStatus = 'CLOSE';
+          const day = ymdIn(at, MARKET_TZ.KR), p = prevKr.get(q.code), pAt = p ? +new Date(p.asOf) : NaN;
+          let reg = null, fromPrev = false;
+          if (p && p.closeFix && p.price > 0 && Number.isFinite(pAt) && ymdIn(pAt, MARKET_TZ.KR) === day) { reg = Object.fromEntries(REG.map((k) => [k, p[k]])); fromPrev = true; }
+          else if (kstMin(at) < 16 * 60) { q.closeFix = 1; fixed++; continue; } // 시간외 체결 전 — 이 값이 정규장 종가
+          else {
+            const h = hist[q.code], n = Array.isArray(h?.closes) && Array.isArray(h?.dates) ? Math.min(h.closes.length, h.dates.length) : 0;
+            const c = n ? h.closes[n - 1] : NaN, cAt = n ? h.dates[n - 1] : NaN;
+            if (c > 0 && Number.isFinite(cAt) && ymdIn(cAt, MARKET_TZ.KR) === day && q.prevClose > 0) {
+              const change = c - q.prevClose;
+              reg = { price: c, change: Math.round(change * 100) / 100, changePct: Math.round((change / q.prevClose) * 10000) / 100,
+                asOf: `${day.slice(0, 4)}-${day.slice(4, 6)}-${day.slice(6, 8)}T15:30:00+09:00` };
+            }
+          }
+          if (!reg) continue;
+          const afterPrice = q.price;
+          Object.assign(q, reg);
+          if (fromPrev) q.closeFix = 1;
+          if (at > +new Date(q.asOf) + 60e3) {
+            const change = afterPrice - q.price;
+            q.ext = { session: 'post', price: afterPrice, change: Math.round(change * 100) / 100, changePct: Math.round((change / q.price) * 10000) / 100, at };
+            after++;
+          }
+        }
+        if (fixed || after) console.log(`  · 국내 정규장 뒤: 종가 표시 ${fixed}종목 · 시간외 가격 ${after}종목`);
+      }
       // 휴장 확인 기록 { KR: 'YYYY-MM-DD', US: … } — 장 시간인데 그 시장 시세가 하나도 '장중'이 아니면 오늘 날짜를 남긴다.
       // 화면은 오늘 기록이 없을 때만 '개장 후 갱신 없음'을 띄운다(수집 중단 경고가 휴장일에 뜨지 않게). 휴장일마다 한 번만 바뀐다.
       const closed = {};
