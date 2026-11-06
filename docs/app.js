@@ -309,14 +309,14 @@ async function loadMarket() {
     // 국내 / 미국 / 환율 세 묶음의 줄 목록 — 작은 카드 7개가 줄바꿈되며 하나만 남던 배치를 없애고, 휴대폰에서 높이를 절반으로.
     // 지수 변동폭은 '포인트'라 통화 기호를 붙이지 않는다(예전엔 미국 지수에 $가 붙었다).
     const num2 = (v) => Math.abs(v ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const row = (name, price, change, pct, unit = '') => {
+    const row = (name, price, change, pct, unit = '', est = false) => {
       const c = dirClass(pct);
       const arrow = pct > 0 ? '▲' : pct < 0 ? '▼' : '–';
-      return `<div class="idx-row"><span class="nm">${esc(name)}</span>
+      return `<div class="idx-row"${est ? ` title="${EST_TIP}"` : ''}><span class="nm">${esc(name)}${est ? ' <span class="est">예상</span>' : ''}</span>
         <span class="pv">${price}${unit ? `<span class="fx-u">${unit}</span>` : ''}</span>
         <span class="ch ${c}-c">${arrow} ${num2(change)}</span><span class="pc ${c}-c">${fmtPct(pct)}</span></div>`;
     };
-    const idxRow = (i) => row(i.name, (i.price ?? 0).toLocaleString('en-US', { maximumFractionDigits: 2 }), i.change, i.changePct);
+    const idxRow = (i) => row(i.name, (i.price ?? 0).toLocaleString('en-US', { maximumFractionDigits: 2 }), i.change, i.changePct, '', expIdx(i));
     const fxRow = (f) => row(f.name, (f.price ?? 0).toLocaleString('ko-KR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), f.change, f.changePct, '원');
     const idx = m.indices || [];
     const groups = [
@@ -338,7 +338,7 @@ function renderBriefs(briefs) {
   if (!el) return;
   if (!briefs || !briefs.length) { el.innerHTML = ''; return; }
   el.innerHTML = briefs.map((b) => {
-    const pct = b.changePct ?? 0;
+    const pct = b.changePct ?? 0, est = expIdx((state.market?.indices || []).find((i) => i && i.currency === 'KRW' && i.name === b.name));
     const dirCls = pct < 0 ? 'down' : pct > 0 ? 'up' : 'flat';
     const cardCls = pct < 0 ? 'brief-down' : pct > 0 ? 'brief-up' : '';
     const arrow = pct > 0 ? '▲' : pct < 0 ? '▼' : '–';
@@ -375,7 +375,7 @@ function renderBriefs(briefs) {
     return `<div class="brief ${cardCls}">
       <div class="brief-head">
         <span class="brief-name">${esc(b.name)}</span>
-        <span class="brief-chg ${dirCls}-c">${arrow} ${fmtPct(pct)}</span>
+        <span class="brief-chg ${dirCls}-c"${est ? ` title="${EST_TIP}"` : ''}>${est ? '<span class="est">예상</span> ' : ''}${arrow} ${fmtPct(pct)}</span>
         <span class="brief-tag ${dirCls}">${label}</span>
       </div>
       ${reasonBlock}
@@ -516,16 +516,28 @@ function marketYmd(ms, market) {
   const tz = market === 'KR' ? 'Asia/Seoul' : 'America/New_York';
   return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(ms).replace(/-/g, '');
 }
-// 내 종목 등락률의 단순 평균(보유 비중을 모르므로 종목마다 같은 무게) — 수집 실패·값 없는 종목은 뺀다
+// 첫 체결 전 — 국내 장중인데 오늘 거래량이 없으면 아직 체결이 없는 것(가격 = 어제 종가·0%). 개장 직후엔 체결이 늦게 잡히는 종목이 있고,
+// 시가가 10% 넘게 벌어지면 거래소가 시가 결정을 2분 미룬다(정적 변동성 완화장치). 0%로 세지 않는다 — 평균·시장 대비에서 빼고 칸은 '체결 전'·맨 뒤.
+// 매매 정지 종목은 멈추기 직전 값이 있으니 해당 없음
+function pendingOf(q) { return !!(q && q.ok && marketOf(q) === 'KR' && q.marketStatus === 'OPEN' && !(q.volume > 0) && !q.halt); }
+// 매매 정지 — 봇이 붙인 halt('market' 시장 전체 · 'stock' 그 종목만), 장중일 때만
+const haltOf = (q) => (q && q.ok && q.halt && q.marketStatus === 'OPEN' ? q.halt : '');
+// '한눈에' 칸 순서 — 많이 오른 종목부터, 첫 체결 전은 체결된 종목 뒤, 시세 실패는 맨 뒤
+const tileRank = (q) => (q && q.ok ? (pendingOf(q) ? -1e9 : q.changePct ?? 0) : -Infinity);
+// 내 종목 등락률의 단순 평균(보유 비중을 모르므로 종목마다 같은 무게) — 수집 실패·값 없는·첫 체결 전 종목은 뺀다
 function avgPct(list) {
-  const v = list.filter((q) => q && q.ok && Number.isFinite(q.changePct)).map((q) => q.changePct);
+  const v = list.filter((q) => q && q.ok && Number.isFinite(q.changePct) && !pendingOf(q)).map((q) => q.changePct);
   return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
 }
-// 같은 시장 지수(market.json의 기호) — '한눈에' 시장 머리에 내 종목 평균과 나란히
+// 예상 지수 — 개장 직전(국내 8시 40~50분쯤부터)과 9시 몇 초 동안 네이버 지수는 '개장 전'인 채로 동시호가 주문으로 계산한 예상값을 준다.
+// 실제 지수처럼 보이지 않게 '예상'을 붙이고 종목과 비교(시장 대비)하지 않는다. 0%(어제 종가 그대로)는 예상값이 아님
+const expIdx = (i) => !!(i && i.marketStatus === 'PREOPEN' && Number.isFinite(i.changePct) && i.changePct !== 0);
+const EST_TIP = '9시 개장 전 동시호가 주문으로 계산한 예상 지수 — 실제 시가와 다를 수 있어요';
+// 같은 시장 지수(market.json의 기호) — '한눈에' 시장 머리에 내 종목 평균과 나란히(예상 지수면 exp)
 const BENCH = { KR: [['^KS11', '코스피'], ['^KQ11', '코스닥']], US: [['^GSPC', 'S&P 500'], ['^IXIC', '나스닥']] };
 function benchOf(key, indices) {
   return (BENCH[key] || []).map(([sym, name]) => (indices || []).find((i) => i && i.symbol === sym && Number.isFinite(i.changePct)))
-    .filter(Boolean).map((i) => ({ name: BENCH[key].find(([sym]) => sym === i.symbol)[1], pct: i.changePct }));
+    .filter(Boolean).map((i) => ({ name: BENCH[key].find(([sym]) => sym === i.symbol)[1], pct: i.changePct, ...(expIdx(i) ? { exp: true } : {}) }));
 }
 // 오늘 가격이 최근 6개월 종가(오늘 봉은 빼고) 중 가장 높으면 'high', 가장 낮으면 'low' — 차트와 같은 과거 시세 기준
 function sixMonthMark(q, h) {
@@ -625,10 +637,10 @@ function benchFor(q, indices) {
   const ex = String(q && q.exch || '');
   const sym = marketOf(q || {}) === 'KR' ? (ex === 'KOSPI' ? '^KS11' : ex === 'KOSDAQ' ? '^KQ11' : null) : (!ex ? null : /NASDAQ/.test(ex) ? '^IXIC' : '^GSPC');
   const i = sym && (indices || []).find((x) => x && x.symbol === sym && Number.isFinite(x.changePct));
-  return i ? { sym, name: BENCH_NAME[sym], pct: i.changePct } : null;
+  return i && !expIdx(i) ? { sym, name: BENCH_NAME[sym], pct: i.changePct } : null; // 예상 지수와는 비교하지 않는다
 }
 function vsMarket(q, indices) {
-  const b = q && q.ok && Number.isFinite(q.changePct) ? benchFor(q, indices) : null;
+  const b = q && q.ok && Number.isFinite(q.changePct) && !pendingOf(q) ? benchFor(q, indices) : null; // 첫 체결 전(0%)은 비교하지 않는다
   if (!b) return null;
   const diff = Math.round((q.changePct - b.pct) * 100) / 100;
   return { ...b, diff, follows: Math.abs(b.pct) >= 1 && Math.sign(q.changePct) === Math.sign(b.pct) && Math.abs(diff) < 1 };
@@ -721,6 +733,31 @@ function staleOf(market, valid, closed, ms = Date.now()) {
 // 개장 전(국내 08:00~09:00 첫 체결 전) — 네이버 시세가 모두 '개장 전'·어제 종가(0%)라 칸이 모두 무채색이다. 비어 보이지 않게 까닭을 한 줄로
 const PREOPEN_NOTE = '9시 개장 전이라 모두 어제 종가(0%)예요 — 첫 체결 뒤 1분쯤 지나 바뀌고, 9시 10분까지는 1분마다 새로 받아요.';
 const preOpenNote = (key, valid) => (key === 'KR' && valid.length && valid.every((q) => q.marketStatus === 'PREOPEN') ? PREOPEN_NOTE : '');
+// 한국시간 'HH:MM' — 시각을 모르면 ''
+function hmKst(iso) {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '';
+  const c = marketClock('Asia/Seoul', t);
+  return `${String(Math.floor(c.min / 60)).padStart(2, '0')}:${String(c.min % 60).padStart(2, '0')}`;
+}
+// 시장 전체 매매 정지(서킷브레이커 같은 시장 조치 — halt 'market')면 어느 시장이 언제부터 멈췄는지 한 줄. 한 종목만 멈춘 건 칸·카드에만
+function haltNote(key, valid) {
+  const h = key === 'KR' ? valid.filter((q) => haltOf(q) === 'market') : [];
+  if (!h.length) return '';
+  const mk = [...new Set(h.map((q) => (q.exch === 'KOSPI' ? '코스피' : q.exch === 'KOSDAQ' ? '코스닥' : '')))].filter(Boolean).join('·');
+  const first = h.map((q) => q.haltAt).filter((s) => hmKst(s)).sort((a, b) => Date.parse(a) - Date.parse(b))[0];
+  return `${mk ? `${mk} ` : ''}시장 전체 매매가 ${first ? `${hmKst(first)}부터 ` : ''}멈춰 있어요(서킷브레이커 같은 시장 조치) — ‘매매 정지’ 칸은 멈추기 직전 가격이에요.`;
+}
+// 첫 체결 전 — 칸 말풍선 · 평일 9시~9시 30분엔 '한눈에' 안내 한 줄(그 뒤로는 칸에만)
+const PENDING_TIP = '오늘 아직 체결이 없어요(어제 종가 그대로). 개장 직후엔 체결이 늦게 잡히기도 하고, 시가가 10% 넘게 벌어지면 거래소가 시가 결정을 2분 미뤄요(변동성 완화장치)';
+function pendingNote(key, valid, ms = Date.now()) {
+  const n = key === 'KR' ? valid.filter(pendingOf).length : 0;
+  const c = marketClock('Asia/Seoul', ms);
+  return n && !c.weekend && c.min >= 9 * 60 && c.min < 9 * 60 + 30
+    ? `${n}종목은 아직 첫 체결 전이에요 — 개장 직후엔 체결이 늦게 잡히기도 하고, 시가가 10% 넘게 벌어지면 거래소가 시가 결정을 2분 미뤄요(변동성 완화장치).` : '';
+}
+// '한눈에' 시장 안내 한 줄 — 개장 전 → 시장 전체 매매 정지 → 첫 체결 전 순으로 하나만
+const boardNote = (key, valid, ms) => preOpenNote(key, valid) || haltNote(key, valid) || pendingNote(key, valid, ms);
 
 // 시장별 묶음: 헤더(종목수·상승/하락 개수·해당 시장 장상태·갱신시각) + 그 시장의 카드 그리드
 function renderGroup(g, list, closed) {
@@ -788,15 +825,17 @@ function tileHtml(q) {
   if (!q || !q.ok) {
     return `<button type="button" class="tile err" data-code="${esc(q?.code)}" title="시세를 받지 못함 — 눌러서 이유 보기"><span class="t-nm">${esc(q?.name || q?.code)}</span><span class="t-pct">시세 없음</span></button>`;
   }
-  const p = q.changePct ?? 0;
+  const pend = pendingOf(q), halt = haltOf(q), since = halt && hmKst(q.haltAt);
+  const p = pend ? 0 : q.changePct ?? 0;
   const ap = Math.abs(p), lv = ap < 0.5 ? 0 : ap < 1.5 ? 1 : ap < 3 ? 2 : ap < 5 ? 3 : 4; // 색 진하기 5단계(0.5·1.5·3·5%) — 3% 이상은 진한 색에 흰 글자
   const disc = keyDiscToday(q.code);
   const x = extOf(q);
   const mk = sixMonthMark(q, state.hist[q.code]);
   const vs = vsMarket(q, state.market?.indices);
-  const tip = `${q.name} ${fmtPct(p)}${vs ? ` · ${vs.name} 대비 ${fmtPctP(vs.diff)}${vs.follows ? '(시장 따라)' : ''}` : ''}${x ? ` · ${x.label} ${fmtPct(x.changePct)}` : ''}${mk ? ` · 6개월 ${mk === 'high' ? '신고가' : '신저가'}` : ''}${disc ? ` · 오늘 주요 공시: ${disc.title}` : ''}`;
-  return `<button type="button" class="tile ${dirClass(p)} h${lv}" data-code="${esc(q.code)}" title="${esc(tip)}">
-    <span class="t-nm">${esc(q.name)}</span><span class="t-pct">${fmtPct(p)}</span>${x ? `<span class="t-ext">${x.short} ${fmtPct(x.changePct)}</span>` : ''}${disc ? '<span class="t-dot" role="img" aria-label="오늘 주요 공시"></span>' : ''}</button>`;
+  const tip = pend ? `${q.name} — ${PENDING_TIP}${disc ? ` · 오늘 주요 공시: ${disc.title}` : ''}`
+    : `${q.name} ${fmtPct(p)}${halt ? ` · 매매 정지${since ? `(${since}부터)` : ''} — 값은 멈추기 직전 가격` : ''}${vs ? ` · ${vs.name} 대비 ${fmtPctP(vs.diff)}${vs.follows ? '(시장 따라)' : ''}` : ''}${x ? ` · ${x.label} ${fmtPct(x.changePct)}` : ''}${mk ? ` · 6개월 ${mk === 'high' ? '신고가' : '신저가'}` : ''}${disc ? ` · 오늘 주요 공시: ${disc.title}` : ''}`;
+  return `<button type="button" class="tile ${dirClass(p)} h${lv}${pend ? ' pend' : ''}" data-code="${esc(q.code)}" title="${esc(tip)}">
+    <span class="t-nm">${esc(q.name)}</span><span class="t-pct">${pend ? '체결 전' : fmtPct(p)}</span>${halt ? '<span class="t-ext">매매 정지</span>' : x ? `<span class="t-ext">${x.short} ${fmtPct(x.changePct)}</span>` : ''}${disc ? '<span class="t-dot" role="img" aria-label="오늘 주요 공시"></span>' : ''}</button>`;
 }
 
 // ---------- 미국 시간외(프리·애프터마켓) 가격 ----------
@@ -820,12 +859,12 @@ function extRow(q) {
 function renderBoard(groups, closed) {
   const el = $('#board');
   if (!el) return;
-  const byPct = (a, b) => (b && b.ok ? b.changePct ?? 0 : -Infinity) - (a && a.ok ? a.changePct ?? 0 : -Infinity) || 0;
+  const byPct = (a, b) => tileRank(b) - tileRank(a) || 0;
   const mkts = groups.map(({ g, list }) => {
     const { valid, up, down, t, stale, status } = groupInfo(g, list, closed);
-    const avg = avgPct(valid), bench = benchOf(g.key, state.market?.indices), note = preOpenNote(g.key, valid);
+    const avg = avgPct(valid), bench = benchOf(g.key, state.market?.indices), note = boardNote(g.key, valid);
     const cmp = avg == null ? '' : `<span class="bm-avg" title="내 종목 등락률의 단순 평균(종목마다 같은 무게) — 같은 시장 지수와 비교">평균 <b class="${dirClass(avg)}-c">${fmtPct(avg)}</b>`
-      + `${bench.map((b) => `<span class="bm-idx">${esc(b.name)} <b class="${dirClass(b.pct)}-c">${fmtPct(b.pct)}</b></span>`).join('')}</span>`;
+      + `${bench.map((b) => `<span class="bm-idx"${b.exp ? ` title="${EST_TIP}"` : ''}>${esc(b.name)}${b.exp ? ' <span class="est">예상</span>' : ''} <b class="${dirClass(b.pct)}-c">${fmtPct(b.pct)}</b></span>`).join('')}</span>`;
     return `<div class="bm" style="--n:${list.length}">
       <div class="bm-head"><span class="bm-title">${esc(g.label)}</span>
         ${valid.length ? `<span class="mgroup-updown"><b class="up-c">▲ ${up}</b> <b class="down-c">▼ ${down}</b></span>` : ''}${cmp}
@@ -1051,7 +1090,10 @@ function renderCard(q, hist, inv) {
   const mk = sixMonthMark(q, hist);
   if (mk) badge = `<span class="badge mark ${mk}" title="오늘 가격이 최근 6개월 종가 중 가장 ${mk === 'high' ? '높음' : '낮음'}">6개월 ${mk === 'high' ? '신고가' : '신저가'}</span>${badge}`;
   const arrow = q.changePct > 0 ? '▲' : q.changePct < 0 ? '▼' : '–';
-  const status = q.marketStatus === 'OPEN' ? '<span class="sdot live"></span>장중' : q.marketStatus === 'PREOPEN' ? '<span class="sdot"></span>개장 전' : '<span class="sdot"></span>마감';
+  const halt = haltOf(q), since = halt && hmKst(q.haltAt);
+  const status = halt ? `<span class="sdot warn"></span>매매 정지${since ? ` (${since}부터)` : ''}`
+    : pendingOf(q) ? '<span class="sdot"></span>체결 전'
+    : q.marketStatus === 'OPEN' ? '<span class="sdot live"></span>장중' : q.marketStatus === 'PREOPEN' ? '<span class="sdot"></span>개장 전' : '<span class="sdot"></span>마감';
 
   const closes = hist && hist.closes;
   const retRow = closes

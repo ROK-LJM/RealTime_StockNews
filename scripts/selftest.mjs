@@ -56,11 +56,11 @@ function yahooChart(sym, pct) {
     timestamp: ts, indicators: { quote: [{ close: closes }] },
   }] } };
 }
-const naverStock = (code, pct, status = 'OPEN', at = null) => ({ datas: [{
+const naverStock = (code, pct, status = 'OPEN', at = null, extra = {}) => ({ datas: [{
   stockName: `종목${code}`, closePrice: '70,000', compareToPreviousClosePrice: String(Math.round(Math.abs(70000 * pct / 100))),
   fluctuationsRatio: String(Math.abs(pct)), compareToPreviousPrice: { name: pct > 0 ? 'RISING' : pct < 0 ? 'FALLING' : 'EVEN' },
   openPrice: '69,000', highPrice: '71,000', lowPrice: '68,000', accumulatedTradingVolume: '1,234,567',
-  marketStatus: status, localTradedAt: (at == null ? new Date() : new Date(at)).toISOString(),
+  marketStatus: status, localTradedAt: (at == null ? new Date() : new Date(at)).toISOString(), ...extra,
 }] });
 const naverIndex = (pct, status = 'OPEN') => ({ datas: [{ closePriceRaw: '2,600.00', compareToPreviousClosePriceRaw: (2600 * pct / 100).toFixed(1), fluctuationsRatioRaw: pct.toFixed(2), marketStatus: status }] });
 const trendStock = [{ bizdate: '20261015', foreignerPureBuyQuant: '-1,000', organPureBuyQuant: '500', individualPureBuyQuant: '500', foreignerHoldRatio: '50.00%' }];
@@ -192,7 +192,7 @@ async function withDartKey(fn) {
   try { return await fn(); } finally { delete process.env.DART_API_KEY; }
 }
 
-function routes({ krPct = { '005930': 4.2, '000660': 0.3 }, krAt = null, usPct = {}, idxPct = -1.2, krStatus = 'OPEN', idxStatus = 'OPEN', newsTag = '', news = (m, u) => text(rss(newsTag, queryName(u))),
+function routes({ krPct = { '005930': 4.2, '000660': 0.3 }, krAt = null, krExtra = {}, usPct = {}, idxPct = -1.2, krStatus = 'OPEN', idxStatus = 'OPEN', newsTag = '', news = (m, u) => text(rss(newsTag, queryName(u))),
   yahoo = (m, u) => { // 시간외(5분봉) 요청엔 기본적으로 체결 없음 — 시간외 전용 테스트만 봉을 준다
     const sym = decodeURIComponent(m[1]);
     return json(/interval=5m/.test(u) ? { chart: { result: [{ meta: {}, timestamp: [], indicators: { quote: [{ close: [] }] } }] } } : yahooChart(sym, usPct[sym]));
@@ -206,7 +206,7 @@ function routes({ krPct = { '005930': 4.2, '000660': 0.3 }, krAt = null, usPct =
     { re: /api\.nasdaq\.com\/api\/(?:analyst\/([^/]+)\/earnings-date|quote\/([^/]+)\/dividends)/, fn: (m) => nasdaq(m[1] ? 'earn' : 'div', decodeURIComponent(m[1] || m[2])) },
     { re: /opendart\.fss\.or\.kr\/api\/corpCode\.xml\?/, fn: (m, u) => corpZip(u) },
     { re: /opendart\.fss\.or\.kr\/api\/list\.json\?/, fn: (m, u) => listFn(new URL(u).searchParams.get('corp_code'), u) },
-    { re: /polling\.finance\.naver\.com\/api\/realtime\/domestic\/stock\/(\d{6})/, fn: (m) => json(naverStock(m[1], krPct[m[1]] ?? 0.5, krStatus, krAt)) },
+    { re: /polling\.finance\.naver\.com\/api\/realtime\/domestic\/stock\/(\d{6})/, fn: (m) => json(naverStock(m[1], krPct[m[1]] ?? 0.5, krStatus, krAt, krExtra[m[1]])) },
     { re: /polling\.finance\.naver\.com\/api\/realtime\/domestic\/index\/(KOSPI|KOSDAQ)/, fn: () => json(naverIndex(idxPct, idxStatus)) },
     { re: /m\.stock\.naver\.com\/api\/stock\/(\d{6})\/trend/, fn: () => json(trendStock) },
     { re: /m\.stock\.naver\.com\/api\/index\/(KOSPI|KOSDAQ)\/trend/, fn: () => json(trendIndex) },
@@ -1202,6 +1202,88 @@ await test('개장 직후 집중 갱신(burst.mjs): 국내 시세·코스피·�
   now = T('2026-11-05T09:01:10+09:00');
   assert.equal(await burst.burstOnce({ root, clock: () => now, sleep: async () => {} }), '시세 받기 실패');
   assert.equal(raw(root, 'quotes.json'), before);
+});
+await test('매매 정지·첫 체결 전 시세(sources.mjs·burst.mjs): 정지면 halt — 시장 전체(서킷브레이커) market · 그 종목만 stock · 정지 시각 · 평소엔 칸 없음 · 오늘 거래량 없으면 null · 집중 갱신 합치기는 새 값 그대로(정지가 풀리면 빠짐)', async () => {
+  const HALT = { code: '2', text: '정지.Halted', name: 'HALTED' };
+  NET.routes = routes({ krPct: { '005930': -9.98, '000660': -11.71, '035720': 0 }, krExtra: {
+    '005930': { tradeStopType: HALT, tradableStatusCode: 'marketOperationHalt', tradableStatusUpdatedAt: '2026-11-06T09:04:12.035+09:00' },
+    '000660': { tradeStopType: HALT, tradableStatusCode: 'tradingHalt' },
+    '096770': { tradeStopType: HALT, tradableStatusCode: 'marketOperationHalt', tradableStatusUpdatedAt: '2026-11-06T09:04:05+09:00' },
+    '035720': { accumulatedTradingVolume: undefined, tradeStopType: { code: '1', text: '운영.Trading', name: 'TRADING' }, tradableStatusCode: 'ok' },
+  } });
+  const [a, b, c, d] = await src.getKrQuotesLive([{ code: '005930' }, { code: '000660' }, { code: '035720' }, { code: '051910' }]);
+  assert.equal(a.halt, 'market', '시장 전체 정지'); assert.equal(a.haltAt, '2026-11-06T09:04:12.035+09:00');
+  assert.equal(a.changePct, -9.98, '값은 멈추기 직전 가격 그대로');
+  assert.equal(b.halt, 'stock', '그 종목만 정지'); assert.equal(b.haltAt, null);
+  assert.ok(!('halt' in c) && !('haltAt' in c), '운영 중이면 칸 없음'); assert.equal(c.volume, null, '오늘 거래량 없음');
+  assert.ok(!('halt' in d)); assert.equal(d.volume, 1234567);
+  const g = await src.getQuote({ code: '096770' }); // 앞 시험의 시세 캐시(8초)에 걸리지 않는 종목
+  assert.equal(g.halt, 'market', '정규 회차 시세도 같음'); assert.equal(g.haltAt, '2026-11-06T09:04:05+09:00');
+  // 집중 갱신 합치기 — 새 값 그대로(상장 시장·AI 끔은 이어 붙임), 정지가 풀린 새 값엔 halt가 없다
+  const { halt, haltAt, ...a2 } = a;
+  const prev = { quotes: [{ code: '005930', market: 'KR', ok: true, halt: 'market', haltAt, exch: 'KOSPI', ai: false }, { code: '000660', market: 'KR', ok: true, exch: 'KOSPI' }] };
+  const { file } = burst.mergeKrQuotes(prev, [a2, b]);
+  assert.ok(!('halt' in file.quotes[0]) && !('haltAt' in file.quotes[0]), '풀리면 빠짐');
+  assert.equal(file.quotes[0].exch, 'KOSPI'); assert.equal(file.quotes[0].ai, false);
+  assert.equal(file.quotes[1].halt, 'stock');
+});
+await test('화면 첫 체결 전·매매 정지·예상 지수(app.js): 장중인데 오늘 거래량 없는 국내 종목은 체결 전(평균·시장 대비에서 빼고 칸 맨 뒤) · 시장 전체 정지면 안내 한 줄 · 개장 전 예상 지수는 표시하고 비교 안 함 · 안내는 하나만', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const a = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const b = appJs.slice(appJs.indexOf('// ---------- 데이터 지연 경고'), appJs.indexOf('// ---------- 내 종목 한눈에'));
+  const f = vm.runInNewContext(`${a}${b}; ({ pendingOf, haltOf, tileRank, avgPct, expIdx, benchOf, vsMarket, hmKst, haltNote, pendingNote, boardNote })`, { lastTimeOf: () => '' });
+  const kr = (x) => ({ ok: true, market: 'KR', exch: 'KOSPI', marketStatus: 'OPEN', volume: 1000, changePct: -6, ...x });
+  const pend = kr({ volume: null, changePct: 0 });
+  assert.equal(f.pendingOf(pend), true);
+  assert.equal(f.pendingOf(kr({ volume: 0, changePct: 0 })), true, '거래량 0도');
+  assert.equal(f.pendingOf(kr({})), false, '체결 있음');
+  assert.equal(f.pendingOf(kr({ volume: null, marketStatus: 'PREOPEN' })), false, '개장 전은 따로(이름표·안내)');
+  assert.equal(f.pendingOf(kr({ volume: null, halt: 'stock' })), false, '정지 종목은 정지로');
+  assert.equal(f.pendingOf({ ...pend, market: 'US' }), false, '해외는 해당 없음');
+  assert.equal(f.pendingOf({ ...pend, ok: false }), false);
+  assert.equal(f.haltOf(kr({ halt: 'market' })), 'market');
+  assert.equal(f.haltOf(kr({ halt: 'market', marketStatus: 'CLOSE' })), '', '장이 끝나면 정지 표시 안 함');
+  assert.equal(f.haltOf(kr({})), '');
+  assert.equal(f.avgPct([kr({ changePct: -6 }), kr({ changePct: -4 }), pend]), -5, '첫 체결 전은 평균에서 뺌');
+  const order = [pend, kr({ changePct: 1 }), { ok: false, code: 'X' }, kr({ changePct: -7 })].sort((x, y) => f.tileRank(y) - f.tileRank(x) || 0);
+  assert.deepEqual(order.map((q) => (q.ok ? (f.pendingOf(q) ? '전' : q.changePct) : '실패')), [1, -7, '전', '실패'], '체결된 종목 → 체결 전 → 실패');
+  // 예상 지수 — 개장 전인데 0%가 아니면 예상
+  const ks = (x) => ({ symbol: '^KS11', name: '코스피', currency: 'KRW', changePct: -9.68, marketStatus: 'PREOPEN', ...x });
+  assert.equal(f.expIdx(ks({})), true);
+  assert.equal(f.expIdx(ks({ changePct: 0 })), false, '어제 종가 그대로면 예상 아님');
+  assert.equal(f.expIdx(ks({ marketStatus: 'OPEN' })), false);
+  assert.deepEqual(JSON.parse(JSON.stringify(f.benchOf('KR', [ks({})]))), [{ name: '코스피', pct: -9.68, exp: true }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(f.benchOf('KR', [ks({ marketStatus: 'OPEN' })]))), [{ name: '코스피', pct: -9.68 }]);
+  assert.equal(f.vsMarket(kr({ changePct: -6.5 }), [ks({})]), null, '예상 지수와 비교 안 함');
+  assert.equal(f.vsMarket(kr({ changePct: -6.5 }), [ks({ marketStatus: 'OPEN', changePct: -6 })]).follows, true);
+  assert.equal(f.vsMarket(pend, [ks({ marketStatus: 'OPEN', changePct: -6 })]), null, '첫 체결 전은 비교 안 함');
+  // 시장 전체 매매 정지 안내 — 가장 이른 정지 시각, 시장 이름
+  assert.equal(f.hmKst('2026-11-06T09:04:12.035+09:00'), '09:04');
+  assert.equal(f.hmKst('2026-11-06T00:30:00Z'), '09:30', '한국시간으로');
+  assert.equal(f.hmKst(null), '');
+  const halted = [kr({ halt: 'market', haltAt: '2026-11-06T09:05:40+09:00' }), kr({ halt: 'market', haltAt: '2026-11-06T09:04:03+09:00' }), kr({ exch: 'KOSDAQ' })];
+  assert.equal(f.haltNote('KR', halted), '코스피 시장 전체 매매가 09:04부터 멈춰 있어요(서킷브레이커 같은 시장 조치) — ‘매매 정지’ 칸은 멈추기 직전 가격이에요.');
+  assert.match(f.haltNote('KR', [...halted, kr({ exch: 'KOSDAQ', halt: 'market' })]), /^코스피·코스닥 시장/);
+  assert.match(f.haltNote('KR', [kr({ halt: 'market', exch: undefined, haltAt: null })]), /^시장 전체 매매가 멈춰/, '시장·시각을 모르면 빼고');
+  assert.equal(f.haltNote('KR', [kr({ halt: 'stock' })]), '', '한 종목 정지는 칸에만');
+  assert.equal(f.haltNote('US', halted), '');
+  assert.equal(f.haltNote('KR', [kr({ halt: 'market', marketStatus: 'CLOSE' })]), '', '장이 끝나면 없음');
+  // 첫 체결 전 안내 — 평일 9시~9시 30분만
+  const at = (hm, d = '2026-11-06') => T(`${d}T${hm}:00+09:00`);
+  assert.match(f.pendingNote('KR', [pend, pend, kr({})], at('09:00')), /^2종목은 아직 첫 체결 전이에요 — .*2분 미뤄요/);
+  assert.match(f.pendingNote('KR', [pend], at('09:29')), /^1종목/);
+  assert.equal(f.pendingNote('KR', [pend], at('09:30')), '', '9시 30분부터는 칸에만');
+  assert.equal(f.pendingNote('KR', [pend], at('08:59')), '');
+  assert.equal(f.pendingNote('KR', [kr({})], at('09:01')), '', '모두 체결');
+  assert.equal(f.pendingNote('US', [pend], at('09:01')), '');
+  assert.equal(f.pendingNote('KR', [pend], at('09:01', '2026-11-07')), '', '토요일');
+  // 안내는 하나만 — 개장 전 → 시장 전체 정지 → 첫 체결 전
+  const preo = [{ ok: true, market: 'KR', marketStatus: 'PREOPEN', changePct: 0 }];
+  assert.match(f.boardNote('KR', preo, at('08:50')), /9시 개장 전/);
+  assert.match(f.boardNote('KR', [...halted, pend], at('09:05')), /매매가 09:04부터/);
+  assert.match(f.boardNote('KR', [pend, kr({})], at('09:01')), /첫 체결 전/);
+  assert.equal(f.boardNote('KR', [kr({})], at('09:01')), '');
 });
 await test('화면 개장 직후·개장 전(app.js): 평일 08:59~09:12엔 20초마다 확인(설정이 더 짧거나 수동이면 그대로) · 국내 시세가 모두 개장 전이면 안내 한 줄 · 이름표 "개장 전"', async () => {
   const vm = await import('node:vm');

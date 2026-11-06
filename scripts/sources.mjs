@@ -91,8 +91,11 @@ async function krStockNaver(code) {
   return {
     name: d.stockName || code, currency: 'KRW', price, prevClose, change, changePct,
     open: num(d.openPrice), high: num(d.highPrice), low: num(d.lowPrice),
-    volume: num(d.accumulatedTradingVolume),
+    volume: num(d.accumulatedTradingVolume), // 오늘 아직 체결이 없으면 없음(null) — 화면이 '체결 전'으로 본다
     marketStatus: d.marketStatus || null,
+    // 매매 정지(tradeStopType HALTED) — 'market' = 서킷브레이커 같은 시장 전체 정지(tradableStatusCode 'marketOperationHalt'), 'stock' = 그 종목만.
+    // 정지 중엔 값이 멈춰 있다(멈추기 직전 가격). 평소엔 이 칸이 없다
+    ...(d.tradeStopType?.name === 'HALTED' ? { halt: d.tradableStatusCode === 'marketOperationHalt' ? 'market' : 'stock', haltAt: d.tradableStatusUpdatedAt || null } : {}),
     asOf: d.localTradedAt || new Date().toISOString(),
   };
 }
