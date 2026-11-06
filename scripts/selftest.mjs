@@ -1227,7 +1227,7 @@ await test('매매 정지·첫 체결 전 시세(sources.mjs·burst.mjs): 정지
   assert.equal(file.quotes[0].exch, 'KOSPI'); assert.equal(file.quotes[0].ai, false);
   assert.equal(file.quotes[1].halt, 'stock');
 });
-await test('시장 조치(sources.mjs): 사이드카 속보 제목 — 방향·시장(사이드카 바로 앞 · 둘을 함께 쓰면 둘 다 · 해제·방향·시장 없으면 아님) · 같은 시장·방향 기사가 3분 안에 2건 이상 몰린 첫 시각(그날 09:00~15:40 기사만) · 기록 합치기(그날 것만·가장 이른 시각·시각순)', async () => {
+await test('시장 조치(sources.mjs): 사이드카 속보 제목 — 방향·시장(사이드카 바로 앞 · 둘을 함께 쓰면 둘 다 · 해제·방향·시장 없으면 아님) · 같은 시장·방향 기사가 3분 안에 2건 이상 몰린 첫 묶음의 두 번째 기사 시각(그날 09:00~15:40 기사만) · 기록 합치기(그날 것만·가장 이른 시각·시각순)', async () => {
   const s = (t) => JSON.parse(JSON.stringify(src.sidecarOf(t))).map((e) => `${e.mk}:${e.dir}`);
   // 실제 제목(2026-10~11월 구글 뉴스)
   assert.deepEqual(s('[속보] 코스피 4%대 급락…매도 사이드카 발동 - 연합뉴스'), ['KOSPI:sell']);
@@ -1241,13 +1241,14 @@ await test('시장 조치(sources.mjs): 사이드카 속보 제목 — 방향·�
   assert.deepEqual(s('SK하이닉스·삼성전자 2.7조 투매에 사이드카 발동! 폭락장 속 연기금·외국인이 동시에 매수'), [], '방향 없음');
   assert.deepEqual(s('코스피 매도 사이드카 해제…낙폭 축소'), [], '해제');
   assert.deepEqual(s('반도체주 매도 사이드카?'), [], '시장 이름 없음');
-  // 시각 — 같은 시장·방향 기사가 3분 안에 2건 이상 몰린 첫 시각(혼자 일찍 찍힌 기사는 빼고), 그날 09:00~15:40 기사만
+  // 시각 — 같은 시장·방향 기사가 3분 안에 2건 이상 몰린 첫 묶음의 두 번째 기사 시각(혼자 일찍 찍힌 기사에 끌려가지 않게), 그날 09:00~15:40 기사만
   const at = (hm, d = '2026-11-06') => T(`${d}T${hm}:00+09:00`);
   const iso = (ms) => new Date(ms).toISOString();
   const items = [
     { title: '[속보] 코스피 이어 코스닥도 매도 사이드카 - 메트로신문', pubMs: at('09:01') }, // 혼자 일찍
     { title: '[속보] 코스닥, 매도 사이드카 발동 - 서울파이낸스', pubMs: at('09:07') },
     { title: '[스팟] 코스닥 매도 사이드카 발동 - 머니투데이', pubMs: at('09:09') },
+    { title: "코스피, 서킷브레이커 끝나자 '매도 사이드카' - 메트로신문", pubMs: at('09:34') }, // 한 곳만 일찍(실측)
     { title: '[속보] 코스피, 서킷 해제 후 매도 사이드카 발동 - 뉴스1', pubMs: at('09:36') },
     { title: '[속보] 코스피, 서킷브레이커 이어 매도 사이드카 발동 - 한국경제', pubMs: at('09:37') },
     { title: '[속보] 코스피 매도 사이드카 발동 - 장전일보', pubMs: at('08:40') }, // 장 전(잘못 찍힘)
@@ -1258,7 +1259,7 @@ await test('시장 조치(sources.mjs): 사이드카 속보 제목 — 방향·�
     { title: '날짜 없음 코스닥 매수 사이드카', pubMs: null },
   ];
   const ev = JSON.parse(JSON.stringify(src.sidecarEvents(items, at('09:40')))).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
-  assert.deepEqual(ev.map((e) => `${e.kind}:${e.mk}:${e.dir}@${e.at}`), [`sidecar:KOSDAQ:sell@${iso(at('09:07'))}`, `sidecar:KOSPI:sell@${iso(at('09:36'))}`]);
+  assert.deepEqual(ev.map((e) => `${e.kind}:${e.mk}:${e.dir}@${e.at}`), [`sidecar:KOSDAQ:sell@${iso(at('09:09'))}`, `sidecar:KOSPI:sell@${iso(at('09:36'))}`], '두 번째 기사 시각 — 일찍 찍은 한 곳(09:34)에 끌려가지 않음');
   assert.equal(src.sidecarEvents([], at('09:40')).length, 0);
   // 기록 합치기 — 그날 것만 · 같은 조치는 가장 이른 시각 · 시각순
   const cb = { kind: 'cb', mk: 'KOSPI', at: '2026-11-06T09:04:03+09:00' };
@@ -1292,12 +1293,12 @@ await test('시장 조치 기록(fetch.mjs → quotes.json measures): 시장 전
   assert.equal(callsTo(SC), 1, '장 시간엔 사이드카 뉴스를 받음');
   let m = read(root, 'quotes.json').measures;
   assert.equal(m.day, '2026-11-06');
-  assert.deepEqual(m.items.map((x) => `${x.kind}:${x.mk}:${x.dir || ''}@${hm(x.at)}`), ['cb:KOSPI:@09:04', 'sidecar:KOSDAQ:sell@09:07'], '지수와 반대 방향 사이드카(매수)는 버림');
+  assert.deepEqual(m.items.map((x) => `${x.kind}:${x.mk}:${x.dir || ''}@${hm(x.at)}`), ['cb:KOSPI:@09:04', 'sidecar:KOSDAQ:sell@09:09'], '지수와 반대 방향 사이드카(매수)는 버림 · 사이드카는 두 번째 기사 시각');
   assert.equal(m.items[0].at, new Date(at('09:04') + 3000).toISOString(), '서킷브레이커는 가장 이른 정지 시각');
   // 09:40 — 정지 풀림 · 코스피 매도 사이드카 기사 2건 · 코스닥 사이드카 기사는 더 늦은 시각
   await pipeline(root, { idxPct: -5.9, news: news([['[속보] 코스피, 서킷 해제 후 매도 사이드카 발동 - 뉴스1', '09:36'], ['[속보] 코스피, 서킷브레이커 이어 매도 사이드카 발동 - 한국경제', '09:37'], ['코스닥 매도 사이드카 발동 이후 낙폭 확대 - 가', '09:20'], ['코스닥 매도 사이드카 발동… - 나', '09:21']]) }, at('09:40'));
   m = read(root, 'quotes.json').measures;
-  assert.deepEqual(m.items.map((x) => `${x.kind}:${x.mk}:${x.dir || ''}@${hm(x.at)}`), ['cb:KOSPI:@09:04', 'sidecar:KOSDAQ:sell@09:07', 'sidecar:KOSPI:sell@09:36'], '정지가 풀려도 서킷브레이커 유지 · 같은 조치는 가장 이른 시각');
+  assert.deepEqual(m.items.map((x) => `${x.kind}:${x.mk}:${x.dir || ''}@${hm(x.at)}`), ['cb:KOSPI:@09:04', 'sidecar:KOSDAQ:sell@09:09', 'sidecar:KOSPI:sell@09:37'], '정지가 풀려도 서킷브레이커 유지 · 같은 조치는 가장 이른 시각');
   // 16:30 — 장 시간 밖엔 사이드카 뉴스를 받지 않고 그날 기록 유지
   await pipeline(root, { idxPct: -5.9, news: news([['[속보] 코스피 매수 사이드카 발동 - 가', '15:10'], ['[속보] 코스피 매수 사이드카 발동 - 나', '15:11']]) }, at('16:30'));
   assert.equal(callsTo(SC), 0, '장 시간 밖엔 받지 않음');

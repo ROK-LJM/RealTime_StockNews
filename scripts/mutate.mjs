@@ -250,6 +250,7 @@ const MUTANTS = [
   ["[조치] 해제도", S, "if (!m || /사이드카\\S*\\s*(?:해제|종료)/.test(t)) return [];", "if (!m) return [];"],
   ["[조치] 한 건만 있어도", S, "j + 1 < ts.length && ts[j + 1] - t <= 3 * 60e3", "true"],
   ["[조치] 30분 안이면", S, "ts[j + 1] - t <= 3 * 60e3", "ts[j + 1] - t <= 30 * 60e3"],
+  ["[조치] 첫 기사 시각", S, "at: new Date(ts[i + 1]).toISOString()", "at: new Date(ts[i]).toISOString()"],
   ["[조치] 다른 날 기사도", S, "kstDay(it.pubMs) !== day || ", ""],
   ["[조치] 장 전 기사도", S, "kstMinOf(it.pubMs) < 9 * 60 || ", ""],
   ["[조치] 기록 날짜 안 봄", S, " && kstDay(Date.parse(x.at)) === day;", ";"],

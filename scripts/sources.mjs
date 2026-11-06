@@ -346,8 +346,9 @@ export function sidecarOf(title) {
   const i = Math.max(head.lastIndexOf('코스피'), head.lastIndexOf('코스닥'));
   return i < 0 ? [] : [{ mk: head.startsWith('코스닥', i) ? 'KOSDAQ' : 'KOSPI', dir }];
 }
-// 그날(한국시간) 09:00~15:40 기사에서 시장·방향마다 시각 하나 — 같은 시장·방향 기사가 3분 안에 2건 이상 몰린 첫 시각
-// (기사 하나만 일찍 찍힌 언론사가 있다 — 실측 11/06 09:04 서킷브레이커 기사가 08:40·08:54로 찍힘)
+// 그날(한국시간) 09:00~15:40 기사에서 시장·방향마다 시각 하나 — 같은 시장·방향 기사가 3분 안에 2건 이상 몰린 첫 묶음의 두 번째 기사 시각
+// (시각을 일찍 찍는 언론사가 있다 — 실측 11/06 09:04 서킷브레이커 기사가 08:40·08:54로, 코스피 매도 사이드카는 한 곳만 09:34·나머지 09:36~09:37.
+//  두 번째로 보도한 시각이라 실제 발동보다 1~2분 늦을 수는 있어도 이르지는 않다)
 const KST_OFF = 9 * 3600e3;
 const kstDay = (ms) => new Date(ms + KST_OFF).toISOString().slice(0, 10);
 const kstMinOf = (ms) => { const d = new Date(ms + KST_OFF); return d.getUTCHours() * 60 + d.getUTCMinutes(); };
@@ -361,7 +362,7 @@ export function sidecarEvents(items, now = Date.now()) {
   for (const [k, ts] of by) {
     ts.sort((a, b) => a - b);
     const i = ts.findIndex((t, j) => j + 1 < ts.length && ts[j + 1] - t <= 3 * 60e3);
-    if (i >= 0) { const [mk, dir] = k.split('|'); out.push({ kind: 'sidecar', mk, dir, at: new Date(ts[i]).toISOString() }); }
+    if (i >= 0) { const [mk, dir] = k.split('|'); out.push({ kind: 'sidecar', mk, dir, at: new Date(ts[i + 1]).toISOString() }); }
   }
   return out;
 }
