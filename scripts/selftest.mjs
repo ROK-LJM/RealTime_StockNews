@@ -2015,6 +2015,43 @@ await test('급등락 기록(32차): 시장보다 덜 움직인 날은 방향 �
     assert.equal(g.pickReasonNews(l, pct, '20261105', ny, []).title, want, '화면');
   }
 });
+await test('급등락 기록(33차): 지난날 기록의 이유도 지금 규칙으로 — 시세 안내·사회공헌·방향이 반대인 뉴스·방향이 반대인 공시는 비움 · 맞는 이유·AI·시장 흐름은 그대로', async () => {
+  const root = workspace();
+  writeData(root, 'moves.json', { '005930': [
+    { d: '20261014', p: 3.25, r: '삼성전자 주가, 10월 14일 204,000원 2.00% 상승 기록', s: 'news' },
+    { d: '20261013', p: -3, r: '삼성전자, 김장 김치 2500박스 이웃에 전달', s: 'news' },
+    { d: '20261012', p: -4, r: '[계약] 단일판매ㆍ공급계약체결', s: 'disc' },
+    { d: '20261011', p: 4, r: '삼성전자, 반도체 우려에 급락', s: 'news' },
+    { d: '20261010', p: -2.5, r: '삼성전자, 반도체 우려에 하락', s: 'news' },
+    { d: '20261009', p: -5, r: '[증자·사채] 유상증자결정', s: 'disc' },
+    { d: '20261008', p: 6, r: '예전 AI 진단', s: 'ai' },
+    { d: '20261007', p: -3, r: '코스피 -4.00% 흐름 — 종목만의 이유 기사 없음', s: 'mkt' },
+  ] });
+  await pipeline(root, { krAt: NOW_KR });
+  const byDay = Object.fromEntries(read(root, 'moves.json')['005930'].map((x) => [x.d, [x.r, x.s]]));
+  assert.deepEqual(byDay['20261014'], ['', ''], '시세 안내');
+  assert.deepEqual(byDay['20261013'], ['', ''], '사회공헌');
+  assert.deepEqual(byDay['20261012'], ['', ''], '내린 날의 공급계약 체결');
+  assert.deepEqual(byDay['20261011'], ['', ''], '오른 날의 급락 기사');
+  assert.deepEqual(byDay['20261010'], ['삼성전자, 반도체 우려에 하락', 'news'], '맞는 뉴스는 그대로');
+  assert.deepEqual(byDay['20261009'], ['[증자·사채] 유상증자결정', 'disc'], '방향이 맞는 공시는 그대로');
+  assert.deepEqual(byDay['20261008'], ['예전 AI 진단', 'ai']);
+  assert.deepEqual(byDay['20261007'], ['코스피 -4.00% 흐름 — 종목만의 이유 기사 없음', 'mkt']);
+  // 다시 돌려도 같은 결과(이미 비운 기록은 그대로)
+  const first = raw(root, 'moves.json');
+  await pipeline(root, { krAt: NOW_KR + 5 * MIN }, NOW_KR + 5 * MIN);
+  assert.deepEqual(JSON.parse(raw(root, 'moves.json'))['005930'].filter((x) => x.d < '20261015'), JSON.parse(first)['005930'].filter((x) => x.d < '20261015'));
+  // 오늘 기록이 없는 날(2% 아래)에도 지난 이유를 비우면 파일을 다시 쓴다 — 제자리 고치면 직전 파일과 같아 보여 안 써진다
+  const r2 = workspace();
+  writeData(r2, 'moves.json', { '005930': [{ d: '20261014', p: 3.25, r: '삼성전자 주가, 10월 14일 204,000원 2.00% 상승 기록', s: 'news' }] });
+  await pipeline(r2, { krAt: NOW_KR, krPct: { '005930': 0.4, '000660': 0.3 } });
+  assert.deepEqual(read(r2, 'moves.json')['005930'], [{ d: '20261014', p: 3.25, r: '', s: '' }], '오늘 기록 없이 지난 이유만 비워도 씀');
+  // 장중에 방향이 뒤집히면(-3%에 남긴 유상증자 이유 → 지금 +4.2%) 그날 공시 이유는 지킬 이유가 아니다 — 지금 등락으로 다시 본다(30차)
+  const r3 = workspace();
+  writeData(r3, 'moves.json', { '005930': [{ d: '20261015', p: -3, r: '[증자·사채] 유상증자결정', s: 'disc' }] });
+  await pipeline(r3, { krAt: NOW_KR, gemini: () => text('upstream error', 500), news: () => text('<?xml version="1.0"?><rss><channel></channel></rss>') });
+  assert.deepEqual(read(r3, 'moves.json')['005930'][0], { d: '20261015', p: 4.2, r: '', s: '' }, '방향이 뒤집힌 날의 공시 이유는 버림');
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');

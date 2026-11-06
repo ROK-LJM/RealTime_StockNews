@@ -362,11 +362,23 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
     const rankOf = (x) => (!x || !x.s ? 0 : x.s === 'disc' && MINOR_DISC_RE.test(String(x.r ?? '').replace(/^\[[^\]]*\]\s*/, '')) ? 0.5 : rank[x.s] || 0);
     const cut = (s) => (s.length > MOVE_REASON_MAX ? `${s.slice(0, MOVE_REASON_MAX - 1)}…` : s);
     const moves = {};
-    let recorded = 0, removed = 0;
+    let recorded = 0, removed = 0, cleared = 0;
+    // 지난날 기록의 이유도 지금 규칙으로 다시 본다(33차) — 시세 안내·상품 상장 공지·사회공헌·그날 방향과 반대인 뉴스, 방향이 반대인 공시는
+    // 그날의 이유가 아니라 비운다(화면엔 '이유 기록 없음'). 호재·악재 태그는 제목만으로 정해져 다시 계산해도 같다. 새 객체로 바꿔 직전 파일과 비교가 되게
+    const recheck = (x, tz, names) => {
+      if (!x.r || !(x.s === 'news' || x.s === 'disc')) return x;
+      const bad = x.s === 'news'
+        ? !pickReasonNews([{ title: String(x.r), sentiment: tagSentiment(x.r) }], x.p, x.d, (ms) => ymdIn(ms, tz), names)
+        : discDir(String(x.r).replace(/^\[[^\]]*\]\s*/, '')) === -Math.sign(x.p);
+      if (!bad) return x;
+      cleared++;
+      return { ...x, r: '', s: '' };
+    };
     for (const it of items) {
       const tz = MARKET_TZ[it.market] || MARKET_TZ.US;
       const list = (isObj(prevMoves) && Array.isArray(prevMoves[it.code]) ? prevMoves[it.code] : [])
-        .filter((x) => isObj(x) && /^\d{8}$/.test(x.d) && Number.isFinite(x.p) && x.d >= keepFrom);
+        .filter((x) => isObj(x) && /^\d{8}$/.test(x.d) && Number.isFinite(x.p) && x.d >= keepFrom)
+        .map((x) => recheck(x, tz, [it.name, krBaseName(it.name, it.code)].filter(Boolean)));
       const q = quotesByCode[it.code];
       const at = q && q.ok && Number.isFinite(q.changePct) ? +new Date(q.asOf) : NaN;
       if (Number.isFinite(at)) {
@@ -408,7 +420,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
       if (list.length) moves[it.code] = list.slice(0, MOVE_KEEP_N);
     }
     if (prevMoves == null || JSON.stringify(moves) !== JSON.stringify(prevMoves)) write('moves.json', moves);
-    if (recorded || removed) console.log(`  · 급등락 기록: ±2% 이상 ${recorded}종목${removed ? ` · 2% 아래로 돌아와 지움 ${removed}건` : ''}`);
+    if (recorded || removed || cleared) console.log(`  · 급등락 기록: ±2% 이상 ${recorded}종목${removed ? ` · 2% 아래로 돌아와 지움 ${removed}건` : ''}${cleared ? ` · 지금 규칙에 안 맞는 이유 비움 ${cleared}건` : ''}`);
   } catch (e) { console.error('  ✗ 급등락 기록 실패 — moves.json 유지:', e.message); }
 
   // AI 상태 한 줄 요약 — 키 없음/모델 전환/할당량 소진/배분 대기를 Actions 로그에서 바로 알 수 있게

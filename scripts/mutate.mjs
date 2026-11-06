@@ -308,6 +308,11 @@ const MUTANTS = [
   ["[시세] '기록' 꼬리 못 읽음(화면)", A, "(?:상승|하락|보합)(?:\\s*(?:기록|마감|중))?$/,", "(?:상승|하락|보합)$/,"],
   ["[영어] 전망 글 맨 뒤 안 함(봇)", S, "|\\b[Ss]tock\\s+[Ff]orecasts?\\b|\\b[Pp]rice\\s+[Pp]redictions?\\b/;", "/;"],
   ["[영어] 전망 글 맨 뒤 안 함(화면)", A, "|\\b[Ss]tock\\s+[Ff]orecasts?\\b|\\b[Pp]rice\\s+[Pp]redictions?\\b/;", "/;"],
+  // ---------- 33차 — 지난날 급등락 기록 이유 다시 보기 ----------
+  ["[지난 기록] 다시 보지 않음", F, ".map((x) => recheck(x, tz, [it.name, krBaseName(it.name, it.code)].filter(Boolean)));", ";"],
+  ["[지난 기록] 공시 방향 안 봄", F, ": discDir(String(x.r).replace(/^\\[[^\\]]*\\]\\s*/, '')) === -Math.sign(x.p);", ": false;"],
+  ["[지난 기록] 뉴스 규칙 안 봄", F, "? !pickReasonNews([{ title: String(x.r), sentiment: tagSentiment(x.r) }], x.p, x.d, (ms) => ymdIn(ms, tz), names)", "? false"],
+  ["[지난 기록] 제자리 고침(비교 안 됨)", F, "return { ...x, r: '', s: '' };", "x.r = ''; x.s = ''; return x;"],
   ["[공시 방향] 화면 반대 공시도", A, " && !(dir && discDir(x.title) === -dir)", ""],
   ["[공시 방향] 화면 방향 안 넘김", A, "keyDiscToday(q.code, Math.sign(q.changePct || 0))", "keyDiscToday(q.code)"],
   ["[공시 방향] 봇 반대 공시도", F, " && discDir(x.title) !== -Math.sign(q.changePct)", ""],
