@@ -1962,6 +1962,59 @@ await test('이유(31차): 시장보다 덜 움직인 종목도 방향 모를 �
   for (const t of ['Tesla stock jumps after deliveries', 'Nvidia shares surged 5% on AI demand', 'Apple stock climbs to record', 'Palantir soars after earnings']) assert.equal(tone(t), 'pos', t);
   for (const t of ['New shipping route opens in Asia', 'Space mission launches', 'Apple unveils new iPad']) assert.equal(tone(t), 'neutral', '낱말 경계: ' + t);
 });
+await test('급등락 기록(32차): 시장보다 덜 움직인 날은 방향 모를 기사 대신 시장 흐름 이유 · 같은 방향 기사는 그대로 · 시장보다 더 움직였으면 기사 · 예전 약한 기사·시장 흐름 이유 다시 보기 · 화면 지난 급등락은 흐린 글자 · 시세 안내 "…상승 기록" · 영어 전망 글 맨 뒤(봇·화면 같음)', async () => {
+  const list = { v: 2, kr: [['005930', '삼성전자', 'KOSPI', 1], ['000660', 'SK하이닉스', 'KOSPI', 2]], us: [['AAPL', '애플', 'Apple Inc.', 'NASDAQ', 1]], meta: {} };
+  const item = (t) => '<item><title>' + t + ' - 테스트일보</title><link>https://news.example.com/1</link><pubDate>' + new Date(Date.now() - 600e3).toUTCString() + '</pubDate><source url="https://news.example.com">테스트일보</source></item>';
+  const newsOf = (tail) => (m, u) => text('<?xml version="1.0"?><rss><channel>' + (tail ? item(queryName(u) + tail) : '') + '</channel></rss>');
+  const base = { gemini: () => text('upstream error', 500), krAt: NOW_KR, idxPct: -6 };
+  const mv = (root) => read(root, 'moves.json')['005930'][0];
+  const MK = '코스피 -6.00% 흐름 — 종목만의 이유 기사 없음';
+  const ws = () => { const r = workspace(); writeData(r, 'stocklist.json', list); return r; };
+  const r1 = ws();
+  await pipeline(r1, { ...base, krPct: { '005930': -4, '000660': 0.3 }, news: newsOf(', 정기 임원 인사 발표') });
+  assert.deepEqual(mv(r1), { d: '20261015', p: -4, r: MK, s: 'mkt' }, '시장보다 덜 움직였는데 방향 모를 기사 → 시장 흐름');
+  const r2 = ws();
+  await pipeline(r2, { ...base, krPct: { '005930': -4, '000660': 0.3 }, news: newsOf(', 반도체 우려에 하락') });
+  assert.deepEqual([mv(r2).s, mv(r2).r], ['news', '삼성전자, 반도체 우려에 하락'], '같은 방향 기사는 그대로');
+  const r3 = ws();
+  await pipeline(r3, { ...base, krPct: { '005930': -8, '000660': 0.3 }, news: newsOf(', 정기 임원 인사 발표') });
+  assert.deepEqual([mv(r3).s, mv(r3).r], ['news', '삼성전자, 정기 임원 인사 발표'], '시장보다 1%p 넘게 더 움직였으면 기사');
+  const r4 = ws();
+  await pipeline(r4, { ...base, krPct: { '005930': -4, '000660': 0.3 }, news: newsOf('') });
+  assert.equal(mv(r4).s, 'mkt', '기사가 없어도 시장보다 덜 움직였으면 시장 흐름');
+  const r5 = workspace();
+  await pipeline(r5, { ...base, krPct: { '005930': -4, '000660': 0.3 }, news: newsOf('') });
+  assert.deepEqual([mv(r5).r, mv(r5).s], ['', ''], '상장 시장을 모르면 시장 흐름 이유 없음');
+  const r6 = ws();
+  writeData(r6, 'moves.json', { '005930': [{ d: '20261015', p: -3, r: '삼성전자, 정기 임원 인사 발표', s: 'news' }] });
+  await pipeline(r6, { ...base, krPct: { '005930': -4, '000660': 0.3 }, news: newsOf('') });
+  assert.equal(mv(r6).s, 'mkt', '예전 약한 기사 이유 → 시장 흐름');
+  const r7 = ws();
+  writeData(r7, 'moves.json', { '005930': [{ d: '20261015', p: -4, r: MK, s: 'mkt' }] });
+  await pipeline(r7, { ...base, krPct: { '005930': -8, '000660': 0.3 }, news: newsOf('') });
+  assert.deepEqual([mv(r7).r, mv(r7).s], ['', ''], '시장보다 더 움직이게 되면 예전 시장 흐름 이유를 버림');
+  // 화면 '지난 급등락' — 시장 흐름 이유는 흐린 글자(출처 표시 없음)
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const line = (k) => appJs.slice(appJs.indexOf(k), appJs.indexOf('\n', appJs.indexOf(k)));
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const rm = appJs.slice(appJs.indexOf('function renderMoves('), appJs.indexOf('// ---------- 최근 공시'));
+  const el = { innerHTML: '', hidden: true };
+  const g = vm.runInNewContext([line('function dirClass('), line('function cssId('), line('function esc('), line('const MOVE_SRC'), block, rm].join('\n') + '; ({ renderMoves, priceOnly, pickReasonNews })', { document: { getElementById: () => el } });
+  g.renderMoves({ code: 'A', market: 'KR', ok: true, asOf: new Date().toISOString() }, [{ d: '20261015', p: -4, r: MK, s: 'mkt' }, { d: '20261014', p: 3, r: '수주 공시', s: 'disc' }]);
+  assert.ok(el.innerHTML.includes('<span class="mv-r"><span class="muted">' + MK + '</span></span>') && el.innerHTML.includes('<span class="src">공시</span>수주 공시'), el.innerHTML);
+  // 시세 안내 — 끝에 '기록'·'마감'이 붙어도(실제 11/05 OCI홀딩스 급등락 기록 이유)
+  for (const t of ['OCI홀딩스 주가, 11월 5일 204,000원 2.00% 상승 기록', 'LG전자 주가, 11월 5일 142,800원 2.39% 하락 마감']) { assert.equal(src.priceOnly(t), true, '봇: ' + t); assert.equal(g.priceOnly(t), true, '화면: ' + t); }
+  for (const t of ['삼성SDI 50만8000원으로 6.79%↓…ESS 성장과 조정 압력 교차', 'OCI홀딩스 주가, 11월 5일 204,000원 2.00% 상승 기록 경신에 신고가']) { assert.equal(src.priceOnly(t), false, '봇: ' + t); assert.equal(g.priceOnly(t), false, '화면: ' + t); }
+  // 영어 전망 글 — 맨 뒤(실제 11/05 아마존닷컴 급등락 기록 이유 'Amazon.com, Inc. (AMZN) Stock Forecasts')
+  const it = (title) => ({ title, pubMs: T('2026-11-05T21:00:00Z'), sentiment: { tone: 'neutral' } });
+  const ny = (ms) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(ms).replace(/-/g, '');
+  for (const [l, pct, want] of [[[it('Amazon.com, Inc. (AMZN) Stock Forecasts'), it('Amazon expands same-day delivery')], -2.19, 'Amazon expands same-day delivery'],
+    [[it('Tesla Stock Price Prediction 2026'), it('Tesla opens new plant')], 3, 'Tesla opens new plant']]) {
+    assert.equal(src.pickReasonNews(l, pct, '20261105', ny, []).title, want, '봇');
+    assert.equal(g.pickReasonNews(l, pct, '20261105', ny, []).title, want, '화면');
+  }
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');

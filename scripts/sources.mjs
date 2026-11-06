@@ -465,7 +465,7 @@ export function isRelevantNews(title, item, keys = newsKeys(item)) {
 // 'HD건설기계 장중 3%대 상승'. 이유가 붙은 제목('…추정치 웃돈 파두…주가는 장중 6.75% 하락')은 거르지 않도록 틀을 좁게 잡는다.
 // docs/app.js의 PRICE_ONLY와 같게 유지(자체 테스트가 두 곳 결과를 비교).
 export const PRICE_ONLY = [
-  /주가,?\s*\d{1,2}월\s*\d{1,2}일\s*(?:장중|장\s?마감|애프터마켓|프리마켓|시간외|오전|오후)?\s*[\d,.]+원\s*[\d.]+%\s*(?:상승|하락|보합)$/,
+  /주가,?\s*\d{1,2}월\s*\d{1,2}일\s*(?:장중|장\s?마감|애프터마켓|프리마켓|시간외|오전|오후)?\s*[\d,.]+원\s*[\d.]+%\s*(?:상승|하락|보합)(?:\s*(?:기록|마감|중))?$/,
   /^\S+(?:\s\S+){0,3}\s주가\s*(?:상승|하락|강세|약세|보합)\s*중$/,
   /^(?:\[특징주\]\s*)?[^\s,…·]+,?\s(?:\d{1,2}일\s*)?(?:장중|장\s?초반|오전|오후)\s*[\d.]+%대?\s*(?:상승|하락|강세|약세|급등|급락)(?:\s*중|세)?$/,
   /^\S+(?:\s\S+){0,3}\s주가\s*[\d,]+원\s*(?:상승|하락|보합)\s*(?:후\s*)?장\s?마감$/,
@@ -513,7 +513,7 @@ const REPORT_RE = /^\[리포트\s?브리핑\]|목표가\s*[\d,]+\s*원/;
 // 번호 붙은 연재·기획 기사('[한화에어로 해부⑤] …'·'[전자 3형제 경쟁 공식①] …')도 그날 움직임의 원인이 아닌 해설이라 같은 등급
 // 종목 추천·리포트·전망 칼럼 꼭지('… [오늘, 이 종목]'·'[버핏 리포트] …'·'… [주식 초고수는 지금]'·'[○○ 주가전망] …')도 앞이든 끝이든 같은 등급
 // — 사실을 전하는 꼭지('[핫종목]'·'[종목NOW]'·'[특징주]')는 그대로
-const SPEC_RE = /지지선|저항선|과매도|과매수|\bRSI\b|기술적\s*분석|횡보|(?:있을까|될까|갈까|할까)\s*\??\s*$|\?\s*$|^\[[^\]]*[①-⑳][^\]]*\]|\[[^\]]*(?:이\s?종목|[eE]종목|추천|전망|리포트|고수)[^\]]*\]/;
+const SPEC_RE = /지지선|저항선|과매도|과매수|\bRSI\b|기술적\s*분석|횡보|(?:있을까|될까|갈까|할까)\s*\??\s*$|\?\s*$|^\[[^\]]*[①-⑳][^\]]*\]|\[[^\]]*(?:이\s?종목|[eE]종목|추천|전망|리포트|고수)[^\]]*\]|\b[Ss]tock\s+[Ff]orecasts?\b|\b[Pp]rice\s+[Pp]redictions?\b/;
 const weakTitle = (t) => { const c = coreTitle(t); return roundupTitle(c) || REPORT_RE.test(c) || SPEC_RE.test(c); };
 // '소식에도'·'불구'처럼 거스르는 말이 있으면 호재·악재 낱말로 방향을 짐작하지 않는다
 const CONTRA_RE = /에도[\s,.…'"‘’“”]|에도$|불구|무색/;
@@ -526,6 +526,10 @@ function newsDir(it, names) {
   return tone === 'pos' ? 1 : tone === 'neg' ? -1 : REPORT_RE.test(it.title) ? 1 : 0;
 }
 // items: 최신순 뉴스, pct: 그날 등락률, day: 그 시장 현지 날짜(YYYYMMDD), ymd(ms): 같은 기준의 날짜 함수, names: 종목 이름들
+// '시장 흐름'보다 나은 종목 이유인가 — 나열·리포트·전망 글이 아니고 그날 방향을 말하는 기사(docs/app.js preferMarket의 반대, 32차 급등락 기록)
+export function strongNews(it, pct, names = []) {
+  return !!(it && it.title && !weakTitle(it.title) && newsDir(it, names) === Math.sign(Number(pct) || 0));
+}
 export function pickReasonNews(items, pct, day, ymd, names = []) {
   const s = Math.sign(Number(pct) || 0);
   const dir = (it) => newsDir(it, names);

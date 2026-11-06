@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 import {
   getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis,
   getSidecarNews, sidecarEvents, mergeMeasures,
-  aiStatus, aiGate, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, pickReasonNews, tagSentiment, krBaseName,
+  aiStatus, aiGate, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, pickReasonNews, strongNews, tagSentiment, krBaseName,
 } from './sources.mjs';
 import { startBudget, toStored, totalUsed, capacity, inSession, isKrSession, nextAllowanceAt, closedCheckDay, usExtWindow, usAfterPostSameDay } from './aibudget.mjs';
 import { validateWatchlist, writeJsonAtomic, analysisSig, sigMove, manifestOf } from './util.mjs';
@@ -189,6 +189,17 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
     } else console.warn('  ! 시세 전부 실패 — quotes.json 유지');
   } catch (e) { console.error('  ✗ 시세 실패 — quotes.json 유지:', e.message); }
 
+  // 같은 시장 지수(30·32차) — 화면 '시장 대비'와 같은 규칙: 국내는 상장 시장별 코스피·코스닥, 미국은 나스닥 상장이면 나스닥·그 밖은 S&P 500.
+  // 상장 시장을 모르거나 개장 전(예상 지수)이면 없음. 6) 종목 AI 분석의 시장 흐름과 7) 급등락 기록의 시장 흐름 이유에 쓴다
+  const idxAll = () => (marketNow?.indices?.length ? marketNow.indices : readJson('market.json')?.indices) || [];
+  const idxOfQuote = (q) => {
+    const ex = String(q.exch || '');
+    const sym = q.market === 'KR' ? ({ KOSPI: '^KS11', KOSDAQ: '^KQ11' })[ex] : ex ? (/NASDAQ/.test(ex) ? '^IXIC' : '^GSPC') : null;
+    const i = sym && idxAll().find((x) => x && x.symbol === sym && Number.isFinite(x.changePct));
+    if (!i || i.marketStatus === 'PREOPEN') return null;
+    return { name: i.name, pct: i.changePct, ex };
+  };
+
   // 3~5) 과거 시세·수급·뉴스 — 정해진 간격(REFRESH_MIN)에만 새로 받고, 그 사이엔 직전 값 재사용.
   //      받기에 실패한 종목도 직전 값을 지킨다(예전엔 그 종목이 파일에서 빠져 차트·수급이 사라졌다).
   const minute = new Date(now).getUTCMinutes(); // 한국시간과 분은 같다(정시 단위 시차)
@@ -300,18 +311,14 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
       const tz = MARKET_TZ[it.market] || MARKET_TZ.US, from = ymdIn(now - 2 * 86400e3, tz), to = ymdIn(now + 7 * 86400e3, tz);
       return (Array.isArray(cal?.events) ? cal.events : []).filter((e) => e && e.c === it.code && e.k !== 'disc' && e.t !== '실적 공시' && e.d >= from && e.d <= to);
     };
-    // 시장 흐름(30차) — 같은 시장 지수(화면 '시장 대비'와 같은 규칙: 국내는 상장 시장별 코스피·코스닥, 미국은 나스닥 상장이면 나스닥·그 밖은 S&P 500)와
-    // 국내는 그날 시장 조치(서킷브레이커·사이드카). 상장 시장을 모르거나 개장 전(예상 지수)이면 넘기지 않는다. 시그니처에는 넣지 않는다(지수만 바뀌었다고 다시 분석하지 않음)
-    const idxAll = (marketNow?.indices?.length ? marketNow.indices : readJson('market.json')?.indices) || [];
+    // 시장 흐름(30차) — 같은 시장 지수(idxOfQuote)와 국내는 그날 시장 조치(서킷브레이커·사이드카). 시그니처에는 넣지 않는다(지수만 바뀌었다고 다시 분석하지 않음)
     const benchOfQuote = (q) => {
-      const ex = String(q.exch || '');
-      const sym = q.market === 'KR' ? ({ KOSPI: '^KS11', KOSDAQ: '^KQ11' })[ex] : ex ? (/NASDAQ/.test(ex) ? '^IXIC' : '^GSPC') : null;
-      const i = sym && idxAll.find((x) => x && x.symbol === sym && Number.isFinite(x.changePct));
-      if (!i || i.marketStatus === 'PREOPEN') return null;
+      const ix = idxOfQuote(q);
+      if (!ix) return null;
       const hm = (iso) => new Date(Date.parse(iso) + 9 * 3600e3).toISOString().slice(11, 16);
-      const events = q.market !== 'KR' ? [] : (measuresNow?.items || []).filter((m) => m && m.mk === ex && Number.isFinite(Date.parse(m.at)))
+      const events = q.market !== 'KR' ? [] : (measuresNow?.items || []).filter((m) => m && m.mk === ix.ex && Number.isFinite(Date.parse(m.at)))
         .map((m) => `${m.kind === 'cb' ? '서킷브레이커' : `${m.dir === 'buy' ? '매수' : '매도'} 사이드카`} ${hm(m.at)}`);
-      return { name: i.name, pct: i.changePct, events };
+      return { name: ix.name, pct: ix.pct, events };
     };
     const movers = items
       .map((it) => ({ it, q: quotesByCode[it.code] }))
@@ -350,7 +357,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
     const prevMoves = readJson('moves.json');
     const an = readJson('analysis.json') || {};
     const keepFrom = ymdIn(now - MOVE_KEEP_DAYS * 86400e3, MARKET_TZ.KR);
-    const rank = { ai: 3, disc: 2, news: 1 };
+    const rank = { ai: 3, disc: 2, news: 1, mkt: 0.8 }; // 시장 흐름(32차)은 뉴스 아래·정정 공시 위
     // 정정·자회사 공시 이유는 뉴스보다 아래(0.5) — 맞는 뉴스가 생기면 그것으로 바꾼다. 이유 글은 '[종류] 제목'
     const rankOf = (x) => (!x || !x.s ? 0 : x.s === 'disc' && MINOR_DISC_RE.test(String(x.r ?? '').replace(/^\[[^\]]*\]\s*/, '')) ? 0.5 : rank[x.s] || 0);
     const cut = (s) => (s.length > MOVE_REASON_MAX ? `${s.slice(0, MOVE_REASON_MAX - 1)}…` : s);
@@ -373,16 +380,24 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
           const d = discs.find((x) => !MINOR_DISC_RE.test(x.title)), dMinor = d ? null : discs[0] || null;
           const n = pickReasonNews((news[it.code]?.items || []).filter((x) => x && Number.isFinite(x.pubMs) && ymdIn(x.pubMs, tz) >= dayStart(1)),
             q.changePct, day, (ms) => ymdIn(ms, tz), names);
+          // 시장 흐름(32차, 화면 '왜 움직였나'와 같은 기준) — 지수가 1% 넘게 움직인 날 같은 방향으로 지수보다 1%p 넘게 더 움직이지 않았으면
+          // 그날 방향을 말하는 기사가 아닌 한(방향 모를 기사·나열·전망 글) '코스피 -6.02% 흐름'을 이유로(정정·자회사 공시보다 앞)
+          const ix = idxOfQuote(q);
+          const mk = ix && Math.abs(ix.pct) >= 1 && Math.sign(q.changePct) === Math.sign(ix.pct) && Math.abs(q.changePct) < Math.abs(ix.pct) + 1 ? ix : null;
+          const mkWhy = mk ? { r: `${mk.name} ${mk.pct >= 0 ? '+' : ''}${mk.pct.toFixed(2)}% 흐름 — 종목만의 이유 기사 없음`, s: 'mkt' } : null;
           const why = a && a.headline && Number.isFinite(a.at) && ymdIn(a.at, tz) >= day ? { r: a.headline, s: 'ai' }
-            : d ? { r: `[${d.tag || '공시'}] ${d.title}`, s: 'disc' } : n ? { r: n.title, s: 'news' }
-            : dMinor ? { r: `[${dMinor.tag || '공시'}] ${dMinor.title}`, s: 'disc' } : { r: '', s: '' };
+            : d ? { r: `[${d.tag || '공시'}] ${d.title}`, s: 'disc' } : n && (!mk || strongNews(n, q.changePct, names)) ? { r: n.title, s: 'news' }
+            : mkWhy || (n ? { r: n.title, s: 'news' } : dMinor ? { r: `[${dMinor.tag || '공시'}] ${dMinor.title}`, s: 'disc' } : { r: '', s: '' });
           const old = i >= 0 ? list[i] : null;
           // 예전에 남긴 뉴스 이유도 지금 규칙으로 다시 본다 — 시세 안내·방향이 반대인 기사(내린 날의 호재 기사 등)면
           // 지킬 만한 이유가 아니다(더 나은 게 없으면 비운다). 호재·악재 태그는 제목만으로 정해져 다시 계산해도 같다
-          const oldNewsOk = old && old.s === 'news' && !!pickReasonNews([{ title: old.r, sentiment: tagSentiment(old.r) }], q.changePct, day, (ms) => ymdIn(ms, tz), names);
+          const oldItem = old && { title: String(old.r ?? ''), sentiment: tagSentiment(old.r) };
+          const oldNewsOk = old && old.s === 'news' && !!pickReasonNews([oldItem], q.changePct, day, (ms) => ymdIn(ms, tz), names)
+            && !(mk && !strongNews(oldItem, q.changePct, names)); // 시장 흐름 안이면 방향을 말하는 기사만 지킨다(32차)
           // 예전에 남긴 공시 이유도 지금 규칙으로 — 방향이 반대인 공시면 지킬 이유가 아니다(30차)
           const oldDiscOk = !(old && old.s === 'disc' && discDir(String(old.r ?? '').replace(/^\[[^\]]*\]\s*/, '')) === -Math.sign(q.changePct));
-          const oldRank = old && oldDiscOk && !(old.s === 'news' && !oldNewsOk) ? rankOf(old) : 0;
+          const oldMktOk = !(old && old.s === 'mkt' && !mk); // 시장 흐름 이유는 지금도 시장 흐름 안일 때만(32차)
+          const oldRank = old && oldDiscOk && oldMktOk && !(old.s === 'news' && !oldNewsOk) ? rankOf(old) : 0;
           const keep = old && oldRank > rankOf(why);
           const entry = { d: day, p: Math.round(q.changePct * 100) / 100, r: cut(String(keep ? old.r : why.r)), s: keep ? old.s : why.s };
           if (i >= 0) list[i] = entry; else list.push(entry);
