@@ -316,7 +316,7 @@ async function googleNews(query, ko, recentDays = 0, keep = null, keys = []) {
     for (let i = 0; i < 3 && source && title.endsWith(source); i++) title = title.slice(0, -source.length).replace(/[\s\-–—|]+$/, '');
     const pub = pick('pubDate');
     const pubMs = pub ? Date.parse(pub) : null;
-    items.push({ title, source, time: pub ? new Date(pub).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '', pubMs, link: pick('link'), sentiment: tagSentiment(title) });
+    items.push({ title, source, time: pub ? new Date(pub).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '', pubMs, link: pick('link'), sentiment: tagSentiment(title) });
   }
   let out = items.filter((it) => it.title && !SPAM_RE.test(it.title) && (!keep || keep(it.title)));
   if (recentDays > 0) {
@@ -709,14 +709,21 @@ async function geminiJSON(prompt, { retries = 2 } = {}) {
   }
 }
 
+// AI 입력의 기사 날짜 — 그 시장 현지 날짜 '[월/일] 제목'(30차). 발행 시각을 모르면 제목만
+const ymdIn = (ms, timeZone) => new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(ms).replace(/-/g, '');
+const mdOf = (ymd) => `${+ymd.slice(4, 6)}/${+ymd.slice(6, 8)}`;
+const datedTitle = (h, timeZone) => `${Number.isFinite(h && h.pubMs) ? `[${mdOf(ymdIn(h.pubMs, timeZone))}] ` : ''}${h.title}`;
+
 // 헤드라인 목록을 주고 "오늘 가장 가치 있는 핵심 뉴스 1~3개 + 한 줄 요약"을 JSON으로 받는다.
-export async function aiCoreNews(name, changePct, headlines) {
+// 이틀치 기사라 제목 앞에 기사 날짜(한국 날짜)를 붙인다 — 어제 기사를 오늘 원인으로 고르지 않게(30차)
+export async function aiCoreNews(name, changePct, headlines, now = Date.now()) {
   if (!GEMINI_KEY || !headlines || !headlines.length) return null;
   const dir = changePct <= -1 ? '급락' : changePct >= 1 ? '급등' : '보합';
-  const list = headlines.map((h, i) => `${i + 1}. ${h.title}${h.source ? ` (${h.source})` : ''}`).join('\n');
+  const list = headlines.map((h, i) => `${i + 1}. ${datedTitle(h, 'Asia/Seoul')}${h.source ? ` (${h.source})` : ''}`).join('\n');
   const prompt =
-    `너는 한국 증시 애널리스트다. 오늘 ${name}이(가) ${changePct.toFixed(2)}% ${dir}했다.\n` +
+    `너는 한국 증시 애널리스트다. 오늘(${mdOf(ymdIn(now, 'Asia/Seoul'))}) ${name}이(가) ${changePct.toFixed(2)}% ${dir}했다.\n` +
     `아래 뉴스 제목 중 오늘 이 움직임을 설명하는, 투자자에게 가장 가치 있고 핵심적인 것만 1~3개 골라라.\n` +
+    `제목 앞 [월/일]은 기사 날짜다 — 오늘 기사를 먼저 보고, 지난 기사는 오늘까지 이어진 원인일 때만 고른다.\n` +
     `광고·홍보·중복·단순 시황중계·무관한 것은 제외하고, 실제 원인/재료가 되는 것만 고른다.\n` +
     `반드시 이 JSON만 출력: {"summary":"오늘 ${name} ${dir} 핵심 이유 한 문장(한국어, 45자 내외)","items":[{"index":뉴스번호,"why":"왜 핵심인지 한 줄(한국어)"}]}\n\n` +
     `뉴스 목록:\n${list}`;
@@ -744,7 +751,7 @@ function historyStats(history) {
 }
 
 // 뉴스·수급·추세·시세를 모두 넘겨 Gemini가 "오늘 왜 이렇게 움직이는지"를 종합 분석. 키 없거나 실패 시 null.
-export async function aiStockAnalysis({ quote, news, flow, history, disclosures, schedule, now = Date.now() }) {
+export async function aiStockAnalysis({ quote, news, flow, history, disclosures, schedule, market = null, now = Date.now() }) {
   if (!GEMINI_KEY || !quote) return null;
   const name = quote.name || quote.code;
   const pct = quote.changePct ?? 0;
@@ -755,7 +762,15 @@ export async function aiStockAnalysis({ quote, news, flow, history, disclosures,
   const p = (v) => v == null ? 'N/A' : `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
   const n = (v) => v == null ? 'N/A' : `${v >= 0 ? '+' : ''}${Math.round(v).toLocaleString('ko-KR')}`;
   const st = historyStats(history);
-  const heads = (news?.items || []).slice(0, 6).map((it, i) => `${i + 1}. ${it.title}`).join('\n') || '(수집된 뉴스 없음)';
+  // 기사 날짜(그 시장 현지 날짜)와 등락이 난 거래일(시세 시각의 그 시장 날짜) — 거래일 전 기사를 그날 원인으로 오해하지 않게(30차)
+  const tz = us ? 'America/New_York' : 'Asia/Seoul';
+  const qt = Date.parse(quote.asOf);
+  const tradeDay = ymdIn(Number.isFinite(qt) ? qt : now, tz);
+  const heads = (news?.items || []).slice(0, 6).map((it, i) => `${i + 1}. ${datedTitle(it, tz)}`).join('\n') || '(수집된 뉴스 없음)';
+  // 시장 흐름(30차) — 같은 시장 지수(호출부가 화면 '시장 대비'와 같은 규칙으로 고름)와 그날 시장 조치. 지수가 1% 넘게 움직인 날엔 시장 몫과 종목 몫을 나눠 보게 한다
+  const mk = market && market.name && Number.isFinite(market.pct) ? market : null;
+  const sgn = (v) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`;
+  const mkLine = mk ? `${mk.name} ${sgn(mk.pct)}%${Array.isArray(mk.events) && mk.events.length ? ` (오늘 ${mk.events.join('·')})` : ''} — 이 종목은 시장 대비 ${sgn(pct - mk.pct)}%p` : '';
   const today = new Date(now + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, ''); // 한국 날짜 YYYYMMDD
   // 종목 수급은 장 마감 후 저녁에 그날 확정치가 나와 장중엔 전 거래일 값이다 — 오늘 움직임의 원인으로 오해하지 않게 날짜를 밝힌다
   const fd = /^\d{8}$/.test(String(flow?.date ?? '')) ? String(flow.date) : '';
@@ -779,16 +794,18 @@ export async function aiStockAnalysis({ quote, news, flow, history, disclosures,
   const rel = (d) => { const k = dayNo(d) - dayNo(localDay); return k === 0 ? '오늘' : k === -1 ? '어제' : k === 1 ? '내일' : `${+d.slice(4, 6)}/${+d.slice(6, 8)}`; };
   const sched = (Array.isArray(schedule) ? schedule : []).filter((e) => e && /^\d{8}$/.test(String(e.d)) && e.t).slice(0, 5);
   const schedLines = sched.map((e) => `- ${rel(e.d)}${e.tm ? ` ${e.tm}` : ''} ${e.t}${e.s ? ` — ${String(e.s).slice(0, 60)}` : ''}`).join('\n');
-  const basis = us ? '뉴스·추세' : discs.length ? '뉴스·공시·수급·추세' : '뉴스·수급·추세';
+  const basis = `${mk ? '시장·' : ''}${us ? '뉴스·추세' : discs.length ? '뉴스·공시·수급·추세' : '뉴스·수급·추세'}`;
   const prompt =
     `너는 ${us ? '미국' : '한국'} 증시 애널리스트다(답은 한국어로). 아래 정보를 종합해 '${name}'이(가) 오늘 왜 ${dir}하는지 핵심 원인을 분석하라.\n` +
-    `오늘 등락: ${pct.toFixed(2)}% · 현재가 ${money(quote.price)} (고가 ${money(quote.high)} / 저가 ${money(quote.low)})\n` +
+    `오늘 등락(${mdOf(tradeDay)} 거래일): ${pct.toFixed(2)}% · 현재가 ${money(quote.price)} (고가 ${money(quote.high)} / 저가 ${money(quote.low)})\n` +
+    (mk ? `시장: ${mkLine}\n` : '') +
     `과거 흐름: ${histLine}\n` +
     (us ? '' : `수급(순매수): ${flowLine}\n`) +
     (discs.length ? `최근 공시(전자공시 2주, 최신순):\n${discLines}\n` : '') +
     (sched.length ? `가까운 일정(${us ? '나스닥' : '전자공시'} 기준 — 오늘 움직임과 이어질 때만 원인으로):\n${schedLines}\n` : '') +
-    `최근 뉴스 제목:\n${heads}\n\n` +
+    `최근 뉴스 제목(앞의 [월/일]은 기사 날짜 — 거래일 전 기사는 그날까지 이어진 재료일 때만 원인으로):\n${heads}\n\n` +
     `단순 시황 중계가 아니라 '원인'에 집중하라. ${basis}를 서로 연결해 설명하고, 근거가 약하면 단정하지 말 것.\n` +
+    (mk && Math.abs(mk.pct) >= 1 ? `시장 전체가 크게 움직인 날이다 — 시장 흐름 탓인 몫과 이 종목만의 요인을 나눠, 시장보다 더(덜) 움직인 까닭을 짚어라.\n` : '') +
     `반드시 이 JSON만 출력:\n` +
     `{"headline":"오늘 왜 ${dir}하는지 한 문장 진단(한국어, 50자 내외)",` +
     `"summary":"종합 분석 2~3문장(한국어, ${basis.replace(/·/g, '+')}를 연결)",` +
@@ -803,6 +820,7 @@ export async function aiStockAnalysis({ quote, news, flow, history, disclosures,
     factors: Array.isArray(parsed.factors) ? parsed.factors.map((x) => String(x)).filter(Boolean).slice(0, 4) : [],
     outlook: String(parsed.outlook || ''),
     model: r.model,
+    ...(mk ? { mkt: mk.name } : {}), // 화면 면책 문구의 근거에 '시장'
   };
 }
 
@@ -830,7 +848,7 @@ export async function getIndexReason(name, changePct, prev = null, now = Date.no
     const recent = ai && aiAt != null && now - aiAt >= 0 && now - aiAt < INDEX_AI_MIN_INTERVAL_MS;
     const settled = !open && sigMove(aiSig) === sigMove(sig); // 장 밖(휴장 포함) + 등락 그대로 → 뉴스만 바뀜
     if (!ai || (aiSig !== sig && !recent && !settled)) {
-      const fresh = await aiCoreNews(name, changePct, items);
+      const fresh = await aiCoreNews(name, changePct, items, now);
       if (fresh) { ai = fresh; aiAt = now; aiSig = sig; }
     }
     return { dir, query: q, headlines: items.slice(0, 4), ai, aiAt, aiSig };

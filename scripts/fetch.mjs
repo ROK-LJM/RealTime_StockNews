@@ -20,7 +20,7 @@ import {
 } from './sources.mjs';
 import { startBudget, toStored, totalUsed, capacity, inSession, isKrSession, nextAllowanceAt, closedCheckDay, usExtWindow, usAfterPostSameDay } from './aibudget.mjs';
 import { validateWatchlist, writeJsonAtomic, analysisSig, sigMove, manifestOf } from './util.mjs';
-import { dartEnabled, resetDart, dartHalted, ensureCorpTable, getDisclosures, MINOR_DISC_RE } from './dart.mjs';
+import { dartEnabled, resetDart, dartHalted, ensureCorpTable, getDisclosures, MINOR_DISC_RE, discDir } from './dart.mjs';
 import { calendarDue, buildCalendar } from './calendar.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -114,7 +114,8 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
 
   // 1) 지수 + 분위기 + 급등락 핵심 이유/수급 브리핑
   const prevBriefs = (readJson('market.json') || {}).briefs || []; // 지수 AI 재사용용(직전 reason)
-  let marketNow = null; // 2) 시장 조치에서 지수 방향 확인용
+  let marketNow = null; // 2) 시장 조치에서 지수 방향 확인용 · 6) 종목 AI 분석의 시장 흐름
+  let measuresNow = null; // 6) 종목 AI 분석의 시장 흐름(그날 시장 조치, 30차)
   try {
     const market = await getMarket();
     marketNow = market;
@@ -183,6 +184,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
       // 그날 시장 조치(서킷브레이커·사이드카) — 그날 내내 남는다
       const idxNow = marketNow?.indices?.length ? marketNow.indices : readJson('market.json')?.indices;
       const measures = await marketMeasures(prevQuotesFile?.measures, quotes, idxNow, now);
+      measuresNow = measures;
       write('quotes.json', { quotes, ...(Object.keys(closed).length ? { closed } : {}), ...(measures ? { measures } : {}) });
     } else console.warn('  ! 시세 전부 실패 — quotes.json 유지');
   } catch (e) { console.error('  ✗ 시세 실패 — quotes.json 유지:', e.message); }
@@ -298,6 +300,19 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
       const tz = MARKET_TZ[it.market] || MARKET_TZ.US, from = ymdIn(now - 2 * 86400e3, tz), to = ymdIn(now + 7 * 86400e3, tz);
       return (Array.isArray(cal?.events) ? cal.events : []).filter((e) => e && e.c === it.code && e.k !== 'disc' && e.t !== '실적 공시' && e.d >= from && e.d <= to);
     };
+    // 시장 흐름(30차) — 같은 시장 지수(화면 '시장 대비'와 같은 규칙: 국내는 상장 시장별 코스피·코스닥, 미국은 나스닥 상장이면 나스닥·그 밖은 S&P 500)와
+    // 국내는 그날 시장 조치(서킷브레이커·사이드카). 상장 시장을 모르거나 개장 전(예상 지수)이면 넘기지 않는다. 시그니처에는 넣지 않는다(지수만 바뀌었다고 다시 분석하지 않음)
+    const idxAll = (marketNow?.indices?.length ? marketNow.indices : readJson('market.json')?.indices) || [];
+    const benchOfQuote = (q) => {
+      const ex = String(q.exch || '');
+      const sym = q.market === 'KR' ? ({ KOSPI: '^KS11', KOSDAQ: '^KQ11' })[ex] : ex ? (/NASDAQ/.test(ex) ? '^IXIC' : '^GSPC') : null;
+      const i = sym && idxAll.find((x) => x && x.symbol === sym && Number.isFinite(x.changePct));
+      if (!i || i.marketStatus === 'PREOPEN') return null;
+      const hm = (iso) => new Date(Date.parse(iso) + 9 * 3600e3).toISOString().slice(11, 16);
+      const events = q.market !== 'KR' ? [] : (measuresNow?.items || []).filter((m) => m && m.mk === ex && Number.isFinite(Date.parse(m.at)))
+        .map((m) => `${m.kind === 'cb' ? '서킷브레이커' : `${m.dir === 'buy' ? '매수' : '매도'} 사이드카`} ${hm(m.at)}`);
+      return { name: i.name, pct: i.changePct, events };
+    };
     const movers = items
       .map((it) => ({ it, q: quotesByCode[it.code] }))
       .filter(({ it, q }) => it.ai !== false && q && q.ok && Math.abs(q.changePct ?? 0) >= STOCK_ANALYSIS_THRESHOLD)
@@ -317,7 +332,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
       }
       calls++;
       try {
-        const a = await aiStockAnalysis({ quote: q, news: news[it.code], flow: investors[it.code], history: history[it.code], disclosures: disclosures[it.code], schedule: scheduleOf(it), now });
+        const a = await aiStockAnalysis({ quote: q, news: news[it.code], flow: investors[it.code], history: history[it.code], disclosures: disclosures[it.code], schedule: scheduleOf(it), market: benchOfQuote(q), now });
         if (a) analysis[it.code] = { ...a, sig, at: now };
         else if (prev[it.code]) analysis[it.code] = prev[it.code]; // 일시적 실패 시 기존 분석 유지
       } catch (e) { console.error(`    종합분석 실패(${it.code}):`, e.message); if (prev[it.code]) analysis[it.code] = prev[it.code]; }
@@ -353,7 +368,8 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
         if (Math.abs(q.changePct) >= STOCK_ANALYSIS_THRESHOLD) {
           const a = an[it.code];
           const names = [q.name, krBaseName(q.name, q.code)]; // 우선주는 기사 속 보통주 이름으로도 방향을 본다
-          const discs = (disclosures[it.code]?.items || []).filter((x) => x && x.key && x.title && x.date <= day && x.date >= dayStart(3));
+          // 그날 움직임과 방향이 반대인 공시(내린 날의 공급계약 체결·자기주식 취득, 오른 날의 유상증자 등)는 이유가 아니다(30차)
+          const discs = (disclosures[it.code]?.items || []).filter((x) => x && x.key && x.title && x.date <= day && x.date >= dayStart(3) && discDir(x.title) !== -Math.sign(q.changePct));
           const d = discs.find((x) => !MINOR_DISC_RE.test(x.title)), dMinor = d ? null : discs[0] || null;
           const n = pickReasonNews((news[it.code]?.items || []).filter((x) => x && Number.isFinite(x.pubMs) && ymdIn(x.pubMs, tz) >= dayStart(1)),
             q.changePct, day, (ms) => ymdIn(ms, tz), names);
@@ -364,7 +380,9 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
           // 예전에 남긴 뉴스 이유도 지금 규칙으로 다시 본다 — 시세 안내·방향이 반대인 기사(내린 날의 호재 기사 등)면
           // 지킬 만한 이유가 아니다(더 나은 게 없으면 비운다). 호재·악재 태그는 제목만으로 정해져 다시 계산해도 같다
           const oldNewsOk = old && old.s === 'news' && !!pickReasonNews([{ title: old.r, sentiment: tagSentiment(old.r) }], q.changePct, day, (ms) => ymdIn(ms, tz), names);
-          const oldRank = old && !(old.s === 'news' && !oldNewsOk) ? rankOf(old) : 0;
+          // 예전에 남긴 공시 이유도 지금 규칙으로 — 방향이 반대인 공시면 지킬 이유가 아니다(30차)
+          const oldDiscOk = !(old && old.s === 'disc' && discDir(String(old.r ?? '').replace(/^\[[^\]]*\]\s*/, '')) === -Math.sign(q.changePct));
+          const oldRank = old && oldDiscOk && !(old.s === 'news' && !oldNewsOk) ? rankOf(old) : 0;
           const keep = old && oldRank > rankOf(why);
           const entry = { d: day, p: Math.round(q.changePct * 100) / 100, r: cut(String(keep ? old.r : why.r)), s: keep ? old.s : why.s };
           if (i >= 0) list[i] = entry; else list.push(entry);

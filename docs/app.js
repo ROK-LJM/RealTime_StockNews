@@ -61,6 +61,14 @@ function fmtAiTime(ms) {
     ? d.toLocaleTimeString('ko-KR', opt)
     : d.toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', ...opt });
 }
+// 기사 시각 — 오늘이면 '13:46', 아니면 '11/5 16:32'(이 기기 시각, 시장 이름표 시각과 같은 꼴). 발행 시각을 모르면 봇이 적은 글자(예전 데이터)
+// 봇이 적은 글자는 깃허브 서버(UTC) 시각으로 찍혀 9시간 이르게 보였다(30차) — 발행 시각(pubMs)으로 다시 쓴다
+function newsTime(it) {
+  const ms = Number(it && it.pubMs);
+  if (!Number.isFinite(ms) || ms <= 0) return String((it && it.time) || '');
+  const d = new Date(ms), hm = d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return d.toDateString() === new Date().toDateString() ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
+}
 function cssId(code) { return String(code).replace(/[^a-zA-Z0-9]/g, '_'); }
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 // 외부(뉴스 RSS·AI 응답) 링크는 http/https만 허용 — javascript: 같은 실행 스킴이 섞여 들어와도 클릭으로 실행되지 않게.
@@ -680,6 +688,13 @@ function preferMarket(q, w, vs) {
 }
 // 정정 공시·자회사 공시 — 그날 움직임의 원인일 가능성이 낮아 이유로는 맞는 뉴스가 없을 때만(scripts/dart.mjs의 MINOR_DISC_RE와 같게)
 const MINOR_DISC_RE = /^\[(?:기재|첨부)정정\]|종속회사의주요경영사항|자회사의주요경영사항/;
+// 공시 제목이 말하는 방향 — 호재 쪽 +1, 악재 쪽 −1, 모르면 0. 오늘 움직임과 반대 방향인 공시(내린 날의 공급계약 체결 등)는 이유로 쓰지 않는다(scripts/dart.mjs의 discDir와 같게)
+const DISC_UP_RE = /공급계약체결|수주|자기주식취득|주식소각|(?<!유)무상증자|배당결정/; // 유무상증자는 방향을 모름
+const DISC_DOWN_RE = /계약해지|유상증자|사채권발행결정|자기주식처분|불성실공시법인지정|횡령|배임/;
+function discDir(title) {
+  const t = String(title ?? '');
+  return DISC_DOWN_RE.test(t) ? -1 : DISC_UP_RE.test(t) ? 1 : 0;
+}
 
 // 다음 일정 — 공시 일정 달력(calendar.json)에서 그 종목의 오늘(그 시장 날짜)부터 2주 안 가장 가까운 날의 일정.
 // 지난 공시·이미 낸 실적 공시는 빼고, 그날 일정은 두 개까지(시각, 미국 실적은 장 전·후를 붙여). more = 2주 안 나머지 일정 수
@@ -818,23 +833,26 @@ function groupInfo(g, list, closed) {
 
 // ---------- 내 종목 한눈에 ----------
 // 시장별 등락률 색 타일(진할수록 크게 움직임, 오른 종목부터) + ±2% 넘게 움직인 종목의 '왜' 한 줄.
-// 이유는 AI 진단 → 오늘 주요 공시 → 최근 뉴스(시세 안내 기사는 건너뜀) 순으로 고른다. 이미 받은 데이터만 쓴다(추가 요청 없음).
+// 이유는 AI 진단 → 오늘 주요 공시(오늘 방향과 반대인 공시는 건너뜀) → 최근 뉴스(시세 안내 기사는 건너뜀) 순으로 고른다. 이미 받은 데이터만 쓴다(추가 요청 없음).
 // 타일·줄을 누르면 그 종목 카드로 이동한다.
 const WHY_MIN = 2;  // % — AI 종합분석 대상 기준과 같게
 const WHY_SHOW = 6; // 처음에 보여줄 줄 수(나머지는 '더 보기')
-function keyDiscToday(code) {
+// dir(오늘 등락 방향)을 주면 그 방향과 반대인 공시는 뺀다 — 이유로 고를 때만(칸의 '오늘 주요 공시' 점·말풍선은 모두)
+function keyDiscToday(code, dir = 0) {
   const today = kstYmd(Date.now());
-  const list = (state.disc[code]?.items || []).filter((x) => x && x.key && x.date === today && x.title);
+  const list = (state.disc[code]?.items || []).filter((x) => x && x.key && x.date === today && x.title && !(dir && discDir(x.title) === -dir));
   return list.find((x) => !MINOR_DISC_RE.test(x.title)) || list[0] || null; // 정정·자회사 공시보다 그 밖의 공시 먼저
 }
 function whyOf(q) {
   const a = state.analysis[q.code];
   if (q.ai !== false && a && a.headline && aiFresh(q, a)) return { src: 'AI', label: 'AI 진단', text: a.headline }; // 전날 분석·AI를 꺼 둔 종목이면 오늘 공시·뉴스로
-  const d = keyDiscToday(q.code), disc = d && { src: '공시', label: '오늘 주요 공시', text: `[${d.tag || '공시'}] ${d.title}` };
+  const d = keyDiscToday(q.code, Math.sign(q.changePct || 0)), disc = d && { src: '공시', label: '오늘 주요 공시', text: `[${d.tag || '공시'}] ${d.title}` };
   if (d && !MINOR_DISC_RE.test(d.title)) return disc;
-  const m = marketOf(q), at = +new Date(q.asOf);
-  const n = pickReasonNews(state.news[q.code]?.items, q.changePct, Number.isFinite(at) ? marketYmd(at, m) : '', (ms) => marketYmd(ms, m), reasonNames(q));
-  if (n) return { src: '뉴스', label: '최근 뉴스', text: n.title, item: n };
+  const m = marketOf(q), at = +new Date(q.asOf), day = Number.isFinite(at) ? marketYmd(at, m) : '';
+  const n = pickReasonNews(state.news[q.code]?.items, q.changePct, day, (ms) => marketYmd(ms, m), reasonNames(q));
+  // 그 종목 거래일 기사가 아니면 기사 날짜를 함께 — 어제 '4.90% 하락' 기사가 오늘 -9.86%의 이유처럼 보이지 않게(30차)
+  const nd = n && Number.isFinite(n.pubMs) && day ? marketYmd(n.pubMs, m) : '';
+  if (n) return { src: '뉴스', label: '최근 뉴스', text: n.title, item: n, ...(nd && nd !== day ? { day: `${+nd.slice(4, 6)}/${+nd.slice(6, 8)}` } : {}) };
   return disc || null; // 정정·자회사 공시는 맞는 뉴스가 없을 때만
 }
 function tileHtml(q) {
@@ -899,7 +917,7 @@ function renderBoard(groups, closed, measures) {
     return `<button type="button" class="why-row${i >= show && !state.whyAll ? ' more' : ''}" data-code="${esc(q.code)}">
       <span class="w-pct ${dirClass(p)}-c">${p > 0 ? '▲' : '▼'} ${Math.abs(p).toFixed(2)}%</span>
       <span class="w-nm">${esc(q.name)}</span>
-      <span class="w-txt">${vs && vs.follows ? `<span class="src mkt" title="같은 날 ${esc(vs.name)} ${fmtPct(vs.pct)} — 시장 전체와 비슷하게 움직임(차이 ${fmtPctP(vs.diff)})">시장 따라</span>` : ''}${w ? `<span class="src" title="${esc(w.label)}">${w.src}</span>${esc(w.text)}`
+      <span class="w-txt">${vs && vs.follows ? `<span class="src mkt" title="같은 날 ${esc(vs.name)} ${fmtPct(vs.pct)} — 시장 전체와 비슷하게 움직임(차이 ${fmtPctP(vs.diff)})">시장 따라</span>` : ''}${w ? `<span class="src" title="${esc(w.label)}${w.day ? ` — ${esc(w.day)} 기사` : ''}">${w.src}</span>${w.day ? `<span class="muted">${esc(w.day)}</span> ` : ''}${esc(w.text)}`
         : vs && vs.follows ? `<span class="muted">${esc(vs.name)} ${fmtPct(vs.pct)} 흐름 — 종목만의 이유 기사 없음</span>` : '<span class="muted">아직 이유 정보가 없어요(뉴스·공시·AI 대기)</span>'}</span>
     </button>`;
   }).join('');
@@ -974,9 +992,11 @@ function errCard(q) {
 }
 
 // 분석에 쓴 입력 — 미국 종목은 수급이 없고, 공시는 분석 당시 입력(sig)에 공시 접수번호가 있을 때만
+// AI가 참고한 것 — 시장 흐름(같은 시장 지수·그날 시장 조치, 30차)을 함께 넘겼으면 앞에 '시장'
 function basisOf(q, data) {
-  if (marketOf(q) === 'US') return '뉴스·추세';
-  return String(data?.sig || '').includes('|d:') ? '뉴스·공시·수급·추세' : '뉴스·수급·추세';
+  const mk = data && data.mkt ? '시장·' : '';
+  if (marketOf(q) === 'US') return `${mk}뉴스·추세`;
+  return mk + (String(data?.sig || '').includes('|d:') ? '뉴스·공시·수급·추세' : '뉴스·수급·추세');
 }
 
 // ---------- 지난 급등락 (봇이 ±2% 넘게 움직인 날마다 남긴 등락·이유) ----------
@@ -1185,7 +1205,7 @@ function renderNews(q, data) {
     return `<div class="news-item">
       <span class="tag ${esc(s.tone)}">${esc(s.label)}</span>
       <span>${extLink(it.link, it.title)}
-        <span class="news-time">${esc(it.source || '')} ${esc(it.time || '')}</span>${kw}</span></div>`;
+        <span class="news-time">${esc(it.source || '')} ${esc(newsTime(it))}</span>${kw}</span></div>`;
   }).join('');
   el.innerHTML = `<div class="news-head">${head}${sumHtml}</div>${rows}`;
 }

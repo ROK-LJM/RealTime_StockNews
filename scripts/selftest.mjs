@@ -1689,7 +1689,7 @@ await test('이유(23차): 정정·자회사 공시는 맞는 뉴스가 없을 �
   const q = { code: 'A', name: '가나', market: 'KR', ok: true, changePct: -15.3, asOf: new Date().toISOString() };
   const minor = { key: true, date: today, tag: 'M&A', title: '[기재정정]타법인주식및출자증권취득결정' };
   const sub = { key: true, date: today, tag: 'M&A', title: '영업양도결정(종속회사의주요경영사항)' };
-  const real = { key: true, date: today, tag: '계약', title: '단일판매ㆍ공급계약체결' };
+  const real = { key: true, date: today, tag: '실적', title: '연결재무제표기준영업(잠정)실적(공정공시)' }; // 방향을 모르는 공시(30차 — 내린 날의 공급계약 체결은 이유 아님)
   ctx.state.disc.A = { items: [minor] };
   ctx.state.news.A = { items: [{ title: '가나, 반도체주 폭락에 급락', pubMs: Date.now() - 600e3 }] };
   assert.deepEqual([f.whyOf(q).src, f.whyOf(q).text], ['뉴스', '가나, 반도체주 폭락에 급락'], '정정 공시보다 맞는 뉴스');
@@ -1699,7 +1699,132 @@ await test('이유(23차): 정정·자회사 공시는 맞는 뉴스가 없을 �
   assert.equal(f.whyOf(q).text, '[M&A] 영업양도결정(종속회사의주요경영사항)', '맞는 뉴스가 없으면 그 공시');
   ctx.state.disc.A = { items: [minor, real] };
   ctx.state.news.A = { items: [{ title: '가나, 반도체주 폭락에 급락', pubMs: Date.now() - 600e3 }] };
-  assert.equal(f.whyOf(q).text, '[계약] 단일판매ㆍ공급계약체결', '그날 다른 주요 공시가 있으면 그 공시가 먼저');
+  assert.equal(f.whyOf(q).text, '[실적] 연결재무제표기준영업(잠정)실적(공정공시)', '그날 다른 주요 공시가 있으면 그 공시가 먼저');
+});
+await test('뉴스 시각(30차): 봇이 적는 글자는 서버 시간대(깃허브 UTC)여도 한국 시각 · 화면은 발행 시각으로(오늘 HH:MM · 그 밖 M/D HH:MM) · 발행 시각을 모르면 봇 글자', async () => {
+  const zone = process.env.TZ, sys = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  process.env.TZ = 'UTC'; // 깃허브 서버와 같은 시간대 — 예전엔 여기서 9시간 이른 글자가 찍혔다(11/06 13:46 기사 → '오전 04:46')
+  try {
+    const root = workspace();
+    await pipeline(root, { krAt: NOW_KR });
+    const it = read(root, 'news.json')['005930'].items[0];
+    const kst = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(it.pubMs);
+    assert.equal(it.time, kst, '한국 시각 글자');
+  } finally { process.env.TZ = zone ?? sys; } // TZ를 지우기만 하면 시간대가 돌아오지 않아 원래 값으로 되돌린다
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const top = appJs.slice(appJs.indexOf('function newsTime('), appJs.indexOf('\n', appJs.indexOf('function extLink(')));
+  const rn = appJs.slice(appJs.indexOf('function renderNews('), appJs.indexOf('// ---------- 루프'));
+  const el = { innerHTML: '' };
+  const f = vm.runInNewContext(top + '\n' + rn + '; ({ newsTime, renderNews })', { document: { getElementById: () => el }, location: { href: 'https://rok-ljm.github.io/' }, MOVER_THRESHOLD: 3, URL });
+  const hm = (ms) => new Date(ms).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const now = Date.now();
+  assert.equal(f.newsTime({ pubMs: now, time: '11. 06. 오전 04:46' }), hm(now), '오늘이면 시각만(봇 글자는 안 씀)');
+  const old = now - 3 * 86400e3, d = new Date(old);
+  assert.equal(f.newsTime({ pubMs: old }), (d.getMonth() + 1) + '/' + d.getDate() + ' ' + hm(old), '그 밖은 월/일 시각');
+  assert.equal(f.newsTime({ time: '10. 21. 오후 03:00' }), '10. 21. 오후 03:00', '발행 시각이 없으면 봇 글자(예전 데이터)');
+  assert.equal(f.newsTime({ pubMs: null }), '', '둘 다 없으면 빈칸');
+  f.renderNews({ code: '005930', changePct: 1 }, { items: [{ title: '기사', source: '연합', time: '11. 06. 오전 04:46', pubMs: now, link: 'https://news.example.com/1' }] });
+  assert.ok(el.innerHTML.includes('연합 ' + hm(now)) && !el.innerHTML.includes('오전 04:46'), '카드 뉴스 줄은 발행 시각으로 — ' + el.innerHTML);
+});
+await test('AI 입력(30차): 종목 분석에 시장 흐름(같은 시장 지수·그날 시장 조치·시장 대비)·거래일·기사 날짜 · 분석에 mkt(화면 근거 "시장·") · 상장 시장을 모르거나 개장 전 지수면 시장 줄 없음 · 지수 핵심 이유에도 기사 날짜', async () => {
+  const textOf = (b) => { try { return JSON.parse(b).contents[0].parts[0].text; } catch { return ''; } };
+  const bodyOf = (name) => textOf(NET.bodies.find((b, i) => isGemini(NET.calls[i]) && b.includes("'" + name + "'")) || '');
+  const briefOf = () => textOf(NET.bodies.find((b, i) => isGemini(NET.calls[i]) && b.includes('뉴스 목록:')) || '');
+  const kstMd = (ms) => { const d = new Date(ms + 9 * 3600e3); return (d.getUTCMonth() + 1) + '/' + d.getUTCDate(); };
+  const list = { v: 2, kr: [['005930', '삼성전자', 'KOSPI', 1], ['000660', 'SK하이닉스', 'KOSPI', 2]], us: [['AAPL', '애플', 'Apple Inc.', 'NASDAQ', 1]], meta: {} };
+  const root = workspace();
+  writeData(root, 'stocklist.json', list);
+  // 그날 09:05 서킷브레이커(직전 회차 기록)
+  writeData(root, 'quotes.json', { quotes: [], measures: { day: '2026-10-15', v: src.MEASURES_V, items: [{ kind: 'cb', mk: 'KOSPI', at: '2026-10-15T00:05:00.000Z' }] } });
+  await pipeline(root, { krAt: NOW_KR, usPct: { AAPL: 3 } });
+  const kr = bodyOf('삼성전자'), us = bodyOf('애플');
+  assert.ok(kr.includes('오늘 등락(10/15 거래일): 4.20%'), kr.slice(0, 700));
+  assert.ok(kr.includes('\n시장: 코스피 -1.20% (오늘 서킷브레이커 09:05) — 이 종목은 시장 대비 +5.40%p\n'), kr.slice(0, 700));
+  assert.ok(kr.includes('시장 전체가 크게 움직인 날이다') && kr.includes('시장·뉴스·수급·추세를 서로 연결'), kr.slice(0, 1600));
+  assert.ok(kr.includes('\n1. [' + kstMd(Date.now() - 3600e3) + '] '), '기사 앞에 한국 날짜 — ' + kr.slice(0, 900));
+  assert.ok(/\n시장: 나스닥 [+-]\d+\.\d{2}% — 이 종목은 시장 대비 [+-]\d+\.\d{2}%p\n/.test(us) && !us.includes('서킷브레이커'), us.slice(0, 700));
+  assert.equal(read(root, 'analysis.json')['005930'].mkt, '코스피');
+  assert.equal(read(root, 'analysis.json').AAPL.mkt, '나스닥');
+  const brief = briefOf();
+  assert.ok(brief.includes('오늘(10/15) 코스피이(가)') && brief.includes('\n1. [' + kstMd(Date.now() - 3600e3) + '] ') && brief.includes('제목 앞 [월/일]은 기사 날짜다'), brief.slice(0, 500));
+  // 상장 시장을 모르면(검색 목록 없음) 시장 줄·mkt 없음
+  const plain = workspace();
+  await pipeline(plain, { krAt: NOW_KR });
+  assert.ok(bodyOf('삼성전자') && !bodyOf('삼성전자').includes('\n시장: ') && !('mkt' in read(plain, 'analysis.json')['005930']), '상장 시장 모름 → 시장 줄 없음');
+  // 개장 전(예상 지수)과는 비교하지 않음
+  const pre = workspace();
+  writeData(pre, 'stocklist.json', list);
+  await pipeline(pre, { krAt: NOW_KR, idxStatus: 'PREOPEN' });
+  assert.ok(bodyOf('삼성전자') && !bodyOf('삼성전자').includes('\n시장: '), '예상 지수와는 비교하지 않음');
+  // 지수가 1% 안쪽이면 시장 줄만(나눠 보라는 말 없음)
+  const calm = workspace();
+  writeData(calm, 'stocklist.json', list);
+  await pipeline(calm, { krAt: NOW_KR, idxPct: 0.4 });
+  assert.ok(bodyOf('삼성전자').includes('\n시장: 코스피 +0.40% — 이 종목은 시장 대비 +3.80%p\n') && !bodyOf('삼성전자').includes('시장 전체가 크게 움직인 날이다'), bodyOf('삼성전자').slice(0, 700));
+  // 화면 면책 문구의 근거 — mkt가 있으면 앞에 '시장'
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const mo = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('\n', appJs.indexOf('function marketOf(')));
+  const g = vm.runInNewContext(mo + '\n' + appJs.slice(appJs.indexOf('function basisOf('), appJs.indexOf('// ---------- 지난 급등락')) + '; ({ basisOf })', {});
+  const krQ = { market: 'KR' }, usQ = { market: 'US' };
+  assert.deepEqual([g.basisOf(krQ, { mkt: '코스피', sig: 'x|d:1' }), g.basisOf(krQ, { sig: 'x' }), g.basisOf(usQ, { mkt: '나스닥' }), g.basisOf(usQ, {})],
+    ['시장·뉴스·공시·수급·추세', '뉴스·수급·추세', '시장·뉴스·추세', '뉴스·추세']);
+});
+await test('이유(30차): 오늘 움직임과 방향이 반대인 공시(내린 날의 공급계약 체결·자기주식 취득, 오른 날의 유상증자)는 "왜 움직였나" 이유에서 뺌 · 칸의 오늘 주요 공시 점은 그대로 · 공시 방향 규칙 봇·화면 같음', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const why = appJs.slice(appJs.indexOf('function keyDiscToday('), appJs.indexOf('function tileHtml('));
+  const kstYmd = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const today = kstYmd(Date.now());
+  const ctx = { state: { analysis: {}, news: {}, disc: {} }, kstYmd };
+  const f = vm.runInNewContext(block + '\n' + why + '; ({ whyOf, keyDiscToday, discDir })', ctx);
+  // 공시 방향 — 실제 전자공시 제목
+  const dirs = [['단일판매ㆍ공급계약체결', 1], ['[기재정정]단일판매ㆍ공급계약체결', 1], ['단일판매ㆍ공급계약해지', -1], ['주요사항보고서(자기주식취득결정)', 1], ['자기주식취득결과보고서', 1],
+    ['주식소각결정', 1], ['무상증자결정', 1], ['현금ㆍ현물배당결정', 1], ['유상증자결정', -1], ['유무상증자결정', 0], ['전환사채권발행결정', -1], ['신주인수권부사채권발행결정', -1],
+    ['자기주식처분결정', -1], ['자기주식취득신탁계약해지결정', -1], ['불성실공시법인지정', -1], ['횡령ㆍ배임혐의발생', -1],
+    ['연결재무제표기준영업(잠정)실적(공정공시)', 0], ['현금ㆍ현물배당을위한주주명부폐쇄(기준일)결정', 0], ['타법인주식및출자증권취득결정', 0], ['풍문또는보도에대한해명(미확정)', 0], ['기업설명회(IR)개최(안내공시)', 0]];
+  for (const [t, d] of dirs) { assert.equal(dartm.discDir(t), d, '봇: ' + t); assert.equal(f.discDir(t), d, '화면: ' + t); }
+  const q = (pct) => ({ code: 'A', name: '가나', market: 'KR', ok: true, changePct: pct, asOf: new Date().toISOString() });
+  const contract = { key: true, date: today, tag: '계약', title: '단일판매ㆍ공급계약체결' };
+  const rights = { key: true, date: today, tag: '증자·사채', title: '유상증자결정' };
+  // 실제 11/06 파두 -10.27%: 이유로 '[계약] 단일판매ㆍ공급계약체결'이 붙었다
+  ctx.state.disc.A = { items: [contract] };
+  ctx.state.news.A = { items: [{ title: '가나, 반도체주 폭락에 급락', pubMs: Date.now() - 600e3 }] };
+  assert.deepEqual([f.whyOf(q(-10.27)).src, f.whyOf(q(-10.27)).text], ['뉴스', '가나, 반도체주 폭락에 급락'], '내린 날의 공급계약 체결은 이유 아님 → 뉴스');
+  ctx.state.news.A = { items: [] };
+  assert.equal(f.whyOf(q(-10.27)), null, '맞는 뉴스도 없으면 이유 없음(끝에라도 쓰지 않음)');
+  assert.equal(f.keyDiscToday('A')?.title, '단일판매ㆍ공급계약체결', "칸의 '오늘 주요 공시' 점은 방향과 무관");
+  assert.equal(f.whyOf(q(6)).text, '[계약] 단일판매ㆍ공급계약체결', '오른 날엔 그 공시가 이유');
+  ctx.state.disc.A = { items: [contract, rights] };
+  assert.equal(f.whyOf(q(-8)).text, '[증자·사채] 유상증자결정', '같은 날 방향이 맞는 공시가 있으면 그것');
+  assert.equal(f.whyOf(q(8)).text, '[계약] 단일판매ㆍ공급계약체결', '오른 날엔 유상증자를 건너뜀');
+  // 뉴스 이유가 그 종목 거래일 기사가 아니면 기사 날짜(실제 11/06 파두 -9.86%에 11/05 '파두 4.90% 하락…' 기사)
+  ctx.state.disc.A = { items: [] };
+  const y = Date.now() - 86400e3 - 600e3, kd = new Date(y + 9 * 3600e3);
+  ctx.state.news.A = { items: [{ title: '가나 4.90% 하락…신규 수주 이행 점검', pubMs: y }] };
+  assert.deepEqual([f.whyOf(q(-9.86)).text, f.whyOf(q(-9.86)).day], ['가나 4.90% 하락…신규 수주 이행 점검', (kd.getUTCMonth() + 1) + '/' + kd.getUTCDate()], '거래일 전 기사엔 날짜');
+  ctx.state.news.A = { items: [{ title: '가나, 반도체주 폭락에 급락', pubMs: Date.now() - 60e3 }] };
+  assert.equal(f.whyOf(q(-9.86)).day, undefined, '그날 기사엔 날짜 없음');
+});
+await test('급등락 기록(30차): 그날 움직임과 방향이 반대인 공시는 이유가 아님(내린 날의 공급계약 체결 → 뉴스) · 방향이 맞는 공시는 그대로 · 예전에 남긴 반대 방향 공시 이유는 바꿈', async () => {
+  await withDartKey(async () => {
+    const item = (t) => '<item><title>' + t + ' - 테스트일보</title><link>https://news.example.com/1</link><pubDate>' + new Date(Date.now() - 600e3).toUTCString() + '</pubDate><source url="https://news.example.com">테스트일보</source></item>';
+    const downNews = (m, u) => text('<?xml version="1.0"?><rss><channel>' + item(queryName(u) + ', 반도체 업황 우려에 급락') + '</channel></rss>');
+    const base = { gemini: () => text('upstream error', 500), krAt: NOW_KR, krPct: { '005930': -4.2, '000660': 0.3 }, news: downNews };
+    const contract = { ...DART_ROWS, '00126380': [['20261015000321', '단일판매ㆍ공급계약체결']] };
+    const root = workspace();
+    await pipeline(root, { ...base, dartRows: contract });
+    assert.deepEqual(read(root, 'moves.json')['005930'][0], { d: '20261015', p: -4.2, r: '삼성전자, 반도체 업황 우려에 급락', s: 'news' }, '내린 날의 공급계약 체결 대신 뉴스');
+    const r2 = workspace();
+    await pipeline(r2, { ...base, dartRows: { ...DART_ROWS, '00126380': [['20261015000400', '유상증자결정'], ['20261015000321', '단일판매ㆍ공급계약체결']] } });
+    assert.deepEqual(read(r2, 'moves.json')['005930'][0], { d: '20261015', p: -4.2, r: '[증자·사채] 유상증자결정', s: 'disc' }, '방향이 맞는 공시는 뉴스보다 먼저');
+    const r3 = workspace();
+    writeData(r3, 'moves.json', { '005930': [{ d: '20261015', p: -3, r: '[계약] 단일판매ㆍ공급계약체결', s: 'disc' }] });
+    await pipeline(r3, { ...base, dartRows: contract });
+    assert.deepEqual(read(r3, 'moves.json')['005930'][0], { d: '20261015', p: -4.2, r: '삼성전자, 반도체 업황 우려에 급락', s: 'news' }, '예전 규칙으로 남긴 반대 방향 공시 이유 → 뉴스로');
+  });
 });
 await test('이유 고르기(21차): 주가 전망·기술적 분석 글(지지선·저항선·과매도·RSI·기술적 분석·횡보·…할 수 있을까?·…지속될까?)은 맨 뒤 — 그것뿐이면 그것 · 봇과 화면 같음', async () => {
   const vm = await import('node:vm');

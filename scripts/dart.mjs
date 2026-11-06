@@ -190,6 +190,14 @@ const TAGS = [
 ];
 // 정정 공시·자회사 공시 — 그날 움직임의 원인일 가능성이 낮아 '왜 움직였나'·급등락 기록 이유로는 맞는 뉴스가 없을 때만(docs/app.js와 같게)
 export const MINOR_DISC_RE = /^\[(?:기재|첨부)정정\]|종속회사의주요경영사항|자회사의주요경영사항/;
+// 공시 제목이 말하는 방향 — 호재 쪽(공급계약 체결·수주·자기주식 취득·소각·무상증자·배당 결정) +1, 악재 쪽(계약 해지·유상증자·사채 발행·자기주식 처분·
+// 불성실공시·횡령·배임) −1, 제목만으론 모르면(실적·M&A·해명 등) 0. '왜 움직였나'·급등락 기록 이유에서 그날 움직임과 반대 방향인 공시는 쓰지 않는다(30차, docs/app.js와 같게)
+const DISC_UP_RE = /공급계약체결|수주|자기주식취득|주식소각|(?<!유)무상증자|배당결정/; // 유무상증자는 방향을 모름
+const DISC_DOWN_RE = /계약해지|유상증자|사채권발행결정|자기주식처분|불성실공시법인지정|횡령|배임/;
+export function discDir(title) {
+  const t = String(title ?? '');
+  return DISC_DOWN_RE.test(t) ? -1 : DISC_UP_RE.test(t) ? 1 : 0;
+}
 const KEY_TAGS = new Set(['위험', '해명', '실적', '계약', '증자·사채', '자사주', '배당', 'M&A', '주요사항']);
 export function tagOf(title) {
   for (const [tag, re] of TAGS) if (re.test(title)) return tag;
