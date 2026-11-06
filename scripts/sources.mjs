@@ -346,9 +346,10 @@ export function sidecarOf(title) {
   const i = Math.max(head.lastIndexOf('코스피'), head.lastIndexOf('코스닥'));
   return i < 0 ? [] : [{ mk: head.startsWith('코스닥', i) ? 'KOSDAQ' : 'KOSPI', dir }];
 }
-// 그날(한국시간) 09:00~15:40 기사에서 시장·방향마다 시각 하나 — 같은 시장·방향 기사가 3분 안에 2건 이상 몰린 첫 묶음의 두 번째 기사 시각
-// (시각을 일찍 찍는 언론사가 있다 — 실측 11/06 09:04 서킷브레이커 기사가 08:40·08:54로, 코스피 매도 사이드카는 한 곳만 09:34·나머지 09:36~09:37.
-//  두 번째로 보도한 시각이라 실제 발동보다 1~2분 늦을 수는 있어도 이르지는 않다)
+// 그날(한국시간) 09:00~15:40 기사에서 시장·방향마다 시각 하나 — 같은 시장·방향 기사가 3분 안에 3건 이상 몰린 첫 묶음의 두 번째 기사 시각.
+// 실제 사이드카는 속보가 한꺼번에 쏟아진다(11/06 코스닥 09:06~09:10 15건 넘게·코스피 09:36~09:37 7건). 시각을 잘못 찍는 언론사가 있어
+// (09:04 서킷브레이커 기사를 08:40·08:54로, 09:35쯤 코스피 사이드카 기사를 09:13·09:14로 — 두 건이 1분 간격으로 붙기도 함) 2건으론 부족하다.
+// 두 번째로 보도한 시각이라 실제 발동보다 1~2분 늦을 수는 있어도 이르지는 않다
 const KST_OFF = 9 * 3600e3;
 const kstDay = (ms) => new Date(ms + KST_OFF).toISOString().slice(0, 10);
 const kstMinOf = (ms) => { const d = new Date(ms + KST_OFF); return d.getUTCHours() * 60 + d.getUTCMinutes(); };
@@ -361,7 +362,7 @@ export function sidecarEvents(items, now = Date.now()) {
   const out = [];
   for (const [k, ts] of by) {
     ts.sort((a, b) => a - b);
-    const i = ts.findIndex((t, j) => j + 1 < ts.length && ts[j + 1] - t <= 3 * 60e3);
+    const i = ts.findIndex((t, j) => j + 2 < ts.length && ts[j + 2] - t <= 3 * 60e3);
     if (i >= 0) { const [mk, dir] = k.split('|'); out.push({ kind: 'sidecar', mk, dir, at: new Date(ts[i + 1]).toISOString() }); }
   }
   return out;
@@ -375,20 +376,22 @@ export async function getSidecarNews() {
     return { title: pick('title'), pubMs: Number.isFinite(pub) ? pub : null };
   }).filter((it) => it.title && it.pubMs != null);
 }
-// 그날 시장 조치 기록 { day: 'YYYY-MM-DD'(한국), items[{ kind: 'cb'(서킷브레이커)|'sidecar', mk: 'KOSPI'|'KOSDAQ', dir?: 'buy'|'sell', at: ISO }] }
-// — 그날 시각인 것만(날이 바뀌면 새로), 같은 조치(종류·시장·방향)는 가장 이른 시각 하나, 시각순. 없으면 null
+// 그날 시장 조치 기록 { day: 'YYYY-MM-DD'(한국), v: 판, items[{ kind: 'cb'(서킷브레이커)|'sidecar', mk: 'KOSPI'|'KOSDAQ', dir?: 'buy'|'sell', at: ISO }] }
+// — 그날 시각인 것만(날이 바뀌면 새로), 같은 조치(종류·시장·방향)는 가장 이른 시각 하나, 시각순. 없으면 null.
+// v: 사이드카 판정 규칙의 판 — 다르면 그날 사이드카 기록을 버리고 다시 찾는다(서킷브레이커는 시세 정지 시각이라 유지)
+export const MEASURES_V = 2;
 export function mergeMeasures(prev, found, now = Date.now()) {
-  const day = kstDay(now);
+  const day = kstDay(now), keepSc = prev?.v === MEASURES_V;
   const ok = (x) => !!x && (x.kind === 'cb' || (x.kind === 'sidecar' && (x.dir === 'buy' || x.dir === 'sell'))) && (x.mk === 'KOSPI' || x.mk === 'KOSDAQ')
     && Number.isFinite(Date.parse(x.at)) && kstDay(Date.parse(x.at)) === day;
-  const items = (Array.isArray(prev?.items) ? prev.items : []).filter(ok).map((x) => ({ ...x }));
+  const items = (Array.isArray(prev?.items) ? prev.items : []).filter((x) => ok(x) && (x.kind === 'cb' || keepSc)).map((x) => ({ ...x }));
   for (const e of (Array.isArray(found) ? found : []).filter(ok)) {
     const same = items.find((x) => x.kind === e.kind && x.mk === e.mk && x.dir === e.dir);
     if (!same) items.push({ kind: e.kind, mk: e.mk, ...(e.kind === 'sidecar' ? { dir: e.dir } : {}), at: e.at });
     else if (Date.parse(e.at) < Date.parse(same.at)) same.at = e.at;
   }
   items.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
-  return items.length ? { day, items } : null;
+  return items.length ? { day, v: MEASURES_V, items } : null;
 }
 
 // ---------- 종목 뉴스 관련도 ----------
