@@ -1901,9 +1901,9 @@ await test('시장 대비(app.js): 국내 코스피·코스닥 · 미국 나스�
   const f = vm.runInNewContext(`${block}; ({ vsMarket })`, {});
   const idx = [{ symbol: '^KS11', changePct: -1.97 }, { symbol: '^KQ11', changePct: -1.85 }, { symbol: '^GSPC', changePct: 0.58 }, { symbol: '^IXIC', changePct: 1.05 }];
   const v = (q) => { const r = f.vsMarket({ ok: true, ...q }, idx); return r ? JSON.parse(JSON.stringify(r)) : null; };
-  assert.deepEqual(v({ market: 'KR', exch: 'KOSPI', changePct: -2.5 }), { sym: '^KS11', name: '코스피', pct: -1.97, diff: -0.53, follows: true });
-  assert.deepEqual(v({ market: 'KR', exch: 'KOSDAQ', changePct: 3 }), { sym: '^KQ11', name: '코스닥', pct: -1.85, diff: 4.85, follows: false });
-  assert.deepEqual(v({ market: 'US', exch: 'NASDAQ', changePct: 2.54 }), { sym: '^IXIC', name: '나스닥', pct: 1.05, diff: 1.49, follows: false }, '1%p 넘게 차이');
+  assert.deepEqual(v({ market: 'KR', exch: 'KOSPI', changePct: -2.5 }), { sym: '^KS11', name: '코스피', pct: -1.97, diff: -0.53, follows: true, within: true });
+  assert.deepEqual(v({ market: 'KR', exch: 'KOSDAQ', changePct: 3 }), { sym: '^KQ11', name: '코스닥', pct: -1.85, diff: 4.85, follows: false, within: false });
+  assert.deepEqual(v({ market: 'US', exch: 'NASDAQ', changePct: 2.54 }), { sym: '^IXIC', name: '나스닥', pct: 1.05, diff: 1.49, follows: false, within: false }, '1%p 넘게 차이');
   assert.equal(v({ market: 'US', exch: 'NYSE', changePct: 0.9 }).follows, false, '지수가 1% 안 움직인 날은 시장 따라 아님');
   assert.equal(v({ market: 'US', exch: 'NYSE', changePct: 0.9 }).name, 'S&P 500');
   assert.equal(v({ market: 'US', exch: 'NASDAQ ETF', changePct: 1 }).name, '나스닥');
@@ -1911,6 +1911,56 @@ await test('시장 대비(app.js): 국내 코스피·코스닥 · 미국 나스�
   assert.equal(v({ market: 'KR', changePct: -2.5 }), null, '상장 시장을 모르면 비교 안 함');
   assert.equal(f.vsMarket({ ok: false, market: 'KR', exch: 'KOSPI', changePct: -2 }, idx), null);
   assert.equal(f.vsMarket({ ok: true, market: 'KR', exch: 'KOSPI', changePct: -2 }, [{ symbol: '^KQ11', changePct: -1 }]), null, '그 지수가 없으면 비교 안 함');
+});
+await test('이유(31차): 시장보다 덜 움직인 종목도 방향 모를 기사뿐이면 시장 흐름("왜 움직였나" 이유 칸 whyCell) · 시장 따라 표시는 1%p 안쪽만 · 사회공헌 기사는 이유에서 뺌(봇·화면 같음) · 영어 활용형 방향 낱말', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const fmt = appJs.slice(appJs.indexOf('function fmtPct('), appJs.indexOf('function dirClass('));
+  const escFn = appJs.slice(appJs.indexOf('function esc('), appJs.indexOf('\n', appJs.indexOf('function esc(')));
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const why = appJs.slice(appJs.indexOf('function keyDiscToday('), appJs.indexOf('function tileHtml('));
+  const kstYmd = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const ctx = { state: { analysis: {}, news: {}, disc: {} }, kstYmd };
+  const f = vm.runInNewContext(fmt + '\n' + escFn + '\n' + block + '\n' + why + '; ({ whyCell, vsMarket, pickReasonNews })', ctx);
+  const idx = [{ symbol: '^KS11', changePct: -6.19 }];
+  const q = (pct) => ({ code: 'B', name: 'HD건설기계', market: 'KR', exch: 'KOSPI', ok: true, changePct: pct, asOf: new Date().toISOString() });
+  const cell = (pct) => f.whyCell(q(pct), f.vsMarket(q(pct), idx));
+  const news = (title, pubMs = Date.now() - 600e3) => { ctx.state.news.B = { items: title ? [{ title, pubMs }] : [] }; };
+  // 실제 11/06 HD건설기계 -3.98%(코스피 -6.19%) — '김장 김치 2500박스 이웃에 전달'이 이유로 붙었다
+  news('HD건설기계·HD현대사이트솔루션, 김장 김치 2500박스 이웃에 전달');
+  assert.ok(cell(-3.98).includes('코스피 -6.19% 흐름 — 종목만의 이유 기사 없음') && !cell(-3.98).includes('시장 따라'), cell(-3.98));
+  news('HD건설기계, 굴착기 신모델 공개');
+  assert.ok(cell(-3.98).includes('흐름 — 종목만의 이유 기사 없음'), '시장보다 덜 움직였는데 방향 모를 기사 → 시장 흐름');
+  assert.ok(cell(-7.5).includes('굴착기 신모델 공개'), '시장보다 1%p 넘게 더 움직였으면 그대로');
+  news('HD건설기계, 수요 둔화 우려에 하락');
+  assert.ok(cell(-3.98).includes('HD건설기계, 수요 둔화 우려에 하락'), '같은 방향 기사는 그대로');
+  news('');
+  assert.ok(cell(-3.98).includes('흐름 — 종목만의 이유 기사 없음'), '이유가 없어도 시장보다 덜 움직였으면 시장 흐름');
+  assert.ok(cell(-7.5).includes('아직 이유 정보가 없어요'), '더 움직였는데 이유 없음');
+  assert.ok(cell(-6.5).startsWith('<span class="src mkt"') && cell(-6.5).includes('시장 따라'), "1%p 안쪽이면 '시장 따라' 표시");
+  // 지난 기사 날짜(30차)는 이유 칸에
+  const y = Date.now() - 86400e3 - 600e3, kd = new Date(y + 9 * 3600e3);
+  news('HD건설기계, 수요 둔화 우려에 하락', y);
+  assert.ok(cell(-7.5).includes('<span class="muted">' + (kd.getUTCMonth() + 1) + '/' + kd.getUTCDate() + '</span> HD건설기계, 수요 둔화 우려에 하락'), cell(-7.5));
+  // within — 지수 1% 넘게·같은 방향·지수보다 1%p 넘게 더 움직이지 않음
+  const w = (pct, ip = -6.19) => f.vsMarket(q(pct), [{ symbol: '^KS11', changePct: ip }]).within;
+  assert.deepEqual([w(-3.98), w(-7.0), w(-7.5), w(2.5), w(-2.5, -0.8)], [true, true, false, false, false]);
+  // 사회공헌 기사 — 봇·화면 같게 이유에서 뺌
+  const it = (title) => ({ title, pubMs: T('2026-11-06T14:00:00+09:00'), sentiment: { tone: 'neutral' } });
+  for (const t of ['HD건설기계·HD현대사이트솔루션, 김장 김치 2500박스 이웃에 전달', '삼성전자, 연말 이웃사랑 성금 500억 기탁', 'SK하이닉스 임직원 봉사활동', 'LG전자, 메이저리그 후원 계약']) {
+    const list = [it(t), it('반도체 업황 점검')];
+    assert.equal(src.pickReasonNews(list, -3, '20261106', kstYmd, []).title, '반도체 업황 점검', '봇: ' + t);
+    assert.equal(f.pickReasonNews(list, -3, '20261106', kstYmd, []).title, '반도체 업황 점검', '화면: ' + t);
+    assert.equal(src.pickReasonNews([it(t)], -3, '20261106', kstYmd, []), null, '그것뿐이어도 이유 아님(봇): ' + t);
+    assert.equal(f.pickReasonNews([it(t)], -3, '20261106', kstYmd, []), null, '그것뿐이어도 이유 아님(화면): ' + t);
+  }
+  // 영어 활용형 — 실제 11/05~06 미국 종목 기사(예전엔 중립)
+  const tone = (t) => src.tagSentiment(t).tone;
+  for (const t of ['Super Micro Computer (SMCI) Stock Sinks After Q1 Results Expose Cash Strain', 'NVDA: Nvidia Stock Slides Below $200 After 9% Rout',
+    "Why Shares of Elon Musk's Tesla, SpaceX Are Sliding After the Midterm Elections", 'Amazon.com stock slips as AI spending keeps cash flow in focus',
+    'Stock Market Today: Amazon Shares Slide as Technology Selloff Erases Earlier Gains', 'IREN stock plunges 18% as Microsoft raises concerns', 'Microsoft misses estimates']) assert.equal(tone(t), 'neg', t);
+  for (const t of ['Tesla stock jumps after deliveries', 'Nvidia shares surged 5% on AI demand', 'Apple stock climbs to record', 'Palantir soars after earnings']) assert.equal(tone(t), 'pos', t);
+  for (const t of ['New shipping route opens in Asia', 'Space mission launches', 'Apple unveils new iPad']) assert.equal(tone(t), 'neutral', '낱말 경계: ' + t);
 });
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');

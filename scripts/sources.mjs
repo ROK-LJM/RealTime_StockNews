@@ -253,9 +253,13 @@ export function computeMood(indices, vix) {
 
 // ---------- 뉴스 + 호재/악재 태깅 ----------
 const NEG = ['급락', '폭락', '하락', '약세', '적자', '손실', '소송', '리콜', '제재', '규제', '감산', '하향', '매도', '우려', '경고', '부진', '쇼크', '미달', '결함', '파업', '횡령', '조사', '벌금', '연기', '취소', '철회', '구조조정', '감자', '디폴트', '하한가',
-  'downgrade', 'lawsuit', 'miss', 'plunge', 'fall', 'falls', 'drop', 'cut', 'cuts', 'warning', 'recall', 'probe', 'decline', 'loss', 'weak', 'slump', 'sink', 'tumble', 'bearish', 'selloff'];
+  'downgrade', 'lawsuit', 'miss', 'plunge', 'fall', 'falls', 'drop', 'cut', 'cuts', 'warning', 'recall', 'probe', 'decline', 'loss', 'weak', 'slump', 'sink', 'tumble', 'bearish', 'selloff',
+  // 영어 활용형(31차) — 'Stock Slides'·'Shares Slip'·'Stock Sinks'·'Plunges'를 중립으로 보던 것(미국 종목 이유·호재/악재 집계)
+  'plunges', 'plunged', 'drops', 'dropped', 'sinks', 'sank', 'tumbles', 'tumbled', 'declines', 'declined', 'slide', 'slides', 'slid', 'sliding', 'slip', 'slips', 'slipped',
+  'fell', 'falling', 'slumps', 'slumped', 'tanks', 'tanked', 'downgraded', 'downgrades', 'misses', 'missed', 'sell-off', 'rout'];
 const POS = ['급등', '폭등', '상승', '강세', '흑자', '호실적', '수주', '계약', '신고가', '인수', '합병', '자사주', '배당', '상향', '매수', '돌파', '신제품', '승인', '호재', '사상최대', '최대실적', '확대', '성장', '상한가', '훈풍',
-  'surge', 'jump', 'soar', 'beat', 'beats', 'upgrade', 'record', 'deal', 'approval', 'approved', 'contract', 'buyback', 'rally', 'gain', 'gains', 'strong', 'bullish', 'rise', 'rises', 'tops'];
+  'surge', 'jump', 'soar', 'beat', 'beats', 'upgrade', 'record', 'deal', 'approval', 'approved', 'contract', 'buyback', 'rally', 'gain', 'gains', 'strong', 'bullish', 'rise', 'rises', 'tops',
+  'surges', 'surged', 'jumps', 'jumped', 'soars', 'soared', 'rallies', 'rallied', 'rose', 'climb', 'climbs', 'climbed', 'spikes', 'spiked', 'upgraded', 'upgrades', 'rebound', 'rebounds', 'rebounded', 'skyrockets'];
 
 // 영문 키워드는 단어 경계로 매칭(예: "mission"이 "miss"로 오탐되지 않도록), 한글은 부분일치
 function kwHit(raw, low, w) {
@@ -482,6 +486,8 @@ export const priceOnly = (title) => { const t = coreTitle(title); return PRICE_O
 // ① 그날 나온 같은 방향의 [특징주] → ② 같은 방향 기사 → ③ 방향을 알 수 없는 기사 → ④ 여러 종목 나열·'[오늘의 …]' 모음·리포트 요약·주가 전망 글·칼럼 꼭지 순.
 // 같은 등급 안에서는 최신순. 방향은 제목의 오름·내림 말, 없으면 호재·악재 태그(내린 날의 '수주 1조 돌파' 같은 호재 기사는 이유 아님).
 export const LISTING_RE = /(ELW|ETN|ETF|리츠|스팩)[^…]{0,30}상장|신규\s*상장/;
+// 기부·봉사 같은 사회공헌 기사('…김장 김치 2500박스 이웃에 전달') — 주가 움직임의 원인이 아니라 이유에서 뺀다(31차, 봇·화면 같게)
+const CSR_RE = /김장|기부|후원|봉사|성금|장학금|헌혈|연탄|사회공헌|이웃\s*사랑|나눔\s*(?:행사|활동|캠페인)/;
 const UP_RE = /상승|강세|급등|반등|↑|오름|올라|치솟|폭등|상한가|신고가/;
 // '…2.80% 조정'·'조정세'·'조정 국면'도 내림 말('목표가 상향 조정'처럼 방향이 붙은 조정은 아님)
 const DOWN_RE = /하락|약세|급락|↓|내림|내려|떨어|폭락|하한가|신저가|주춤|추락|[\d.]+%\s*조정|조정\s*(?:국면|장세|세|받)/;
@@ -525,7 +531,7 @@ export function pickReasonNews(items, pct, day, ymd, names = []) {
   const dir = (it) => newsDir(it, names);
   const tier = (it) => (/\[특징주\]/.test(it.title) && s && dir(it) === s && Number.isFinite(it.pubMs) && ymd(it.pubMs) === day ? 0
     : weakTitle(it.title) ? 3 : s && dir(it) === s ? 1 : 2);
-  return (Array.isArray(items) ? items : []).filter((it) => it && it.title && !priceOnly(it.title) && !LISTING_RE.test(it.title) && !(s && dir(it) === -s))
+  return (Array.isArray(items) ? items : []).filter((it) => it && it.title && !priceOnly(it.title) && !LISTING_RE.test(it.title) && !CSR_RE.test(it.title) && !(s && dir(it) === -s))
     .map((it, i) => [tier(it), i, it]).sort((a, b) => a[0] - b[0] || a[1] - b[1])[0]?.[2] || null;
 }
 

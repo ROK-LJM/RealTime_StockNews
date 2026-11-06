@@ -592,6 +592,8 @@ const priceOnly = (title) => { const t = coreTitle(title); return PRICE_ONLY.som
 // ① 그날 나온 같은 방향의 [특징주] → ② 같은 방향 기사 → ③ 방향을 알 수 없는 기사 → ④ 여러 종목 나열·'[오늘의 …]' 모음·리포트 요약·주가 전망 글·칼럼 꼭지 순.
 // 같은 등급 안에서는 최신순. 방향은 제목의 오름·내림 말, 없으면 호재·악재 태그(내린 날의 '수주 1조 돌파' 같은 호재 기사는 이유 아님).
 const LISTING_RE = /(ELW|ETN|ETF|리츠|스팩)[^…]{0,30}상장|신규\s*상장/;
+// 기부·봉사 같은 사회공헌 기사('…김장 김치 2500박스 이웃에 전달') — 주가 움직임의 원인이 아니라 이유에서 뺀다(31차, 봇·화면 같게)
+const CSR_RE = /김장|기부|후원|봉사|성금|장학금|헌혈|연탄|사회공헌|이웃\s*사랑|나눔\s*(?:행사|활동|캠페인)/;
 const UP_RE = /상승|강세|급등|반등|↑|오름|올라|치솟|폭등|상한가|신고가/;
 // '…2.80% 조정'·'조정세'·'조정 국면'도 내림 말('목표가 상향 조정'처럼 방향이 붙은 조정은 아님)
 const DOWN_RE = /하락|약세|급락|↓|내림|내려|떨어|폭락|하한가|신저가|주춤|추락|[\d.]+%\s*조정|조정\s*(?:국면|장세|세|받)/;
@@ -635,7 +637,7 @@ function pickReasonNews(items, pct, day, ymd, names = []) {
   const dir = (it) => newsDir(it, names);
   const tier = (it) => (/\[특징주\]/.test(it.title) && s && dir(it) === s && Number.isFinite(it.pubMs) && ymd(it.pubMs) === day ? 0
     : weakTitle(it.title) ? 3 : s && dir(it) === s ? 1 : 2);
-  return (Array.isArray(items) ? items : []).filter((it) => it && it.title && !priceOnly(it.title) && !LISTING_RE.test(it.title) && !(s && dir(it) === -s))
+  return (Array.isArray(items) ? items : []).filter((it) => it && it.title && !priceOnly(it.title) && !LISTING_RE.test(it.title) && !CSR_RE.test(it.title) && !(s && dir(it) === -s))
     .map((it, i) => [tier(it), i, it]).sort((a, b) => a[0] - b[0] || a[1] - b[1])[0]?.[2] || null;
 }
 // O1 시장 대비 — 종목마다 같은 시장 지수와 비교(국내 상장 시장별 코스피·코스닥, 미국 나스닥 상장은 나스닥 · 그 밖은 S&P 500).
@@ -651,7 +653,9 @@ function vsMarket(q, indices) {
   const b = q && q.ok && Number.isFinite(q.changePct) && !pendingOf(q) ? benchFor(q, indices) : null; // 첫 체결 전(0%)은 비교하지 않는다
   if (!b) return null;
   const diff = Math.round((q.changePct - b.pct) * 100) / 100;
-  return { ...b, diff, follows: Math.abs(b.pct) >= 1 && Math.sign(q.changePct) === Math.sign(b.pct) && Math.abs(diff) < 1 };
+  const same = Math.abs(b.pct) >= 1 && Math.sign(q.changePct) === Math.sign(b.pct);
+  // within(31차) — 지수가 1% 넘게 움직인 날 같은 방향으로 지수보다 1%p 넘게 더 움직이지는 않음(시장 따라 + 시장보다 덜 움직임): 시장 흐름으로 설명되는 움직임
+  return { ...b, diff, follows: same && Math.abs(diff) < 1, within: same && Math.abs(q.changePct) < Math.abs(b.pct) + 1 };
 }
 
 // 급등락 카드에 AI 종합분석이 아직 없을 때 [지금 상태, 이유] — status.json의 AI 상태 기준(키가 없으면 안내 안 함).
@@ -682,9 +686,9 @@ function aiFresh(q, a) {
   return marketYmd(at, m) >= marketYmd(qt, m);
 }
 
-// '시장 따라' 종목은 같은 방향을 말하는 기사가 아니면(나열·리포트·전망 글·방향 모를 기사) 시장 흐름이 더 나은 설명
+// '시장 따라'·시장보다 덜 움직인 종목(31차)은 같은 방향을 말하는 기사가 아니면(나열·리포트·전망 글·방향 모를 기사) 시장 흐름이 더 나은 설명
 function preferMarket(q, w, vs) {
-  return !!(vs && vs.follows && w && w.src === '뉴스' && (weakTitle(w.text) || !w.item || newsDir(w.item, reasonNames(q)) !== Math.sign(q.changePct || 0)));
+  return !!(vs && (vs.follows || vs.within) && w && w.src === '뉴스' && (weakTitle(w.text) || !w.item || newsDir(w.item, reasonNames(q)) !== Math.sign(q.changePct || 0)));
 }
 // 정정 공시·자회사 공시 — 그날 움직임의 원인일 가능성이 낮아 이유로는 맞는 뉴스가 없을 때만(scripts/dart.mjs의 MINOR_DISC_RE와 같게)
 const MINOR_DISC_RE = /^\[(?:기재|첨부)정정\]|종속회사의주요경영사항|자회사의주요경영사항/;
@@ -855,6 +859,14 @@ function whyOf(q) {
   if (n) return { src: '뉴스', label: '최근 뉴스', text: n.title, item: n, ...(nd && nd !== day ? { day: `${+nd.slice(4, 6)}/${+nd.slice(6, 8)}` } : {}) };
   return disc || null; // 정정·자회사 공시는 맞는 뉴스가 없을 때만
 }
+// '왜 움직였나' 한 줄의 이유 칸 — '시장 따라' 표시 + 이유(출처 · 그 종목 거래일 기사가 아니면 날짜). 이유가 없거나 시장 흐름이 더 나은 설명이면
+// 시장 흐름(시장 따라 · 시장보다 덜 움직임 — 31차) 또는 '아직 이유 정보가 없어요'
+function whyCell(q, vs) {
+  const w0 = whyOf(q), w = preferMarket(q, w0, vs) ? null : w0;
+  const tag = vs && vs.follows ? `<span class="src mkt" title="같은 날 ${esc(vs.name)} ${fmtPct(vs.pct)} — 시장 전체와 비슷하게 움직임(차이 ${fmtPctP(vs.diff)})">시장 따라</span>` : '';
+  if (w) return `${tag}<span class="src" title="${esc(w.label)}${w.day ? ` — ${esc(w.day)} 기사` : ''}">${w.src}</span>${w.day ? `<span class="muted">${esc(w.day)}</span> ` : ''}${esc(w.text)}`;
+  return tag + (vs && (vs.follows || vs.within) ? `<span class="muted">${esc(vs.name)} ${fmtPct(vs.pct)} 흐름 — 종목만의 이유 기사 없음</span>` : '<span class="muted">아직 이유 정보가 없어요(뉴스·공시·AI 대기)</span>');
+}
 function tileHtml(q) {
   if (!q || !q.ok) {
     return `<button type="button" class="tile err" data-code="${esc(q?.code)}" title="시세를 받지 못함 — 눌러서 이유 보기"><span class="t-nm">${esc(q?.name || q?.code)}</span><span class="t-pct">시세 없음</span></button>`;
@@ -912,13 +924,11 @@ function renderBoard(groups, closed, measures) {
     .sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct)));
   const show = isNarrow() ? 4 : WHY_SHOW; // 휴대폰은 처음에 4줄
   const rows = movers.map((q, i) => {
-    const p = q.changePct, vs = vsMarket(q, state.market?.indices), w0 = whyOf(q);
-    const w = preferMarket(q, w0, vs) ? null : w0;
+    const p = q.changePct, vs = vsMarket(q, state.market?.indices);
     return `<button type="button" class="why-row${i >= show && !state.whyAll ? ' more' : ''}" data-code="${esc(q.code)}">
       <span class="w-pct ${dirClass(p)}-c">${p > 0 ? '▲' : '▼'} ${Math.abs(p).toFixed(2)}%</span>
       <span class="w-nm">${esc(q.name)}</span>
-      <span class="w-txt">${vs && vs.follows ? `<span class="src mkt" title="같은 날 ${esc(vs.name)} ${fmtPct(vs.pct)} — 시장 전체와 비슷하게 움직임(차이 ${fmtPctP(vs.diff)})">시장 따라</span>` : ''}${w ? `<span class="src" title="${esc(w.label)}${w.day ? ` — ${esc(w.day)} 기사` : ''}">${w.src}</span>${w.day ? `<span class="muted">${esc(w.day)}</span> ` : ''}${esc(w.text)}`
-        : vs && vs.follows ? `<span class="muted">${esc(vs.name)} ${fmtPct(vs.pct)} 흐름 — 종목만의 이유 기사 없음</span>` : '<span class="muted">아직 이유 정보가 없어요(뉴스·공시·AI 대기)</span>'}</span>
+      <span class="w-txt">${whyCell(q, vs)}</span>
     </button>`;
   }).join('');
   const more = movers.length > show && !state.whyAll ? `<button type="button" class="why-more" data-why="all">${movers.length - show}종목 더 보기<svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></button>` : '';
