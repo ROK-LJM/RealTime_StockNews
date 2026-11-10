@@ -2623,6 +2623,14 @@ await test('이유(52차): 기간 요약 자동 기사·가운데 물음 낚시�
   assert.equal(pick(['가나, 수상한 자금 흐름 포착'], -3, ['가나']), '가나, 수상한 자금 흐름 포착', "'수상한'은 수상 홍보 아님");
   assert.equal(pick(['외국인, 이번주 삼전닉스 7.6조원어치 매도…보유율 수년만 최저치'], -10.44, ['SK하이닉스', '삼전닉스']), '외국인, 이번주 삼전닉스 7.6조원어치 매도…보유율 수년만 최저치', '보통 기사는 그대로');
 });
+await test('스팸(53차): 씽크풀 자동 글("…물량 모아둘 기회로 보이며 이후 전망 및 대응전략")·끝에 무작위 영문 10자가 붙은 낚시("… Idris Elba (PpuuHQKAIs)")는 뉴스에서 뺌 · 보통 괄호 이름은 그대로', () => {
+  for (const t of ['씽크풀 : 삼성SDI(006400)눌릴때마다 물량 모아둘 기회로 보이며 이후 전망 및 대응전략.', '한미반도체(042700)저점을 줄때마다 물량 모아둘 기회로 보이며 이후 전망 및 대응전략.',
+    '[sk텔레콤 주가전망]매도 출회 이후 지금 이 자리 대응 전략 Idris Elba (PpuuHQKAIs)', 'LG에너지솔루션 주가전망 전기차 시장 점유율 1위의 위엄과 실적 턴어라운드를 위한 반등 시나리오 Mothers Day Greetings (cMCLZHuPUw)',
+    '2차전지 반등의 서막이 올랐다! LG에너지솔루션·삼성SDI 진짜 마지막 기회! Infodimanche (IMBqvsXDyY)'])
+    assert.equal(src.SPAM_RE.test(t), true, '스팸: ' + t);
+  for (const t of ['Nvidia expands partnership with Salesforce (Salesforce)', '삼성전자, 미국 판매 법인 개편 (SamsungUSA)', 'Apple unveils new chip (AppleSilic)', '코스피 마감 지수 정리 (KOSPIindex)', '심텍, 장기공급계약 협의…물량 60% 공급 전망'])
+    assert.equal(src.SPAM_RE.test(t), false, '보통 기사: ' + t);
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');

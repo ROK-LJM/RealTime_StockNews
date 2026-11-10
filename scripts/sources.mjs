@@ -425,7 +425,7 @@ export function mergeMeasures(prev, found, now = Date.now()) {
 // 구글 뉴스 검색은 느슨해서 도박·카지노 광고, 다른 종목이 주인공인 시황·상장 공지 기사가 섞인다
 // (실측 2026-10-21: 238건 중 93건(39%)이 제목에 종목 이름 없음 — '토토미 쌀국수', 'a1 카지노', 'ELW 224종목 신규 상장' 등).
 // → 제목에 그 종목의 이름·별칭·티커가 있는 기사만 남긴다. 다른 이름으로 불리는 종목은 별칭으로 보완.
-export const SPAM_RE = /카지노|바카라|토토\s?사이트|스포츠\s?토토|먹튀|꽁머니|홀덤|양방\s?배팅|파워볼|릴게임|슬롯\s?머신|온라인\s?슬롯|#[^\s#]{2,}.*#[^\s#]{2,}|채널\s?지웁니다|반드시\s?체크해\s?보세요|\*[^*\s]{0,6}\s?속보\*/; // 뒤 넷은 유튜브 낚시 제목(41차)
+export const SPAM_RE = /카지노|바카라|토토\s?사이트|스포츠\s?토토|먹튀|꽁머니|홀덤|양방\s?배팅|파워볼|릴게임|슬롯\s?머신|온라인\s?슬롯|#[^\s#]{2,}.*#[^\s#]{2,}|채널\s?지웁니다|반드시\s?체크해\s?보세요|\*[^*\s]{0,6}\s?속보\*|물량\s?모아둘\s?기회로\s?보이며|\((?=[A-Za-z]*[A-Z]{2,}[a-z])(?=[A-Za-z]*(?:[A-Z][a-z]+[A-Z]+[a-z]|[a-z][A-Z]+[a-z]+[A-Z]))[A-Za-z]{10}\)\s*$/; // 넷은 유튜브 낚시 제목(41차) · 씽크풀 자동 글 '…물량 모아둘 기회로 보이며 이후 전망 및 대응전략'·끝의 무작위 영문 10자 '(PpuuHQKAIs)'(53차)
 // 기사가 아닌 시세 페이지('NVIDIA Corporation (NVDA) Stock Price, News, Quote & History'·'Apple AAPL Stock Price and Chart | Live AAPL Quote Today'·'TSM Stock Price — TSMC Chart')
 // — 구글 뉴스가 늘 새 날짜로 잡아 뉴스 칸과 AI 입력을 차지했다(11/02~11/10 미국 뉴스 55건 중 1~3건씩). 어느 검색이든 뺀다(45차)
 export const QUOTE_PAGE_RE = /\b(?:stock\s+price|quote)\s*[,&]?\s*(?:news|quote|history|chart|analysis)\s*[,&]\s*(?:and\s+)?(?:news|quote|history|analysis)\b|\bstock\s+price\s+and\s+chart\b|\blive\s+[A-Z.]{1,6}\s+quote\b|\bstock\s+price\s*[—–-]\s*[^—–-]*\bchart\s*$/i;
