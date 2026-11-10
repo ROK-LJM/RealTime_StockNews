@@ -313,6 +313,8 @@ export function sameStory(a, b, keys = []) {
   return k / Math.min(A.size, B.size) >= need;
 }
 
+// 제목 끝의 매체 꼭지 이름(' : 금융'·' : 기업주식정보'·' : 기업·산업' — 11/02~11/10 뉴스 2,821건 중 98건) — 기사 내용이 아니라 받을 때 뗀다(45차)
+const SECTION_TAIL_RE = /\s:\s[가-힣·]{2,8}$/;
 // recentDays>0 이면 최근 N일 뉴스만(구글 when: 연산자 + pubDate 필터), 최신순 정렬.
 // 같은 기사·같은 소식은 최신 하나만(keys: 종목 이름·별칭 — 빼고 비교), 시세 안내 기사는 뒤로 — 8건 안에 서로 다른 실제 뉴스가 먼저(카드·AI 입력 모두)
 // keep(title): 남길 기사 판정(종목 뉴스의 관련도 필터). 주면 후보를 넉넉히(40건) 읽고 걸러 8건까지.
@@ -330,6 +332,7 @@ async function googleNews(query, ko, recentDays = 0, keep = null, keys = [], mor
     let source = pick('source');
     if (!source) { const idx = title.lastIndexOf(' - '); if (idx > 0) source = title.slice(idx + 3); }
     for (let i = 0; i < 3 && source && title.endsWith(source); i++) title = title.slice(0, -source.length).replace(/[\s\-–—|]+$/, '');
+    title = title.replace(SECTION_TAIL_RE, ''); // 매체 꼭지 꼬리(45차)
     const pub = pick('pubDate');
     const pubMs = pub ? Date.parse(pub) : null;
     items.push({ title, source, time: pub ? new Date(pub).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '', pubMs, link: pick('link'), sentiment: tagSentiment(title) });
@@ -337,7 +340,7 @@ async function googleNews(query, ko, recentDays = 0, keep = null, keys = [], mor
   return items;
   };
   const pipe = (items) => {
-  let out = items.filter((it) => it.title && !SPAM_RE.test(it.title) && (!keep || keep(it.title)));
+  let out = items.filter((it) => it.title && !SPAM_RE.test(it.title) && !QUOTE_PAGE_RE.test(it.title) && (!keep || keep(it.title)));
   if (recentDays > 0) {
     const cutoff = Date.now() - recentDays * 86400000;
     out = out.filter((it) => it.pubMs == null || it.pubMs >= cutoff);
@@ -423,6 +426,9 @@ export function mergeMeasures(prev, found, now = Date.now()) {
 // (실측 2026-10-21: 238건 중 93건(39%)이 제목에 종목 이름 없음 — '토토미 쌀국수', 'a1 카지노', 'ELW 224종목 신규 상장' 등).
 // → 제목에 그 종목의 이름·별칭·티커가 있는 기사만 남긴다. 다른 이름으로 불리는 종목은 별칭으로 보완.
 export const SPAM_RE = /카지노|바카라|토토\s?사이트|스포츠\s?토토|먹튀|꽁머니|홀덤|양방\s?배팅|파워볼|릴게임|슬롯\s?머신|온라인\s?슬롯|#[^\s#]{2,}.*#[^\s#]{2,}|채널\s?지웁니다|반드시\s?체크해\s?보세요|\*[^*\s]{0,6}\s?속보\*/; // 뒤 넷은 유튜브 낚시 제목(41차)
+// 기사가 아닌 시세 페이지('NVIDIA Corporation (NVDA) Stock Price, News, Quote & History'·'Apple AAPL Stock Price and Chart | Live AAPL Quote Today'·'TSM Stock Price — TSMC Chart')
+// — 구글 뉴스가 늘 새 날짜로 잡아 뉴스 칸과 AI 입력을 차지했다(11/02~11/10 미국 뉴스 55건 중 1~3건씩). 어느 검색이든 뺀다(45차)
+export const QUOTE_PAGE_RE = /\b(?:stock\s+price|quote)\s*[,&]?\s*(?:news|quote|history|chart|analysis)\s*[,&]\s*(?:and\s+)?(?:news|quote|history|analysis)\b|\bstock\s+price\s+and\s+chart\b|\blive\s+[A-Z.]{1,6}\s+quote\b|\bstock\s+price\s*[—–-]\s*[^—–-]*\bchart\s*$/i;
 // 뉴스에서 흔히 쓰는 다른 이름(종목코드·티커별). 없는 종목은 이름·영문명·티커로만 판단.
 const NEWS_ALIAS = {
   '000660': ['하이닉스', '삼전닉스'], '010120': ['LS일렉트릭'], '329180': ['현대중공업'], '005380': ['현대자동차'],
@@ -497,6 +503,8 @@ export const PRICE_ONLY = [
   /\|\s*Price:\s*[\d.,]+\s*\|\s*Chg%:/i,
   /주가,?\s*\d{1,2}월\s*\d{1,2}일\s*(?:장중|장\s?마감|오전|오후)?\s*[\d.]+%\s*(?:상승|하락)\s*동일업종/, // 'LS ELECTRIC 주가, 11월 5일 장중 11.94% 하락 동일업종 동반 약세'
   /^\[마감분석\][^…]*?[\d.]+%\s*(?:상승|하락|급등|급락|강세|약세|내린|오른)\s*(?:[\d만,.]+원\s*)?마감/,                          // '[마감분석] 대덕전자 19.80% 급락 마감 7만9800원 기록'                                                       // 'NVDA|NVIDIA Corp|Price:200.130|Chg%:-6.560'
+  /\bstock\s+(?:(?:rises|falls)\s+\w+day,\s+(?:still\s+)?(?:out|under)performs\s+market|(?:out|under)performs\s+(?:competitors|market|\w+day\s+when\s+compared\s+to\s+competitors)(?:\s+on\s+(?:a\s+)?(?:strong|weak)\s+trading\s+day|\s+despite\s+(?:losses\s+on\s+the\s+day|daily\s+gains))?)$/i, // MarketWatch 자동 기사 'Plug Power Inc. stock outperforms competitors on strong trading day'·'… stock falls Tuesday, underperforms market'(45차)
+  /\b(?:moved|opened|closed)\s+(?:up|down)\s+by\s+[\d.]+%\s+on\s+[a-z]{3,9}\.?\s+\d{1,2}\b/i, // 'Microsoft Corp Stock (MSFT) Moved Up by 3.24% on Nov 9: Facts Behind the Movement'(45차)
 ];
 // 제목 끝에 붙는 매체의 꼭지 이름(' : 기업주식정보'·' : 경제')은 떼고 판단한다
 const coreTitle = (t) => String(t ?? '').trim().replace(/\s:\s\S{1,10}$/, '');
@@ -508,7 +516,7 @@ export const priceOnly = (title) => { const t = coreTitle(title); return PRICE_O
 export const LISTING_RE = /(ELW|ETN|ETF|리츠|스팩)[^…]{0,30}상장|신규\s*상장/;
 // 기부·봉사 같은 사회공헌 기사('…김장 김치 2500박스 이웃에 전달') — 주가 움직임의 원인이 아니라 이유에서 뺀다(31차, 봇·화면 같게)
 // 채용(공채)·사내 행사 기사도 같은 규칙(39차 — '안랩, 하반기 공채…', 'HD현대중공업, 난타 공연 관람…근로자 화합 목적', 'K리그-HD현대일렉트릭, 축구 교실')
-const CSR_RE = /김장|기부|후원|봉사|성금|장학금|헌혈|연탄|사회공헌|이웃\s*사랑|나눔\s*(?:행사|활동|캠페인)|공채|(?:신입|경력|하반기|상반기)\s?(?:사원\s?)?채용|채용\s?(?:공고|설명회|박람회)|인턴\s?(?:모집|채용)|화합\s?(?:행사|목적)|축구\s?교실|공연\s?관람|직업\s?훈련|산학\s?협력|인재\s?양성/;
+const CSR_RE = /김장|기부|후원|봉사|성금|장학금|헌혈|연탄|사회공헌|이웃\s*사랑|나눔\s*(?:행사|활동|캠페인)|공채|(?:신입|경력|하반기|상반기)\s?(?:사원\s?)?채용|채용\s?(?:공고|설명회|박람회)|인턴\s?(?:모집|채용)|화합\s?(?:행사|목적)|축구\s?교실|공연\s?관람|직업\s?훈련|산학\s?협력|인재\s?양성|브랜드\s?평판/;
 const UP_RE = /상승|(?<!(?:원화|달러|엔화|유로)\s?)강세|급등|반등|↑|오름|올라|올랐|오른(?!쪽|손|팔)|치솟|솟구|폭등|껑충|뛰었|훨훨|불기둥|랠리|들썩|상한가|신고가/;
 // '…2.80% 조정'·'조정세'·'조정 국면'도 내림 말('목표가 상향 조정'처럼 방향이 붙은 조정은 아님)
 const DOWN_RE = /하락|(?<!(?:원화|달러|엔화|유로)\s?)약세|급락|↓|내림|내려|내린|내렸|떨어|폭락|하한가|신저가|주춤|추락|증발|반토막|휘청|무너|붕괴|곤두박질|주저앉|미끄러|뒷걸음|고꾸라|털썩|빠졌|밀려(?!들)|밀린|[\d.]+%\s*조정|조정\s*(?:국면|장세|세|받)/;
@@ -537,7 +545,8 @@ const REPORT_RE = /^\[리포트\s?브리핑\]|목표가\s*[\d,]+\s*원/;
 // 번호 붙은 연재·기획 기사('[한화에어로 해부⑤] …'·'[전자 3형제 경쟁 공식①] …')도 그날 움직임의 원인이 아닌 해설이라 같은 등급
 // 종목 추천·리포트·전망 칼럼 꼭지('… [오늘, 이 종목]'·'[버핏 리포트] …'·'… [주식 초고수는 지금]'·'[○○ 주가전망] …')도 앞이든 끝이든 같은 등급
 // — 사실을 전하는 꼭지('[핫종목]'·'[종목NOW]'·'[특징주]')는 그대로
-const SPEC_RE = /지지선|저항선|과매도|과매수|\bRSI\b|기술적\s*분석|횡보|무슨\s?일|주가\s?전망|봤더니|[‘'"]이것[’'"]|(?:있을까|될까|갈까|할까)\s*\??\s*(?:$|…|\.\.\.)|\?\s*$|^\[[^\]]*[①-⑳][^\]]*\]|\[[^\]]*(?:이\s?종목|[eE]종목|추천|전망|리포트|고수|탐구|풍향계|돋보기|줌인)[^\]]*\]|\b[Ss]tock\s+[Ff]orecasts?\b|\b[Pp]rice\s+[Pp]redictions?\b/;
+// 외국인·기관 매매만 전하는 자동 기사('[장중수급포착] … 외국인/기관 동시 순매수… 주가 +6.00%'·'[거래소 외국인] …'·'[공매도 브리핑] …')·매경 자동 신호('[MK시그널] …')·영어 'Stock Price Forecast'·'Is a Trending Stock'도 같은 등급(45차)
+const SPEC_RE = /지지선|저항선|과매도|과매수|\bRSI\b|기술적\s*분석|횡보|무슨\s?일|주가\s?전망|봤더니|[‘'"]이것[’'"]|(?:있을까|될까|갈까|할까)\s*\??\s*(?:$|…|\.\.\.)|\?\s*$|^\[[^\]]*[①-⑳][^\]]*\]|\[[^\]]*(?:이\s?종목|[eE]종목|추천|전망|리포트|고수|탐구|풍향계|돋보기|줌인)[^\]]*\]|\b[Ss]tock\s+[Ff]orecasts?\b|\b[Pp]rice\s+[Pp]redictions?\b|\b[Pp]rice\s+[Ff]orecasts?\b|\b[Tt]rending\s+[Ss]tock\b|\[(?:장중)?수급포착\]|\[MK시그널\]|\[공매도[^\]]*\]|^\[(?:거래소|유가증권|코스피|코스닥)\s?(?:외국인|기관|개인)[^\]]*\]/;
 const weakTitle = (t) => { const c = coreTitle(t); return roundupTitle(c) || REPORT_RE.test(c) || SPEC_RE.test(c); };
 // '소식에도'·'불구'처럼 거스르는 말이 있으면 호재·악재 낱말로 방향을 짐작하지 않는다
 const CONTRA_RE = /에도[\s,.…'"‘’“”]|에도$|불구|무색/;

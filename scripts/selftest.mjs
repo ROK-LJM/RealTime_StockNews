@@ -2364,6 +2364,57 @@ await test('AI 입력 과거 흐름(44차): 1주·1개월·3개월·고점 대�
   const body = NET.bodies.find((b, i) => isGemini(NET.calls[i])) || '';
   assert.ok(body.includes('과거 흐름: 1주 +10.0% · 1개월 +10.0% · 3개월 +10.0% · 6개월 고점대비 +0.0%'), body.slice(0, 700));
 });
+await test('이유·뉴스(45차): 시세 페이지는 뉴스에서 뺌 · 제목 끝 매체 꼭지(" : 금융") 뗌 · MarketWatch 자동 시세 기사·"Moved Up by 3.24% on Nov 9"는 시세 안내 · [장중수급포착]·[거래소 외국인]·[공매도 브리핑]·[MK시그널]·Price Forecast·Trending Stock은 맨 뒤 · 브랜드평판은 이유 아님 · 봇·화면 같음', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(block + '; ({ pickReasonNews, priceOnly })', {});
+  const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const it = (title) => ({ title, pubMs: T('2026-11-10T10:30:00+09:00'), sentiment: src.tagSentiment(title) });
+  const pick = (titles, pct, names = []) => {
+    const list = titles.map(it), a = src.pickReasonNews(list, pct, '20261110', kst, names), b = f.pickReasonNews(list, pct, '20261110', kst, names);
+    assert.equal(b ? b.title : null, a ? a.title : null, '봇·화면 같은 선택: ' + titles.join(' / '));
+    return a ? a.title : null;
+  };
+  // 시세 안내(봇·화면 같게) — 실제 11/10 제목과 MarketWatch 자동 기사 꼴
+  for (const t of ['Plug Power Inc. stock outperforms competitors on strong trading day', 'Apple Inc. stock rises Monday, outperforms market', 'Tesla Inc. stock falls Tuesday, still outperforms market',
+    'Amazon.com Inc. stock underperforms Wednesday when compared to competitors', 'Nvidia Corp. stock outperforms market despite losses on the day',
+    'Microsoft Corp Stock (MSFT) Moved Up by 3.24% on Nov 9: Facts Behind the Movement', 'Taiwan Semiconductor Manufacturing Co Ltd Stock (TSM) Opened Up by 3.14% on Nov 9: Drivers Behind the Movement']) {
+    assert.equal(src.priceOnly(t), true, '시세 안내: ' + t); assert.equal(f.priceOnly(t), true, '시세 안내(화면): ' + t);
+  }
+  for (const t of ['Plug Power stock rises after earnings beat', 'Apple (NASDAQ:AAPL) Stock Price Down 1.5% After Analyst Downgrade', 'Stock Market Today, Nov. 9: Plug Power Rises 3.45% on Positioning Ahead of Q3 Report']) {
+    assert.equal(src.priceOnly(t), false, '이유가 붙은 기사: ' + t); assert.equal(f.priceOnly(t), false, '이유가 붙은 기사(화면): ' + t);
+  }
+  assert.equal(pick(['Plug Power Inc. stock outperforms competitors on strong trading day', 'Stock Market Today, Nov. 9: Plug Power Rises 3.45% on Positioning Ahead of Q3 Report'], 3.45, ['Plug Power']),
+    'Stock Market Today, Nov. 9: Plug Power Rises 3.45% on Positioning Ahead of Q3 Report', 'PLUG 11/9 — 자동 시세 기사 대신 이유가 붙은 기사');
+  // 맨 뒤 — 실제 11/10 두산에너빌리티
+  assert.equal(pick(['[장중수급포착] 두산에너빌리티, 외국인/기관 동시 순매수… 주가 +6.00%', "원전주 급등, 두산에너빌리티 9%·현대건설 8%대 상승…미국 '블루쓰나미' 이후 에너지 정책 변화 주목"], 7.2, ['두산에너빌리티']),
+    "원전주 급등, 두산에너빌리티 9%·현대건설 8%대 상승…미국 '블루쓰나미' 이후 에너지 정책 변화 주목", '수급만 전하는 자동 기사는 맨 뒤');
+  for (const [t, name, pct] of [['[MK시그널] 가나, 태양광 토탈 솔루션 프로바이더로의 도약 기대감 등에 주가상승률 26.90%', '가나', 3], ['[거래소 외국인] 가나·삼성전자우 사고 삼성전자 팔았다', '가나', -3],
+    ['[공매도 브리핑] 11월6일 가나 2357억…외국인 비중 83%', '가나', -3], ['Gana Stock Price Forecast: Shares Could Gain Another 30%', 'Gana', 3], ['Gana, Inc. (GANA) Is a Trending Stock: Facts to Know Before Betting on It', 'Gana', 3]])
+    assert.equal(pick([t, name + ' 업황 점검'], pct, [name]), name + ' 업황 점검', '맨 뒤: ' + t);
+  assert.equal(pick(['[장중수급포착] 가나, 기관 5일 연속 순매수행진... 주가 +5.81%'], 5.6, ['가나']), '[장중수급포착] 가나, 기관 5일 연속 순매수행진... 주가 +5.81%', '다른 기사가 없으면 그대로');
+  assert.equal(pick(['[이넷뉴스 브랜드평판] 가나, 에너지장비 상장기업 11월 1위'], 3, ['가나']), null, '브랜드평판 순위는 이유 아님');
+  // 시세 페이지
+  for (const t of ['NVIDIA Corporation (NVDA) Stock Price, News, Quote & History', 'Super Micro Computer, Inc. (SMCI) stock price, news, quote and history - Yahoo Finance', 'Taiwan Semiconductor Manufacturing (TSM) Stock Price, News & Analysis',
+    'Microsoft (MSFT) Stock Price, Quote, News & History', 'Apple AAPL Stock Price and Chart | Live AAPL Quote Today', 'TSM Stock Price — TSMC Chart'])
+    assert.equal(src.QUOTE_PAGE_RE.test(t), true, '시세 페이지: ' + t);
+  for (const t of ['Nvidia Stock Price Today: NVDA Rebounds 3% From $200 Support Level', 'AAPL Stock Price Target Hiked Ahead Of iPhone Launch', 'Analysts revise SMCI stock price target after Supermicro earnings', 'Nvidia stock falls as board probe exposes succession void for Jensen Huang'])
+    assert.equal(src.QUOTE_PAGE_RE.test(t), false, '기사: ' + t);
+  // 봇 — 받을 때 시세 페이지는 빼고 제목 끝 매체 꼭지는 뗀다
+  const item = (t, i) => '<item><title>' + t + ' - 테스트일보</title><link>https://news.example.com/x' + i + '</link><pubDate>' + RSS_PUB + '</pubDate><source url="https://news.example.com">테스트일보</source></item>';
+  const feed = (ts) => text('<?xml version="1.0"?><rss><channel>' + ts.map(item).join('') + '</channel></rss>');
+  const root = workspace();
+  await pipeline(root, { news: (m, u) => {
+    const q = new URL(u).searchParams.get('q');
+    if (/AAPL/.test(q)) return feed(['Apple Inc. (AAPL) stock price, news, quote and history', 'Apple AAPL Stock Price and Chart | Live AAPL Quote Today', 'Apple (AAPL) wins EU approval for new chip plant', 'AAPL shares rise on iPhone demand', 'Apple AAPL supplier deal expands']);
+    if (/삼성전자/.test(q)) return feed(['삼성전자 5%·SK하이닉스 8% 급등…반도체주 반등 : 금융', '삼성전자, 평택 새 공장 착공 : 기업·산업', '삼성전자 노조 임금 협상 타결']);
+    return text(rss('', queryName(u)));
+  } });
+  const titles = (code) => (read(root, 'news.json')[code]?.items || []).map((x) => x.title);
+  assert.ok(titles('AAPL').length >= 3 && !titles('AAPL').some((t) => src.QUOTE_PAGE_RE.test(t)), '시세 페이지 뺌: ' + titles('AAPL').join(' / '));
+  assert.ok(titles('005930').includes('삼성전자 5%·SK하이닉스 8% 급등…반도체주 반등') && titles('005930').includes('삼성전자, 평택 새 공장 착공'), '매체 꼭지 뗌: ' + titles('005930').join(' / '));
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
