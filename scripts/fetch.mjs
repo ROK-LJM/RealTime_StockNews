@@ -364,10 +364,14 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
         .map((m) => `${m.kind === 'cb' ? '서킷브레이커' : `${m.dir === 'buy' ? '매수' : '매도'} 사이드카`} ${hm(m.at)}`);
       return { name: ix.name, pct: ix.pct, events };
     };
+    // 순서(40차) — 같은 시장 지수가 1% 넘게 움직인 날 같은 방향·차이 1%p 안쪽으로 움직인 종목(화면 '시장 따라')은 맨 뒤 — 이유가 시장 흐름이라
+    // AI가 더해 줄 게 적다. 그 종목만의 이유가 있는 종목에 무료 한도를 먼저 쓴다(11/10 지수 +4%대 — 국내 31종목이 모두 ±2%를 넘었다)
+    const follows = (q) => { const ix = idxOfQuote(q); return !!ix && Math.abs(ix.pct) >= 1 && Math.sign(q.changePct) === Math.sign(ix.pct) && Math.abs(q.changePct - ix.pct) < 1; };
     const movers = items
       .map((it) => ({ it, q: quotesByCode[it.code] }))
       .filter(({ it, q }) => it.ai !== false && q && q.ok && Math.abs(q.changePct ?? 0) >= STOCK_ANALYSIS_THRESHOLD)
-      .sort((a, b) => Math.abs(b.q.changePct ?? 0) - Math.abs(a.q.changePct ?? 0));
+      .map((m) => ({ ...m, f: follows(m.q) ? 1 : 0 }))
+      .sort((a, b) => (a.f - b.f) || Math.abs(b.q.changePct ?? 0) - Math.abs(a.q.changePct ?? 0));
     let calls = 0, deferred = 0, waited = 0;
     for (const { it, q } of movers) {
       const sig = analysisSig(q, news[it.code], investors[it.code], disclosures[it.code]);

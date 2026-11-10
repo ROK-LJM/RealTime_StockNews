@@ -2254,6 +2254,19 @@ await test('이유(39차): 채용(공채)·사내 행사 기사도 이유 후보
   }
   for (const t of ['가나, AI 채용 플랫폼 사업 진출', '가나 신공장 착공']) assert.equal(pick([t], 3), t, '사업 기사는 그대로: ' + t);
 });
+await test('AI 종합분석 순서(40차): 시장과 비슷하게 움직인 종목(시장 따라)은 맨 뒤 — 그 종목만의 이유가 있는 종목 먼저(무료 한도) · 상장 시장을 모르면 등락 순', async () => {
+  const geminiNames = () => NET.bodies.filter((b, i) => isGemini(NET.calls[i]) && !b.includes('뉴스 목록')).map((b) => (b.match(/'(삼성전자|SK하이닉스|애플)'/) || [])[1]).filter(Boolean);
+  const list = { v: 2, kr: [['005930', '삼성전자', 'KOSPI', 1], ['000660', 'SK하이닉스', 'KOSPI', 2]], us: [], meta: {} };
+  // 코스피 +5.5% · 삼성전자 +6%(시장 따라 — 차이 0.5%p) · SK하이닉스 +3%(차이 -2.5%p — 그 종목만의 움직임)
+  const r1 = workspace();
+  writeData(r1, 'stocklist.json', list);
+  await pipeline(r1, { idxPct: 5.5, krPct: { '005930': 6, '000660': 3 }, krAt: NOW_KR });
+  assert.deepEqual(geminiNames().slice(0, 2), ['SK하이닉스', '삼성전자'], '시장 따라는 맨 뒤');
+  // 상장 시장을 모르면(검색 목록 없음) 많이 움직인 순서 그대로
+  const r2 = workspace();
+  await pipeline(r2, { idxPct: 5.5, krPct: { '005930': 6, '000660': 3 }, krAt: NOW_KR });
+  assert.deepEqual(geminiNames().slice(0, 2), ['삼성전자', 'SK하이닉스'], '시장을 모르면 등락 순');
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
