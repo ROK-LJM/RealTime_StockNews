@@ -2631,6 +2631,25 @@ await test('스팸(53차): 씽크풀 자동 글("…물량 모아둘 기회로 �
   for (const t of ['Nvidia expands partnership with Salesforce (Salesforce)', '삼성전자, 미국 판매 법인 개편 (SamsungUSA)', 'Apple unveils new chip (AppleSilic)', '코스피 마감 지수 정리 (KOSPIindex)', '심텍, 장기공급계약 협의…물량 60% 공급 전망'])
     assert.equal(src.SPAM_RE.test(t), false, '보통 기사: ' + t);
 });
+await test('AI 종합분석 순서(54차): 그날 진단이 아직 없는 종목 먼저 — 이미 그날 진단이 있는 종목의 재분석은 그 뒤 · 지난날 진단은 없는 것으로', async () => {
+  const geminiNames = () => NET.bodies.filter((b, i) => isGemini(NET.calls[i]) && !b.includes('뉴스 목록')).map((b) => (b.match(/'(삼성전자|SK하이닉스|애플)'/) || [])[1]).filter(Boolean);
+  const seed = (at) => ({ '005930': { headline: '이전 진단', summary: '이전', model: 'model-primary', sig: '5|옛 시그니처', at } });
+  // 삼성전자 +6%(그날 진단 있음 — 입력이 바뀌어 다시 분석할 차례) · SK하이닉스 +3%(진단 없음) → SK하이닉스 먼저
+  const r1 = workspace();
+  writeData(r1, 'analysis.json', seed(NOW_KR - 30 * MIN));
+  await pipeline(r1, { krPct: { '005930': 6, '000660': 3 }, krAt: NOW_KR });
+  assert.deepEqual(geminiNames().slice(0, 2), ['SK하이닉스', '삼성전자'], '진단 없는 종목 먼저');
+  // 삼성전자 진단이 지난날 것이면 둘 다 진단 없음 — 많이 움직인 순
+  const r2 = workspace();
+  writeData(r2, 'analysis.json', seed(NOW_KR - 1440 * MIN));
+  await pipeline(r2, { krPct: { '005930': 6, '000660': 3 }, krAt: NOW_KR });
+  assert.deepEqual(geminiNames().slice(0, 2), ['삼성전자', 'SK하이닉스'], '지난날 진단은 없는 것으로');
+  // 그날 진단이 있어도 방향이 바뀌었으면(-3% 때 진단 → 지금 +6%) 진단 없는 종목과 같은 차례 — 많이 움직인 순
+  const r3 = workspace();
+  writeData(r3, 'analysis.json', { '005930': { ...seed(NOW_KR - 30 * MIN)['005930'], sig: '-3|옛' } });
+  await pipeline(r3, { krPct: { '005930': 6, '000660': 3 }, krAt: NOW_KR });
+  assert.deepEqual(geminiNames().slice(0, 2), ['삼성전자', 'SK하이닉스'], '방향이 바뀐 진단은 없는 것과 같은 차례');
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');

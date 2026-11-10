@@ -376,11 +376,15 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
     // 순서(40차) — 같은 시장 지수가 1% 넘게 움직인 날 같은 방향·차이 1%p 안쪽으로 움직인 종목(화면 '시장 따라')은 맨 뒤 — 이유가 시장 흐름이라
     // AI가 더해 줄 게 적다. 그 종목만의 이유가 있는 종목에 무료 한도를 먼저 쓴다(11/10 지수 +4%대 — 국내 31종목이 모두 ±2%를 넘었다)
     const follows = (q) => { const ix = idxOfQuote(q); return !!ix && Math.abs(ix.pct) >= 1 && Math.sign(q.changePct) === Math.sign(ix.pct) && Math.abs(q.changePct - ix.pct) < 1; };
+    // 그날 진단이 아직 없는 종목 먼저(54차) — 이미 그날 진단이 있는 종목은 등락 구간(12%→11%→13%)·맨 위 기사가 바뀔 때마다 다시 분석돼 회차 몫을 먼저 가져갔다
+    // (11/10 09:25~15:15 호출 37번 중 같은 날 재분석 25번 — HD건설기계·효성중공업·LIG가 20번 가까이 다시 분석되는 동안 20여 종목은 진단 없이 대기, 장중 진단 비율 25%)
+    // 그날 진단이 있어도 방향이 바뀌었으면(오전 상승 → 오후 하락) 진단 없는 종목과 같은 차례 — 반대 방향 진단이 오래 남지 않게
+    const freshOf = (it, q) => { const p = prev[it.code], tz = MARKET_TZ[it.market] || MARKET_TZ.US, at = +new Date(q.asOf); return !!(p && Number.isFinite(p.at) && Number.isFinite(at) && ymdIn(p.at, tz) >= ymdIn(at, tz) && Math.sign(Number(sigMove(p.sig)) || 0) === Math.sign(q.changePct || 0)); };
     const movers = items
       .map((it) => ({ it, q: quotesByCode[it.code] }))
       .filter(({ it, q }) => it.ai !== false && q && q.ok && Math.abs(q.changePct ?? 0) >= STOCK_ANALYSIS_THRESHOLD)
-      .map((m) => ({ ...m, f: follows(m.q) ? 1 : 0 }))
-      .sort((a, b) => (a.f - b.f) || Math.abs(b.q.changePct ?? 0) - Math.abs(a.q.changePct ?? 0));
+      .map((m) => ({ ...m, f: follows(m.q) ? 1 : 0, d: freshOf(m.it, m.q) ? 1 : 0 }))
+      .sort((a, b) => (a.d - b.d) || (a.f - b.f) || Math.abs(b.q.changePct ?? 0) - Math.abs(a.q.changePct ?? 0));
     let calls = 0, deferred = 0, waited = 0;
     for (const { it, q } of movers) {
       const sig = analysisSig(q, news[it.code], investors[it.code], disclosures[it.code]);
