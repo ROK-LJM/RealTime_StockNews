@@ -405,6 +405,10 @@ const MUTANTS = [
   ["[끝값] 그날 봉 그대로", A, "const cut = lastDay === day ? closes.length - 1 : closes.length;", "const cut = closes.length;"],
   ["[끝값] 개장 전에도 덧붙임", A, " || q.marketStatus === 'PREOPEN' || pendingOf(q)) return { closes, dates };", ") return { closes, dates };"],
   ["[끝값] 일봉이 새로워도 바꿈", A, "if (lastDay > day) return { closes, dates };", ""],
+  // ---------- 44차 — AI 입력 과거 흐름 끝값 ----------
+  ["[끝값] AI 과거 흐름 일봉만", S, "const st = historyStats(history, quote);", "const st = historyStats(history);"],
+  ["[끝값] 봇 그날 봉 그대로", S, "return [...c.slice(0, lastDay === day ? c.length - 1 : c.length), quote.price];", "return [...c, quote.price];"],
+  ["[끝값] 봇 첫 체결 전에도", S, "quote.marketStatus === 'PREOPEN' || pending) return c;", "quote.marketStatus === 'PREOPEN') return c;"],
   ["[공시 방향] 화면 반대 공시도", A, " && !(dir && discDir(x.title) === -dir)", ""],
   ["[공시 방향] 화면 방향 안 넘김", A, "keyDiscToday(q.code, Math.sign(q.changePct || 0))", "keyDiscToday(q.code)"],
   ["[공시 방향] 봇 반대 공시도", F, " && discDir(x.title) !== -Math.sign(q.changePct)", ""],

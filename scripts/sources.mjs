@@ -780,8 +780,22 @@ export async function aiCoreNews(name, changePct, headlines, now = Date.now()) {
 export const STOCK_ANALYSIS_THRESHOLD = 2;
 
 // 과거 일봉에서 기간별 등락·고점대비 위치를 뽑아 분석 입력으로 쓴다.
-function historyStats(history) {
-  const c = history && history.closes;
+// 6개월 종가에 지금 가격을 끝값으로(44차, docs/app.js liveSeries와 같은 규칙) — 그날 봉이 있으면 바꾸고 없으면 덧붙임. 개장 전·첫 체결 전·날짜를 모르면 그대로
+export function liveCloses(history, quote) {
+  const c = history && Array.isArray(history.closes) ? history.closes : null;
+  if (!c || !c.length) return c;
+  const d = Array.isArray(history.dates) && history.dates.length === c.length ? history.dates : null;
+  const at = +new Date(quote && quote.asOf);
+  const kr = !!quote && (quote.market || (quote.currency === 'KRW' ? 'KR' : 'US')) === 'KR';
+  const pending = kr && quote.marketStatus === 'OPEN' && !(quote.volume > 0) && !quote.halt;
+  if (!quote || quote.ok === false || !(quote.price > 0) || !d || !Number.isFinite(at) || quote.marketStatus === 'PREOPEN' || pending) return c;
+  const tz = kr ? 'Asia/Seoul' : 'America/New_York';
+  const day = ymdIn(at, tz), lastDay = ymdIn(d[d.length - 1], tz);
+  if (lastDay > day) return c;
+  return [...c.slice(0, lastDay === day ? c.length - 1 : c.length), quote.price];
+}
+export function historyStats(history, quote = null) {
+  const c = liveCloses(history, quote);
   if (!Array.isArray(c) || c.length < 2) return null;
   const last = c[c.length - 1];
   const ret = (n) => { const i = c.length - 1 - n; return i >= 0 && c[i] ? ((last - c[i]) / c[i]) * 100 : null; };
@@ -800,7 +814,7 @@ export async function aiStockAnalysis({ quote, news, flow, history, disclosures,
   const money = (v) => (v == null ? 'N/A' : us ? `$${Number(v).toFixed(2)}` : `${Math.round(v).toLocaleString('ko-KR')}원`);
   const p = (v) => v == null ? 'N/A' : `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
   const n = (v) => v == null ? 'N/A' : `${v >= 0 ? '+' : ''}${Math.round(v).toLocaleString('ko-KR')}`;
-  const st = historyStats(history);
+  const st = historyStats(history, quote); // 끝값은 지금 가격(44차 — 오늘 등락과 같은 기준)
   // 기사 날짜(그 시장 현지 날짜)와 등락이 난 거래일(시세 시각의 그 시장 날짜) — 거래일 전 기사를 그날 원인으로 오해하지 않게(30차)
   const tz = us ? 'America/New_York' : 'Asia/Seoul';
   const qt = Date.parse(quote.asOf);

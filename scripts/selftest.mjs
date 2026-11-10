@@ -2344,6 +2344,26 @@ await test('뉴스 기간·지금 가격 끝값(43차): 뉴스는 마지막 거�
   assert.deepEqual(plain(f.liveSeries(q({ ok: false }), h)).closes, [100, 101, 102], '시세 실패면 그대로');
   assert.equal(f.liveSeries(q(), null), null);
 });
+await test('AI 입력 과거 흐름(44차): 1주·1개월·3개월·고점 대비도 지금 가격 끝값(그날 봉 대신 · 없으면 덧붙임 · 개장 전·첫 체결 전은 그대로) · 실제 요청 본문도', async () => {
+  const d = (s) => T(s + 'T00:00:00Z');
+  const dates = Array.from({ length: 70 }, (_, i) => d('2026-08-01') + i * 86400e3);
+  const closes = dates.map(() => 100);
+  const lastDay = new Date(dates[69] + 9 * 3600e3).toISOString().slice(0, 10);
+  const q = (x) => ({ ok: true, market: 'KR', price: 110, volume: 1, marketStatus: 'OPEN', asOf: lastDay + 'T10:30:00+09:00', ...x });
+  const st = src.historyStats({ closes, dates }, q());
+  assert.deepEqual([Math.round(st.w1), Math.round(st.m1), Math.round(st.m3), Math.round(st.fromHigh)], [10, 10, 10, 0], '그날 봉 → 지금 가격 110');
+  assert.equal(src.liveCloses({ closes, dates }, q()).length, 70, '바꿈(길이 그대로)');
+  const next = new Date(dates[69] + 86400e3 + 9 * 3600e3).toISOString().slice(0, 10);
+  assert.equal(src.liveCloses({ closes, dates }, q({ asOf: next + 'T10:30:00+09:00' })).length, 71, '그날 봉이 없으면 덧붙임');
+  assert.equal(src.liveCloses({ closes, dates }, q({ marketStatus: 'PREOPEN' })).at(-1), 100, '개장 전은 그대로');
+  assert.equal(src.liveCloses({ closes, dates }, q({ volume: null })).at(-1), 100, '첫 체결 전은 그대로');
+  assert.equal(Math.round(src.historyStats({ closes, dates }).w1), 0, '시세를 안 넘기면 예전처럼 일봉만');
+  // 실제 AI 요청 본문 — 과거 흐름 줄이 지금 가격 기준
+  NET.routes = routes(); NET.calls = []; NET.bodies = []; NET.blocked = [];
+  await src.aiStockAnalysis({ quote: { ...q(), code: '005930', name: '가나', changePct: 10, high: 111, low: 100 }, news: { items: [] }, flow: null, history: { closes, dates }, disclosures: null, schedule: [], now: T(lastDay + 'T10:31:00+09:00') });
+  const body = NET.bodies.find((b, i) => isGemini(NET.calls[i])) || '';
+  assert.ok(body.includes('과거 흐름: 1주 +10.0% · 1개월 +10.0% · 3개월 +10.0% · 6개월 고점대비 +0.0%'), body.slice(0, 700));
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
