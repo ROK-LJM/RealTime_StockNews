@@ -2205,6 +2205,35 @@ await test('뉴스 검색어(37차): 미국은 영문 이름·영문 별칭과 �
   assert.deepEqual(n2.PLUG.items.map((x) => x.title), ['Why PLUG stock jumped today'], '영문 검색이 0건이어도 예전 검색어로');
   assert.deepEqual([n2.SPCX.ok, n2.SPCX.items.map((x) => x.title)], [true, ['SpaceX wins contract']], '두 번째가 실패해도 첫 결과 유지');
 });
+await test('방향 낱말(38차): 증발·반토막·들썩 · 낮춰·물린·눈물 / 쾌재·높여·수혜 · "무슨 일이"·"…할까…"는 원인을 말하지 않아 맨 뒤 · 봇·화면 같음', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(block + '; ({ pickReasonNews })', {});
+  const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const it = (title) => ({ title, pubMs: T('2026-11-10T09:30:00+09:00'), sentiment: src.tagSentiment(title) });
+  const pick = (titles, pct, names) => {
+    const list = titles.map(it), a = src.pickReasonNews(list, pct, '20261110', kst, names), b = f.pickReasonNews(list, pct, '20261110', kst, names);
+    assert.equal(b ? b.title : null, a ? a.title : null, '봇·화면 같은 선택: ' + titles.join(' / '));
+    return a ? a.title : null;
+  };
+  // 실제 11/10 삼성SDI +6.14%에 붙은 제목 — 내림 말(증발) + 원인을 말하지 않는 꼭지(무슨 일이)
+  const sdi = '사흘 만에 시총 10조 증발…삼성SDI에 무슨 일이 [이런국장 저런주식]';
+  assert.equal(pick([sdi], 6.14, ['삼성SDI']), null, '오른 날 증발 기사는 이유 아님');
+  assert.equal(pick([sdi, '삼성SDI 업황 점검'], -6, ['삼성SDI']), '삼성SDI 업황 점검', "내린 날이어도 '무슨 일이'는 맨 뒤");
+  assert.equal(pick([sdi], -6, ['삼성SDI']), sdi, '그것뿐이면 그것');
+  for (const [t, up] of [["하반기 '반토막' 145종목 … 가나도 못 피했다", false], ['신재생에너지 관련주 들썩…가나 주목', true], ['메리츠증권 가나 목표가 14만원서 12만원으로 낮춰', false],
+    ['반도체 특수에 가나 쾌재', true], ['가나 목표가 높여', true], ['가나 250층 물린 개미의 눈물', false]]) {
+    assert.equal(pick([t], up ? -3 : 3, ['가나']), null, '반대 방향 제외: ' + t);
+    assert.equal(pick([t], up ? 3 : -3, ['가나']), t, '같은 방향 이유: ' + t);
+  }
+  assert.equal(pick(['가나, 월요일 주가 반전할까…미 해군 고위급 방한', '가나 업황 점검'], 3, ['가나']), '가나 업황 점검', "'…할까…'도 맨 뒤");
+  // 호재·악재 낱말이 맞서면(악재 1·호재 1 = 중립) 방향 낱말이 정한다
+  assert.equal(pick(['가나 시총 10조 증발…신제품 기대'], 3, ['가나']), null, '증발 — 호재 낱말이 있어도 내림');
+  assert.equal(pick(['가나 주가 반토막…수주 기대'], 3, ['가나']), null, '반토막 — 호재 낱말이 있어도 내림');
+  assert.equal(pick(['가나 관련주 들썩…규제 우려'], -3, ['가나']), null, '들썩 — 악재 낱말이 있어도 오름');
+  assert.deepEqual(['시총 10조 증발', '관련주 들썩', '목표가 낮춰', '수혜 기대'].map((t) => src.tagSentiment(t).tone), ['neg', 'pos', 'neg', 'pos']);
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
