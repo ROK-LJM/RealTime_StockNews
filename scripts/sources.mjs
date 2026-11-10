@@ -340,7 +340,7 @@ async function googleNews(query, ko, recentDays = 0, keep = null, keys = [], mor
   return items;
   };
   const pipe = (items) => {
-  let out = items.filter((it) => it.title && !SPAM_RE.test(it.title) && !QUOTE_PAGE_RE.test(it.title) && (!keep || keep(it.title)));
+  let out = items.filter((it) => it.title && !SPAM_RE.test(it.title) && !QUOTE_PAGE_RE.test(it.title) && !HOLDINGS_RE.test(it.title) && (!keep || keep(it.title)));
   if (recentDays > 0) {
     const cutoff = Date.now() - recentDays * 86400000;
     out = out.filter((it) => it.pubMs == null || it.pubMs >= cutoff);
@@ -429,6 +429,9 @@ export const SPAM_RE = /카지노|바카라|토토\s?사이트|스포츠\s?토�
 // 기사가 아닌 시세 페이지('NVIDIA Corporation (NVDA) Stock Price, News, Quote & History'·'Apple AAPL Stock Price and Chart | Live AAPL Quote Today'·'TSM Stock Price — TSMC Chart')
 // — 구글 뉴스가 늘 새 날짜로 잡아 뉴스 칸과 AI 입력을 차지했다(11/02~11/10 미국 뉴스 55건 중 1~3건씩). 어느 검색이든 뺀다(45차)
 export const QUOTE_PAGE_RE = /\b(?:stock\s+price|quote)\s*[,&]?\s*(?:news|quote|history|chart|analysis)\s*[,&]\s*(?:and\s+)?(?:news|quote|history|analysis)\b|\bstock\s+price\s+and\s+chart\b|\blive\s+[A-Z.]{1,6}\s+quote\b|\bstock\s+price\s*[—–-]\s*[^—–-]*\bchart\s*$/i;
+// 기관의 13F 보유 변동 공시 자동 기사(MarketBeat — 'Apple Inc. $AAPL Stock: Axxcess Wealth Management LLC Lowers Stake'·'2,311 Amazon.com, Inc. $AMZN Shares Sold by Gibson Capital LLC')
+// — 회사 소식이 아니라 분기 지분 신고라 뺀다. 11/02~11/10 미국 뉴스 칸 6,907개 중 470개(6.8%), 제목의 캐시태그($AMZN)로 가린다(48차)
+export const HOLDINGS_RE = /^(?=.*\$[A-Z]{1,5}\b).*\b(?:Stock|Shares?|Stake|Position|Holdings?)\b/;
 // 뉴스에서 흔히 쓰는 다른 이름(종목코드·티커별). 없는 종목은 이름·영문명·티커로만 판단.
 const NEWS_ALIAS = {
   '000660': ['하이닉스', '삼전닉스'], '010120': ['LS일렉트릭'], '329180': ['현대중공업'], '005380': ['현대자동차'],
@@ -516,7 +519,8 @@ export const priceOnly = (title) => { const t = coreTitle(title); return PRICE_O
 export const LISTING_RE = /(ELW|ETN|ETF|리츠|스팩)[^…]{0,30}상장|신규\s*상장/;
 // 기부·봉사 같은 사회공헌 기사('…김장 김치 2500박스 이웃에 전달') — 주가 움직임의 원인이 아니라 이유에서 뺀다(31차, 봇·화면 같게)
 // 채용(공채)·사내 행사 기사도 같은 규칙(39차 — '안랩, 하반기 공채…', 'HD현대중공업, 난타 공연 관람…근로자 화합 목적', 'K리그-HD현대일렉트릭, 축구 교실')
-const CSR_RE = /김장|기부|후원|봉사|성금|장학금|헌혈|연탄|사회공헌|이웃\s*사랑|나눔\s*(?:행사|활동|캠페인)|공채|(?:신입|경력|하반기|상반기)\s?(?:사원\s?)?채용|채용\s?(?:공고|설명회|박람회)|인턴\s?(?:모집|채용)|화합\s?(?:행사|목적)|축구\s?교실|공연\s?관람|직업\s?훈련|산학\s?협력|인재\s?양성|브랜드\s?평판/;
+// 미국 13F 보유 변동 공시('… $AMZN Shares Sold by … LLC')도 이유 아님(48차 — 봇은 받을 때도 뺀다)
+const CSR_RE = /김장|기부|후원|봉사|성금|장학금|헌혈|연탄|사회공헌|이웃\s*사랑|나눔\s*(?:행사|활동|캠페인)|공채|(?:신입|경력|하반기|상반기)\s?(?:사원\s?)?채용|채용\s?(?:공고|설명회|박람회)|인턴\s?(?:모집|채용)|화합\s?(?:행사|목적)|축구\s?교실|공연\s?관람|직업\s?훈련|산학\s?협력|인재\s?양성|브랜드\s?평판|^(?=.*\$[A-Z]{1,5}\b).*\b(?:Stock|Shares?|Stake|Position|Holdings?)\b/;
 const UP_RE = /상승|(?<!(?:원화|달러|엔화|유로)\s?)강세|급등|반등|↑|오름|올라|올랐|오른(?!쪽|손|팔)|치솟|솟구|폭등|껑충|뛰었|훨훨|불기둥|랠리|들썩|상한가|신고가/;
 // '…2.80% 조정'·'조정세'·'조정 국면'도 내림 말('목표가 상향 조정'처럼 방향이 붙은 조정은 아님)
 const DOWN_RE = /하락|(?<!(?:원화|달러|엔화|유로)\s?)약세|급락|↓|내림|내려|내린|내렸|떨어|폭락|하한가|신저가|주춤|추락|증발|반토막|휘청|무너|붕괴|곤두박질|주저앉|미끄러|뒷걸음|고꾸라|털썩|빠졌|밀려(?!들)|밀린|[\d.]+%\s*조정|조정\s*(?:국면|장세|세|받)/;

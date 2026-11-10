@@ -420,7 +420,7 @@ const MUTANTS = [
   ["[이유] 거래소 외국인 맨 뒤 안 함(봇)", S, "|^\\[(?:거래소|유가증권|코스피|코스닥)\\s?(?:외국인|기관|개인)[^\\]]*\\]", ""],
   ["[이유] Price Forecast 맨 뒤 안 함(봇)", S, "|\\b[Pp]rice\\s+[Ff]orecasts?\\b", ""],
   ["[이유] Trending Stock 맨 뒤 안 함(봇)", S, "|\\b[Tt]rending\\s+[Ss]tock\\b", ""],
-  ["[사회공헌] 브랜드평판(봇)", S, "|인재\\s?양성|브랜드\\s?평판/;", "|인재\\s?양성/;"],
+  ["[사회공헌] 브랜드평판(봇)", S, "|인재\\s?양성|브랜드\\s?평판|", "|인재\\s?양성|"],
   ["[자동 기사] MarketWatch 시세 안내 아님(화면)", A, "/\\bstock\\s+(?:(?:rises|falls)", "/\\bNOPEstock\\s+(?:(?:rises|falls)"],
   ["[자동 기사] Moved Up by 시세 안내 아님(화면)", A, "/\\b(?:moved|opened|closed)\\s+(?:up|down)", "/\\bNOPE(?:moved|opened|closed)\\s+(?:up|down)"],
   ["[이유] 장중수급포착 맨 뒤 안 함(화면)", A, "|\\[(?:장중)?수급포착\\]", ""],
@@ -429,7 +429,7 @@ const MUTANTS = [
   ["[이유] 거래소 외국인 맨 뒤 안 함(화면)", A, "|^\\[(?:거래소|유가증권|코스피|코스닥)\\s?(?:외국인|기관|개인)[^\\]]*\\]", ""],
   ["[이유] Price Forecast 맨 뒤 안 함(화면)", A, "|\\b[Pp]rice\\s+[Ff]orecasts?\\b", ""],
   ["[이유] Trending Stock 맨 뒤 안 함(화면)", A, "|\\b[Tt]rending\\s+[Ss]tock\\b", ""],
-  ["[사회공헌] 브랜드평판(화면)", A, "|인재\\s?양성|브랜드\\s?평판/;", "|인재\\s?양성/;"],
+  ["[사회공헌] 브랜드평판(화면)", A, "|인재\\s?양성|브랜드\\s?평판|", "|인재\\s?양성|"],
   // ---------- 46차 — 늦게 여는 날(수능일) ----------
   ["[늦은 개장] 봇 표 안 씀", B, "return KRX_LATE[`${k.year}-${k.month}-${k.day}`] || [9 * 60, 15 * 60 + 30];", "return [9 * 60, 15 * 60 + 30];"],
   ["[늦은 개장] AI 장 시간 평소대로", B, "m >= open && m < close + 30;", "m >= 9 * 60 && m < 16 * 60;"],
@@ -453,6 +453,10 @@ const MUTANTS = [
   ["[이유] 티커 앞 움직임도(화면)", A, "return i >= 0 && MOVE_WHY_RE.test(t.slice(i));", "return i >= 0 && MOVE_WHY_RE.test(t);"],
   ["[이유] 화면 이름에 티커 없음", A, ", ...(marketOf(q) === 'US' ? [q.code] : [])];", "];"],
   ["[이유] 봇 이름에 티커 없음", F, ", ...(q.market === 'US' ? [q.code] : [])];", "];"],
+  // ---------- 48차 — 13F 보유 변동 공시 ----------
+  ["[자동 기사] 13F 받을 때 안 뺌", S, " && !HOLDINGS_RE.test(it.title)", ""],
+  ["[자동 기사] 13F 이유로 씀(봇)", S, "|브랜드\\s?평판|^(?=.*\\$[A-Z]{1,5}\\b).*\\b(?:Stock|Shares?|Stake|Position|Holdings?)\\b/;", "|브랜드\\s?평판/;"],
+  ["[자동 기사] 13F 이유로 씀(화면)", A, "|브랜드\\s?평판|^(?=.*\\$[A-Z]{1,5}\\b).*\\b(?:Stock|Shares?|Stake|Position|Holdings?)\\b/;", "|브랜드\\s?평판/;"],
   ["[공시 방향] 화면 반대 공시도", A, " && !(dir && discDir(x.title) === -dir)", ""],
   ["[공시 방향] 화면 방향 안 넘김", A, "keyDiscToday(q.code, Math.sign(q.changePct || 0))", "keyDiscToday(q.code)"],
   ["[공시 방향] 봇 반대 공시도", F, " && discDir(x.title) !== -Math.sign(q.changePct)", ""],

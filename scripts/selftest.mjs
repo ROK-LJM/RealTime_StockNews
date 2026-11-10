@@ -2510,6 +2510,33 @@ await test('이유(47차): 미국 종목은 같은 방향 기사 중 티커 뒤�
   const rec = (read(root, 'moves.json').AAPL || []).find((x) => x.s === 'news');
   assert.equal(rec && rec.r, why, JSON.stringify(read(root, 'moves.json').AAPL));
 });
+await test('뉴스(48차): 미국 13F 보유 변동 공시("… $AMZN Shares Sold by … LLC")는 받을 때 빼고 이유로도 안 씀 · 캐시태그 없는 보통 기사는 그대로 · 봇·화면 같음', async () => {
+  const real = ['Apple Inc. $AAPL Stock: Axxcess Wealth Management LLC Lowers Stake', '2,311 Amazon.com, Inc. $AMZN Shares Sold by Gibson Capital LLC', 'Madrona Financial Services LLC Acquires 6,973 Shares of Amazon.com, Inc. $AMZN',
+    'Amazon.com, Inc. $AMZN Stock Holdings Lessened by Sterling Capital Management LLC', 'NVIDIA Corporation $NVDA Stock Acquired by Fortitude Family Office LLC', 'Taiwan Semiconductor Manufacturing Company Ltd. $TSM Stock: University of Texas Texas AM Investment Management Co. Boosts Position'];
+  for (const t of real) assert.equal(src.HOLDINGS_RE.test(t), true, '13F: ' + t);
+  for (const t of ['Amazon (AMZN) and Meta (META) Soar After JPMorgan Hails Them as ‘Top Internet Picks’', 'Apple Stock (AAPL) Rises 5.3% as Big Tech Gains on Midterms (Nov 4)', 'Cathie Wood Makes $437 Million In Trades. Adds Nvidia, SpaceX; Offloads Broadcom', 'Nvidia shares jump as chip demand surges'])
+    assert.equal(src.HOLDINGS_RE.test(t), false, '보통 기사: ' + t);
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(block + '; ({ pickReasonNews })', {});
+  const ny = (ms) => new Date(ms - 5 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const it = (title) => ({ title, pubMs: T('2026-11-05T15:00:00-05:00'), sentiment: src.tagSentiment(title) });
+  for (const [list, want] of [[[it('Amazon.com, Inc. $AMZN Stock Position Cut by Investment House LLC')], null],
+    [[it('Amazon.com, Inc. $AMZN Stock Position Cut by Investment House LLC'), it('Stock Market Today, Nov. 5: Amazon Shares Slide as Technology Selloff Deepens')], 'Stock Market Today, Nov. 5: Amazon Shares Slide as Technology Selloff Deepens']]) {
+    const a = src.pickReasonNews(list, -2.19, '20261105', ny, ['아마존닷컴', 'AMZN']), b = f.pickReasonNews(list, -2.19, '20261105', ny, ['아마존닷컴', 'AMZN']);
+    assert.equal(a ? a.title : null, want, '봇'); assert.equal(b ? b.title : null, want, '화면');
+  }
+  // 봇 — 받을 때 뺀다
+  const item = (t, i) => '<item><title>' + t + ' - 테스트일보</title><link>https://news.example.com/z' + i + '</link><pubDate>' + RSS_PUB + '</pubDate><source url="https://news.example.com">테스트일보</source></item>';
+  const feed = (ts) => text('<?xml version="1.0"?><rss><channel>' + ts.map(item).join('') + '</channel></rss>');
+  const root = workspace();
+  await pipeline(root, { news: (m, u) => (/AAPL/.test(new URL(u).searchParams.get('q'))
+    ? feed(['Apple Inc. $AAPL Stock: Axxcess Wealth Management LLC Lowers Stake', 'Apple Inc. $AAPL Shares Sold by Gibson Capital LLC', 'Apple (AAPL) wins EU approval for new chip plant', 'AAPL shares rise on iPhone demand', 'Apple AAPL supplier deal expands'])
+    : text(rss('', queryName(u)))) });
+  const titles = (read(root, 'news.json').AAPL?.items || []).map((x) => x.title);
+  assert.ok(titles.length === 3 && !titles.some((t) => src.HOLDINGS_RE.test(t)), titles.join(' / '));
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
