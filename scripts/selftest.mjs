@@ -2171,6 +2171,40 @@ await test('방향 낱말(36차): 휘청·무너·붕괴·밀려·껑충·뛰었
   // 시세 안내
   for (const t of ['[마감분석] 두산에너빌리티 3.02% 내린 4만3350원 마감 : 기업주식정보', '[마감분석] 대덕전자 19.80% 급락 마감 7만9800원 기록']) { assert.equal(src.priceOnly(t), true, '봇: ' + t); assert.equal(f.priceOnly(t), true, '화면: ' + t); }
 });
+await test('뉴스 검색어(37차): 미국은 영문 이름·영문 별칭과 티커(영문 이름을 모르면 예전 검색어) · 3건이 안 되면 넓혀서 한 번 더(국내 이름·별칭, 미국 예전 검색어) · 합쳐서 고름 · 두 번째가 실패해도 첫 결과 유지', async () => {
+  const qs = () => NET.calls.filter((u) => /news\.google\.com/.test(u)).map((u) => new URL(u).searchParams.get('q').replace(/\s+when:\S+/, ''));
+  const items = [{ code: '005930', market: 'KR', name: '삼성전자' }, { code: '010120', market: 'KR', name: 'LS ELECTRIC' }, { code: 'PLUG', market: 'US', name: '플러그파워' }, { code: 'SPCX', market: 'US', name: '스페이스X' }, { code: 'AAPL', market: 'US', name: '애플' }];
+  const list = { v: 2, kr: [], us: [['PLUG', '플러그 파워', 'Plug Power, Inc.', 'NASDAQ', 2], ['SPCX', '스페이스X', 'Space Exploration Technologies Corp. Class A', 'NASDAQ', 7]], meta: {} };
+  const xml = (titles) => '<?xml version="1.0"?><rss><channel>' + titles.map((t, i) => '<item><title>' + t + ' - 일보' + '</title><link>https://news.example.com/' + encodeURIComponent(t) + i + '</link><pubDate>' + new Date(Date.now() - (i + 1) * 600e3).toUTCString() + '</pubDate><source url="https://news.example.com">일보</source></item>').join('') + '</channel></rss>';
+  const many = (m, u) => { const q = new URL(u).searchParams.get('q'); const n = /삼성전자|LS/.test(q) ? (/LS/.test(q) ? 'LS ELECTRIC' : '삼성전자') : /Plug/.test(q) ? 'Plug Power' : /SpaceX/.test(q) ? 'SpaceX' : /AAPL/.test(q) ? 'AAPL' : '기타'; return text(xml([n + ' 수주 소식', n + ' 신공장 착공', n + ' 임원 인사'])); };
+  const r1 = workspace(items);
+  writeData(r1, 'stocklist.json', list);
+  await pipeline(r1, { news: many, krPct: {}, usPct: {} });
+  const q1 = qs();
+  assert.ok(q1.includes('Plug Power PLUG stock') && q1.includes('SpaceX SPCX stock'), '영문 이름·영문 별칭 — ' + q1.join(' / '));
+  assert.ok(q1.includes('애플 AAPL stock'), '영문 이름을 모르면 예전 검색어');
+  assert.ok(q1.includes('삼성전자 주가') && q1.includes('LS ELECTRIC 주가'));
+  assert.ok(!q1.some((q) => q.includes('플러그파워 PLUG')) && !q1.some((q) => / OR /.test(q)), '3건이면 넓혀 찾지 않음 — ' + q1.join(' / '));
+  // 적으면 넓혀서 — 첫 검색 1건 + 두 번째 다른 기사 = 합침
+  const thin = (m, u) => {
+    const q = new URL(u).searchParams.get('q').replace(/\s+when:\S+/, '');
+    if (q === 'LS ELECTRIC 주가') return text(xml(['LS ELECTRIC 주가 급등 배경']));
+    if (q === 'LS ELECTRIC OR LS일렉트릭') return text(xml(['LS일렉트릭, 북미 변압기 수주', 'LS ELECTRIC 주가 급등 배경']));
+    if (q === 'Plug Power PLUG stock') return text(xml([]));
+    if (q === '플러그파워 PLUG stock') return text(xml(['Why PLUG stock jumped today']));
+    if (q === 'SpaceX SPCX stock') return text(xml(['SpaceX wins contract']));
+    if (q === '스페이스X SPCX stock') return text('error', 500);
+    return text(xml([]));
+  };
+  const r2 = workspace(items);
+  writeData(r2, 'stocklist.json', list);
+  await pipeline(r2, { news: thin, krPct: {}, usPct: {} });
+  const n2 = read(r2, 'news.json'), q2 = qs();
+  assert.ok(q2.includes('LS ELECTRIC OR LS일렉트릭') && q2.includes('플러그파워 PLUG stock'), '넓혀서 한 번 더 — ' + q2.join(' / '));
+  assert.deepEqual(n2['010120'].items.map((x) => x.title).sort(), ['LS ELECTRIC 주가 급등 배경', 'LS일렉트릭, 북미 변압기 수주'].sort(), '합치고 같은 기사는 하나');
+  assert.deepEqual(n2.PLUG.items.map((x) => x.title), ['Why PLUG stock jumped today'], '영문 검색이 0건이어도 예전 검색어로');
+  assert.deepEqual([n2.SPCX.ok, n2.SPCX.items.map((x) => x.title)], [true, ['SpaceX wins contract']], '두 번째가 실패해도 첫 결과 유지');
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');

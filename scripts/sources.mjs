@@ -317,9 +317,11 @@ export function sameStory(a, b, keys = []) {
 // 같은 기사·같은 소식은 최신 하나만(keys: 종목 이름·별칭 — 빼고 비교), 시세 안내 기사는 뒤로 — 8건 안에 서로 다른 실제 뉴스가 먼저(카드·AI 입력 모두)
 // keep(title): 남길 기사 판정(종목 뉴스의 관련도 필터). 주면 후보를 넉넉히(40건) 읽고 걸러 8건까지.
 // 도박·카지노 광고 같은 스팸 제목은 어느 검색이든 뺀다.
-async function googleNews(query, ko, recentDays = 0, keep = null, keys = []) {
+// more: 3건이 안 되면 넓혀서 한 번 더 찾을 검색어(37차 — 합쳐서 고른다. 두 번째가 실패해도 첫 결과는 지킨다)
+async function googleNews(query, ko, recentDays = 0, keep = null, keys = [], more = null) {
   const hl = ko ? 'ko' : 'en-US', gl = ko ? 'KR' : 'US', ceid = ko ? 'KR:ko' : 'US:en';
-  const q = recentDays > 0 ? `${query} when:${recentDays}d` : query;
+  const read = async (one) => {
+  const q = recentDays > 0 ? `${one} when:${recentDays}d` : one;
   const xml = await http(`https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=${hl}&gl=${gl}&ceid=${ceid}`, { as: 'text' });
   const items = [];
   for (const b of xml.split('<item>').slice(1, keep ? 41 : 13)) {
@@ -332,6 +334,9 @@ async function googleNews(query, ko, recentDays = 0, keep = null, keys = []) {
     const pubMs = pub ? Date.parse(pub) : null;
     items.push({ title, source, time: pub ? new Date(pub).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '', pubMs, link: pick('link'), sentiment: tagSentiment(title) });
   }
+  return items;
+  };
+  const pipe = (items) => {
   let out = items.filter((it) => it.title && !SPAM_RE.test(it.title) && (!keep || keep(it.title)));
   if (recentDays > 0) {
     const cutoff = Date.now() - recentDays * 86400000;
@@ -341,6 +346,11 @@ async function googleNews(query, ko, recentDays = 0, keep = null, keys = []) {
   out = out.filter((it, i) => !out.slice(0, i).some((p) => sameStory(p.title, it.title, keys)));
   out = [...out.filter((it) => !priceOnly(it.title)), ...out.filter((it) => priceOnly(it.title))];
   return out.slice(0, 8);
+  };
+  const first = await read(query);
+  let out = pipe(first);
+  if (more && out.length < 3) out = pipe([...first, ...(await read(more).catch(() => []))]);
+  return out;
 }
 
 // ---------- 시장 조치(사이드카) — 뉴스 속보로 ----------
@@ -564,9 +574,13 @@ export async function getNews(item) {
     const it = { ...item, code, market };
     const keys = newsKeys(it);
     const keep = (title) => isRelevantNews(title, it, keys);
+    // 검색어 — 국내는 '이름 주가', 미국은 영문 이름(영문 별칭이 있으면 별칭)과 티커(한글 이름을 섞은 영어 검색은 기사가 거의 안 잡혔다 — 11/10 PLUG 0건·TSLA 2건).
+    // 3건이 안 되면 넓혀서 한 번 더 — 국내는 '주가'를 뺀 이름과 별칭, 미국은 한글 이름과 티커(예전 검색어)
+    const base = krBaseName(item.name || code, code), alias = NEWS_ALIAS[code] || [];
+    const enName = alias.find((a) => /^[\x00-\x7f]+$/.test(a)) || enCoreName(item.en);
     const items = market === 'KR'
-      ? await googleNews(`${krBaseName(item.name || code, code)} 주가`, true, 2, keep, keys)
-      : await googleNews(`${item.name || code} ${code} stock`, false, 2, keep, keys);
+      ? await googleNews(`${base} 주가`, true, 2, keep, keys, [base, ...alias.slice(0, 1)].join(' OR '))
+      : await googleNews(`${enName || item.name || code} ${code} stock`, false, 2, keep, keys, enName ? `${item.name || code} ${code} stock` : null);
     // 시세 안내 기사의 '상승·하락'은 가격 설명일 뿐 호재·악재가 아니다 — '시세' 표시로 바꾸고 호재·악재 집계에서 뺀다
     for (const it of items) if (priceOnly(it.title)) it.sentiment = { label: '시세', tone: 'neutral', score: 0, keywords: [] };
     let pos = 0, neg = 0;
