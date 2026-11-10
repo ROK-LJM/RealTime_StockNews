@@ -257,6 +257,26 @@ export function calendarDue(prev, items, now) {
 }
 
 // items: 추적 종목, corpMap: 종목코드→고유번호(없으면 국내 생략), prev: 직전 calendar.json
+// 일정 마무리(51차에 함수로 뗌) — ① 시작과 끝이 같은 날인 기간 일정('자사주 처분 시작'·'끝' — 2026.11.20 ~ 2026.11.20)은 한 줄 '자사주 처분'(하루)
+// ② 같은 날 같은 종목의 같은 일정은 하나로 · 실적 공시가 있는 날의 '발표 예정'은 뺀다 ③ 날짜 → 종류 → 국내 먼저 → 이름 → 시각 순
+export function finalizeEvents(events) {
+  const isP = (e, w) => !!e && e.k === 'cap' && typeof e.t === 'string' && e.t.endsWith(' ' + w);
+  const base = (e, w) => `${e.c}|${e.d}|${e.t.slice(0, -w.length - 1)}`;
+  const ends = new Set(events.filter((e) => isP(e, '끝')).map((e) => base(e, '끝')));
+  const one = new Set(events.filter((e) => isP(e, '시작') && ends.has(base(e, '시작'))).map((e) => base(e, '시작')));
+  const list = events.filter((e) => !(isP(e, '끝') && one.has(base(e, '끝'))))
+    .map((e) => (isP(e, '시작') && one.has(base(e, '시작')) ? { ...e, t: e.t.slice(0, -3), s: `${dot(e.d)} 하루` } : e));
+  const filed = new Set(list.filter((e) => e.k === 'earn' && e.t === '실적 공시').map((e) => `${e.c}|${e.d}`));
+  const seen = new Set();
+  return list.filter((e) => {
+    if (e.k === 'earn' && /예정/.test(e.t) && filed.has(`${e.c}|${e.d}`)) return false;
+    const key = `${e.c}|${e.d}|${e.k}|${e.t}|${e.tm || ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : 0) || (KIND_ORDER[a.k] ?? 9) - (KIND_ORDER[b.k] ?? 9)
+    || (a.m === b.m ? 0 : a.m === 'KR' ? -1 : 1) || String(a.n).localeCompare(String(b.n), 'ko') || String(a.tm || '').localeCompare(String(b.tm || '')));
+}
 export async function buildCalendar({ items, corpMap = null, prev = null, now }) {
   const today = kstYmd(now);
   const from = kstYmd(now - BACK_DAYS * 86400e3), until = kstYmd(now + AHEAD_DAYS * 86400e3);
@@ -353,17 +373,7 @@ export async function buildCalendar({ items, corpMap = null, prev = null, now })
     }
   });
 
-  // 같은 날 같은 종목의 같은 일정은 하나로 · 실적 공시가 있는 날의 '발표 예정'은 뺀다
-  const filed = new Set(events.filter((e) => e.k === 'earn' && e.t === '실적 공시').map((e) => `${e.c}|${e.d}`));
-  const seen = new Set();
-  const out = events.filter((e) => {
-    if (e.k === 'earn' && /예정/.test(e.t) && filed.has(`${e.c}|${e.d}`)) return false;
-    const key = `${e.c}|${e.d}|${e.k}|${e.t}|${e.tm || ''}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  }).sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : 0) || (KIND_ORDER[a.k] ?? 9) - (KIND_ORDER[b.k] ?? 9)
-    || (a.m === b.m ? 0 : a.m === 'KR' ? -1 : 1) || String(a.n).localeCompare(String(b.n), 'ko') || String(a.tm || '').localeCompare(String(b.tm || '')));
+  const out = finalizeEvents(events);
   const usState = !us.length ? 'none' : usFail === us.length ? '받기 실패 — 직전 일정 유지' : usFail ? `일부 실패(${usFail}종목 — 직전 일정 유지)` : 'ok';
   // 진단 — 이번에 못 찾은 것 + 직전 진단 중 아직 기억에 있는 것
   const keptDiag = sameV && Array.isArray(prev?.diag) ? prev.diag.filter((d) => d && Array.isArray(docs[d.no]) && !diag.some((x) => x.no === d.no)) : [];

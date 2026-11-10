@@ -484,6 +484,9 @@ const MUTANTS = [
   ["[공시 방향] 화면 전환청구 행사 방향 없음", A, "|전환청구권\\s?행사|신주인수권\\s?행사|교환청구권\\s?행사/;", "/;"],
   ["[이유] 산업오늘 맨 뒤 안 함(봇)", S, "|\\[산업\\s?오늘\\]/;", "/;"],
   ["[이유] 산업오늘 맨 뒤 안 함(화면)", A, "|\\[산업\\s?오늘\\]/;", "/;"],
+  // ---------- 51차 — 달력 하루 기간 ----------
+  ["[일정] 하루 기간 두 줄", C, "const one = new Set(events.filter((e) => isP(e, '시작') && ends.has(base(e, '시작'))).map((e) => base(e, '시작')));", "const one = new Set();"],
+  ["[일정] 하루 표시 없음", C, "s: `${dot(e.d)} 하루` }", "s: e.s }"],
   ["[공시 방향] 화면 반대 공시도", A, " && !(dir && discDir(x.title) === -dir)", ""],
   ["[공시 방향] 화면 방향 안 넘김", A, "keyDiscToday(q.code, Math.sign(q.changePct || 0))", "keyDiscToday(q.code)"],
   ["[공시 방향] 봇 반대 공시도", F, " && discDir(x.title) !== -Math.sign(q.changePct)", ""],
