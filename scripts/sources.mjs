@@ -511,7 +511,7 @@ const coreTitle = (t) => String(t ?? '').trim().replace(/\s:\s\S{1,10}$/, '');
 export const priceOnly = (title) => { const t = coreTitle(title); return PRICE_ONLY.some((re) => re.test(t)); };
 // 이유로 쓸 뉴스 고르기(급등락 기록) — docs/app.js의 pickReasonNews와 같게 유지(자체 테스트가 비교).
 // 시세 안내·상품 상장 공지('…ELW 224종 상장')·방향이 반대인 기사('15% 급등' 기사인데 오늘은 하락 — 이유일 수 없음)는 빼고
-// ① 그날 나온 같은 방향의 [특징주] → ② 같은 방향 기사 → ③ 방향을 알 수 없는 기사 → ④ 여러 종목 나열·'[오늘의 …]' 모음·리포트 요약·주가 전망 글·칼럼 꼭지 순.
+// ① 그날 나온 같은 방향의 [특징주] → ② 같은 방향 기사(미국은 티커 뒤에 움직임 + 원인이 오는 제목 먼저) → ③ 방향을 알 수 없는 기사 → ④ 여러 종목 나열·'[오늘의 …]' 모음·리포트 요약·주가 전망 글·칼럼 꼭지 순.
 // 같은 등급 안에서는 최신순. 방향은 제목의 오름·내림 말, 없으면 호재·악재 태그(내린 날의 '수주 1조 돌파' 같은 호재 기사는 이유 아님).
 export const LISTING_RE = /(ELW|ETN|ETF|리츠|스팩)[^…]{0,30}상장|신규\s*상장/;
 // 기부·봉사 같은 사회공헌 기사('…김장 김치 2500박스 이웃에 전달') — 주가 움직임의 원인이 아니라 이유에서 뺀다(31차, 봇·화면 같게)
@@ -563,11 +563,17 @@ function newsDir(it, names) {
 export function strongNews(it, pct, names = []) {
   return !!(it && it.title && !weakTitle(it.title) && newsDir(it, names) === Math.sign(Number(pct) || 0));
 }
+// 미국 종목의 '움직임 + 원인' 제목 — 티커 뒤에 오름·내림 말과 after/as/on/amid/following이 이어지면('Amazon (AMZN) and Meta (META) Soar After JPMorgan Hails…'·
+// 'Nvidia Stock (NVDA) Rises 2.8% as Chip Stocks Rebound') 같은 방향 기사 안에서 먼저 쓴다(47차). 티커 앞의 말은 다른 회사 얘기일 수 있어 보지 않는다
+// ('TSMC rises on report … for Nvidia'·'IREN stock plunges 18% as Microsoft …'). 국내 종목은 이름에 영문 티커가 없어 해당 없음
+const MOVE_WHY_RE = /\b(?:soar(?:s|ed|ing)?|jump(?:s|ed|ing)?|surg(?:e|es|ed|ing)|ris(?:e|es|ing)|rose|rall(?:y|ies|ied|ying)|climb(?:s|ed|ing)?|gain(?:s|ed|ing)?|spik(?:e|es|ed|ing)|rebound(?:s|ed|ing)?|pop(?:s|ped|ping)?|fall(?:s|ing)?|fell|drop(?:s|ped|ping)?|slid(?:e|es|ing)?|sink(?:s|ing)?|sank|plung(?:e|es|ed|ing)|tumbl(?:e|es|ed|ing)|slump(?:s|ed|ing)?|declin(?:e|es|ed|ing)|slip(?:s|ped|ping)?)\b(?:[^.?!]|\.\d)*?\b(?:after|as|on|amid|following)\b/i;
+const tickerAt = (t, n) => { const m = /^[A-Z][A-Z.\-]{0,9}$/.test(n || '') ? t.match(new RegExp('(?:^|[^A-Za-z])' + n.replace(/[.\-]/g, (c) => '\\' + c) + '(?:[^A-Za-z]|$)')) : null; return m ? m.index : -1; };
+const moveWhy = (t, names) => (names || []).some((n) => { const i = tickerAt(t, n); return i >= 0 && MOVE_WHY_RE.test(t.slice(i)); });
 export function pickReasonNews(items, pct, day, ymd, names = []) {
   const s = Math.sign(Number(pct) || 0);
   const dir = (it) => newsDir(it, names);
   const tier = (it) => (/\[특징주\]/.test(it.title) && s && dir(it) === s && Number.isFinite(it.pubMs) && ymd(it.pubMs) === day ? 0
-    : weakTitle(it.title) ? 3 : s && dir(it) === s ? 1 : 2);
+    : weakTitle(it.title) ? 3 : s && dir(it) === s ? (moveWhy(it.title, names) ? 1 : 1.5) : 2);
   return (Array.isArray(items) ? items : []).filter((it) => it && it.title && !priceOnly(it.title) && !LISTING_RE.test(it.title) && !CSR_RE.test(it.title) && !(s && dir(it) === -s))
     .map((it, i) => [tier(it), i, it]).sort((a, b) => a[0] - b[0] || a[1] - b[1])[0]?.[2] || null;
 }

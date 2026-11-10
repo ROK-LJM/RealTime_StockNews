@@ -443,7 +443,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
         const i = list.findIndex((x) => x.d === day);
         if (Math.abs(q.changePct) >= STOCK_ANALYSIS_THRESHOLD) {
           const a = an[it.code];
-          const names = [q.name, krBaseName(q.name, q.code)]; // 우선주는 기사 속 보통주 이름으로도 방향을 본다
+          const names = [q.name, krBaseName(q.name, q.code), ...(q.market === 'US' ? [q.code] : [])]; // 우선주는 기사 속 보통주 이름으로도 방향을 본다 · 미국은 티커도(47차)
           // 그날 움직임과 방향이 반대인 공시(내린 날의 공급계약 체결·자기주식 취득, 오른 날의 유상증자 등)는 이유가 아니다(30차)
           const discs = (disclosures[it.code]?.items || []).filter((x) => x && x.key && x.title && x.date <= day && x.date >= dayStart(3) && discDir(x.title) !== -Math.sign(q.changePct));
           const d = discs.find((x) => !MINOR_DISC_RE.test(x.title)), dMinor = d ? null : discs[0] || null;

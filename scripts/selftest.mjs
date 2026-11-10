@@ -2475,6 +2475,41 @@ await test('늦게 여는 날(46차): 수능일 10:00~16:30·새해 첫 거래�
   assert.equal(f.pendingNote('KR', [pend], at('2026-11-19T09:10:00')), '');
   assert.equal(f.pendingNote('KR', [pend], at('2026-11-19T10:30:00')), '');
 });
+await test('이유(47차): 미국 종목은 같은 방향 기사 중 티커 뒤에 움직임 + 원인이 오는 제목 먼저(소수점 허용) · 티커 앞의 다른 회사 움직임은 아님 · 국내 종목은 그대로 · 화면·봇 이름에 미국 티커 · 봇·화면 같음', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(block + '; ({ pickReasonNews, reasonNames })', {});
+  const ny = (ms) => new Date(ms - 5 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const it = (title, tone) => ({ title, pubMs: T('2026-11-09T15:00:00-05:00'), sentiment: { tone } });
+  const pick = (list, pct, names) => {
+    const a = src.pickReasonNews(list, pct, '20261109', ny, names), b = f.pickReasonNews(list, pct, '20261109', ny, names);
+    assert.equal(b ? b.title : null, a ? a.title : null, '봇·화면 같은 선택: ' + list.map((x) => x.title).join(' / '));
+    return a ? a.title : null;
+  };
+  // 실제 11/10 아마존 — 더 최신인 위성 기사보다 'Soar After JPMorgan …'
+  assert.equal(pick([it('Amazon to deploy record 40 satellites on first Vulcan flight (AMZN:NASDAQ)', 'pos'), it('Amazon (AMZN) and Meta (META) Soar After JPMorgan Hails Them as ‘Top Internet Picks’', 'pos')], 2.94, ['아마존닷컴', 'AMZN']),
+    'Amazon (AMZN) and Meta (META) Soar After JPMorgan Hails Them as ‘Top Internet Picks’');
+  assert.equal(pick([it('NVIDIA (NVDA) to host investor day next month', 'pos'), it('NVIDIA (NVDA) Stocks Rebound 6.78% as Lawmakers Call Jensen Huang to Closed-Door Briefing', 'pos')], 2.39, ['엔비디아', 'NVDA']),
+    'NVIDIA (NVDA) Stocks Rebound 6.78% as Lawmakers Call Jensen Huang to Closed-Door Briefing', '소수점이 끼어도');
+  // 티커 앞의 움직임은 다른 회사 얘기 · 티커가 없으면 해당 없음(그대로 최신순)
+  assert.equal(pick([it('NVIDIA (NVDA) to host investor day next month', 'pos'), it('TSMC jumps as Nvidia (NVDA) orders more chips', 'pos')], 3, ['엔비디아', 'NVDA']), 'NVIDIA (NVDA) to host investor day next month', '티커 앞 움직임은 아님');
+  assert.equal(pick([it('Microsoft Stock: The Selloff Proved Why It Is Different (NASDAQ:MSFT)', 'neg'), it('IREN stock plunges 18% as Microsoft raises concerns over data center delays', 'neg')], -3.58, ['마이크로소프트', 'MSFT']),
+    'Microsoft Stock: The Selloff Proved Why It Is Different (NASDAQ:MSFT)', '다른 회사가 주어');
+  assert.equal(pick([it('삼성전자, 평택 신공장 착공', 'pos'), it('Samsung Electronics shares jump as chip demand surges', 'pos')], 3, ['삼성전자']), '삼성전자, 평택 신공장 착공', '국내 종목은 그대로');
+  // 이름 목록 — 미국만 티커
+  assert.deepEqual([...f.reasonNames({ market: 'US', name: '아마존닷컴', code: 'AMZN' })].slice(-1), ['AMZN']);
+  assert.equal([...f.reasonNames({ market: 'KR', name: '삼성전자', code: '005930' })].includes('005930'), false);
+  // 봇 급등락 기록도 — 더 최신인 같은 방향 기사보다 움직임 + 원인 제목
+  const fresh = 'Apple (AAPL) wins record order from carrier', why = 'Apple (AAPL) Stock Rises 3% as iPhone Demand Beats Forecast';
+  assert.deepEqual([src.tagSentiment(fresh).tone, src.tagSentiment(why).tone], ['pos', 'pos'], '전제: 둘 다 호재');
+  const item = (t, i) => '<item><title>' + t + ' - 테스트일보</title><link>https://news.example.com/y' + i + '</link><pubDate>' + RSS_PUB + '</pubDate><source url="https://news.example.com">테스트일보</source></item>';
+  const feed = (ts) => text('<?xml version="1.0"?><rss><channel>' + ts.map(item).join('') + '</channel></rss>');
+  const root = workspace();
+  await pipeline(root, { usPct: { AAPL: 3 }, gemini: () => text('upstream error', 500), news: (m, u) => (/AAPL/.test(new URL(u).searchParams.get('q')) ? feed([fresh, why, 'Apple AAPL supplier deal expands']) : text(rss('', queryName(u)))) });
+  const rec = (read(root, 'moves.json').AAPL || []).find((x) => x.s === 'news');
+  assert.equal(rec && rec.r, why, JSON.stringify(read(root, 'moves.json').AAPL));
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
