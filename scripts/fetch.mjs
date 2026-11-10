@@ -303,7 +303,15 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
   try {
     const usEn = new Map((stockList?.us || []).filter((r) => Array.isArray(r) && r[0]).map((r) => [r[0], r[2] || '']));
     const withEn = (it) => (it.market === 'US' ? { ...it, en: usEn.get(it.code) || '' } : it);
-    await collect('news', '뉴스', 'news.json', (v) => isObj(v) && v.ok === true && Array.isArray(v.items), (it) => getNews(withEn(it)), news);
+    // 뉴스 기간(43차) — 그 종목의 마지막 거래일(시세 시각의 그 시장 날짜)부터: 같은 날이면 2일, 하루 지날 때마다 1일씩(최대 5일).
+    // 예전엔 늘 2일이라 일요일 저녁·월요일 아침(뉴욕은 일요일 저녁)에 마지막 등락이 난 금요일 장중 기사가 검색에서 빠졌다
+    const newsDays = (it) => {
+      const q = quotesByCode[it.code], at = q && q.ok ? +new Date(q.asOf) : NaN;
+      if (!Number.isFinite(at)) return 2;
+      const tz = MARKET_TZ[it.market] || MARKET_TZ.US, dn = (ms) => { const s = ymdIn(ms, tz); return Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8)) / 864e5; };
+      return Math.min(5, Math.max(2, 2 + dn(now) - dn(at)));
+    };
+    await collect('news', '뉴스', 'news.json', (v) => isObj(v) && v.ok === true && Array.isArray(v.items), (it) => getNews(withEn(it), newsDays(it)), news);
     const anyNews = Object.values(news).some((n) => n && n.items && n.items.length);
     if (anyNews) write('news.json', news);
     else console.warn('  ! 뉴스 전부 비어 있음 — news.json 유지');

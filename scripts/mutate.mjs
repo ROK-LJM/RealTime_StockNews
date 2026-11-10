@@ -398,6 +398,13 @@ const MUTANTS = [
   ["[이유] 기획 꼭지 맨 뒤 안 함(화면)", A, "|고수|탐구|풍향계|돋보기|줌인)", "|고수)"],
   ["[이유] ‘이것’ 낚시 맨 뒤 안 함(화면)", A, "|[‘'\"]이것[’'\"]", ""],
   ["[방향] 미미 호재·악재 낱말 없음", S, "'눈물', '미미',", "'눈물',"],
+  // ---------- 43차 — 뉴스 기간 · 지금 가격 끝값 ----------
+  ["[뉴스 기간] 늘 2일", F, "(it) => getNews(withEn(it), newsDays(it))", "(it) => getNews(withEn(it))"],
+  ["[뉴스 기간] 상한 없음", F, "return Math.min(5, Math.max(2, 2 + dn(now) - dn(at)));", "return Math.max(2, 2 + dn(now) - dn(at));"],
+  ["[뉴스 기간] 봇이 기간 안 씀", S, "? await googleNews(`${base} 주가`, true, days,", "? await googleNews(`${base} 주가`, true, 2,"],
+  ["[끝값] 그날 봉 그대로", A, "const cut = lastDay === day ? closes.length - 1 : closes.length;", "const cut = closes.length;"],
+  ["[끝값] 개장 전에도 덧붙임", A, " || q.marketStatus === 'PREOPEN' || pendingOf(q)) return { closes, dates };", ") return { closes, dates };"],
+  ["[끝값] 일봉이 새로워도 바꿈", A, "if (lastDay > day) return { closes, dates };", ""],
   ["[공시 방향] 화면 반대 공시도", A, " && !(dir && discDir(x.title) === -dir)", ""],
   ["[공시 방향] 화면 방향 안 넘김", A, "keyDiscToday(q.code, Math.sign(q.changePct || 0))", "keyDiscToday(q.code)"],
   ["[공시 방향] 봇 반대 공시도", F, " && discDir(x.title) !== -Math.sign(q.changePct)", ""],

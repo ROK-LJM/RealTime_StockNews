@@ -483,9 +483,9 @@ function drawCardChart(cv) {
   const q = cv.__q;
   if (!q) return;
   try {
-    const h = state.hist[q.code];
-    const fc = h && h.closes ? forecast(h.closes, FORECAST_DAYS) : null;
-    drawChart(cv, h && h.closes, fc, { dates: h && h.dates, currency: q.currency });
+    const s = liveSeries(q, state.hist[q.code]); // 끝값은 지금 가격(43차)
+    const fc = s ? forecast(s.closes, FORECAST_DAYS) : null;
+    drawChart(cv, s && s.closes, fc, { dates: s && s.dates, currency: q.currency });
   } catch (e) { console.warn('차트 렌더 실패:', q && q.code, e); }
 }
 
@@ -564,6 +564,19 @@ function sixMonthMark(q, h) {
   if (q.price > Math.max(...prior)) return 'high';
   if (q.price < Math.min(...prior)) return 'low';
   return null;
+}
+// 6개월 종가에 지금 가격을 끝값으로(43차) — 야후 일봉은 30분마다·20분쯤 늦게 받아, 장중엔 카드 가격과 기간 수익률·예측·차트 끝이 어긋났다
+// (오전엔 그날 봉이 아직 없어 오늘 등락이 빠지기도). 그날 봉이 있으면 지금 가격으로 바꾸고, 없으면 덧붙인다. 개장 전·첫 체결 전·날짜를 모르면 그대로
+function liveSeries(q, h) {
+  const closes = h && Array.isArray(h.closes) ? h.closes : null;
+  if (!closes || !closes.length) return null;
+  const dates = Array.isArray(h.dates) && h.dates.length === closes.length ? h.dates : null;
+  const at = +new Date(q && q.asOf);
+  if (!q || !q.ok || !(q.price > 0) || !dates || !Number.isFinite(at) || q.marketStatus === 'PREOPEN' || pendingOf(q)) return { closes, dates };
+  const m = marketOf(q), day = marketYmd(at, m), lastDay = marketYmd(dates[dates.length - 1], m);
+  if (lastDay > day) return { closes, dates };
+  const cut = lastDay === day ? closes.length - 1 : closes.length;
+  return { closes: [...closes.slice(0, cut), q.price], dates: [...dates.slice(0, cut), at] };
 }
 // 지난 급등락 — 봇 기록(moves.json)에서 오늘(그 종목 시세의 날짜) 것은 빼고 최근 n건. 오늘 이유는 위 AI 분석·'왜 움직였나'에 있다
 function pastMoves(q, list, n = 4) {
@@ -1151,7 +1164,7 @@ function renderCard(q, hist, inv) {
     : pendingOf(q) ? '<span class="sdot"></span>체결 전'
     : q.marketStatus === 'OPEN' ? '<span class="sdot live"></span>장중' : q.marketStatus === 'PREOPEN' ? '<span class="sdot"></span>개장 전' : '<span class="sdot"></span>마감';
 
-  const closes = hist && hist.closes;
+  const closes = liveSeries(q, hist)?.closes; // 끝값은 지금 가격(43차 — 카드 가격과 같은 기준)
   const retRow = closes
     ? `<div class="rets">${retSpan('1주', periodReturn(closes, 5))}${retSpan('1개월', periodReturn(closes, 21))}${retSpan('3개월', periodReturn(closes, 63))}</div>`
     : '';

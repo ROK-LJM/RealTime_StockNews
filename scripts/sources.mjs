@@ -563,7 +563,8 @@ export function pickReasonNews(items, pct, day, ymd, names = []) {
     .map((it, i) => [tier(it), i, it]).sort((a, b) => a[0] - b[0] || a[1] - b[1])[0]?.[2] || null;
 }
 
-export async function getNews(item) {
+// days: 찾을 기간(일) — 호출부가 그 종목의 마지막 거래일 기준으로 준다(43차, 평일 장중 2일 · 주말엔 금요일 기사까지)
+export async function getNews(item, days = 2) {
   const code = String(item.code).trim();
   const market = item.market || (isKRCode(code) ? 'KR' : 'US');
   const key = `news:${code}`;
@@ -580,8 +581,8 @@ export async function getNews(item) {
     const base = krBaseName(item.name || code, code), alias = NEWS_ALIAS[code] || [];
     const enName = alias.find((a) => /^[\x00-\x7f]+$/.test(a)) || enCoreName(item.en);
     const items = market === 'KR'
-      ? await googleNews(`${base} 주가`, true, 2, keep, keys, [base, ...alias.slice(0, 1)].join(' OR '))
-      : await googleNews(`${enName || item.name || code} ${code} stock`, false, 2, keep, keys, enName ? `${item.name || code} ${code} stock` : null);
+      ? await googleNews(`${base} 주가`, true, days, keep, keys, [base, ...alias.slice(0, 1)].join(' OR '))
+      : await googleNews(`${enName || item.name || code} ${code} stock`, false, days, keep, keys, enName ? `${item.name || code} ${code} stock` : null);
     // 시세 안내 기사의 '상승·하락'은 가격 설명일 뿐 호재·악재가 아니다 — '시세' 표시로 바꾸고 호재·악재 집계에서 뺀다
     for (const it of items) if (priceOnly(it.title)) it.sentiment = { label: '시세', tone: 'neutral', score: 0, keywords: [] };
     let pos = 0, neg = 0;

@@ -68,8 +68,10 @@ const trendIndex = { bizdate: '20261015', personalValue: '+1,000', foreignValue:
 // tag를 바꾸면 헤드라인이 달라진다(= 분석 입력이 바뀐 상황)
 // 실제 뉴스처럼 제목에 검색한 종목 이름이 들어간다(관련도 필터 통과) — name은 검색어에서 '주가'·'stock' 앞부분
 const queryName = (u) => String(new URL(u).searchParams.get('q') || '').replace(/\s+when:\S+/, '').replace(/\s+(주가|stock)$/, '').trim();
+// 가짜 기사 시각은 한 번 실행하는 동안 고정 — 넓혀 찾는 두 번째 검색(37차)과 시각이 1초 갈리면 같은 소식 중 남는 제목이 달라져 테스트가 흔들렸다
+const RSS_PUB = new Date(Date.now() - 3600e3).toUTCString();
 function rss(tag = '', name = '') {
-  const pub = new Date(Date.now() - 3600e3).toUTCString(); // 최근 2일 필터 통과
+  const pub = RSS_PUB; // 최근 2일 필터 통과
   const items = [1, 2, 3].map((i) => `<item><title>${tag ? `${tag} ` : ''}${name ? `${name} ` : ''}테스트 뉴스 ${i} 급등 - 테스트일보</title><link>https://news.example.com/a${i}</link><pubDate>${pub}</pubDate><source url="https://news.example.com">테스트일보</source></item>`).join('');
   return `<?xml version="1.0"?><rss><channel>${items}</channel></rss>`;
 }
@@ -2310,6 +2312,37 @@ await test('이유(42차): "미미" 평가는 악재 · "‘이것’을 봐라"
   for (const t of ['삼전닉스 올해 200조 주주환원에…“주가, 자사주 매입 아닌 ‘이것’을 봐라”', '곽동신 한미반도체 회장, HBM 장비 혁신 주도⋯3년 연속 매출 신기록 가시권 [CEO 탐구생활]', '[N2 증시 풍향계] 가나 ‘강세’'])
     assert.equal(pick([t, '가나 업황 점검'], 6, ['가나']), '가나 업황 점검', '맨 뒤: ' + t);
   assert.equal(pick(['[특징주] 가나 신공장 착공에 강세', '가나 업황 점검'], 6, ['가나']), '[특징주] 가나 신공장 착공에 강세', '사실을 전하는 꼭지는 그대로');
+});
+await test('뉴스 기간·지금 가격 끝값(43차): 뉴스는 마지막 거래일 기준(같은 날 2일 · 하루 지날 때마다 +1 · 최대 5일) · 기간 수익률·예측·차트는 그날 봉 대신 지금 가격(개장 전·첫 체결 전은 그대로)', async () => {
+  const days = () => NET.calls.filter((u) => /news\.google\.com/.test(u)).map((u) => new URL(u).searchParams.get('q')).filter((q) => /삼성전자 주가/.test(q)).map((q) => (q.match(/when:(\d)d/) || [])[1]);
+  const r1 = workspace();
+  await pipeline(r1, { krAt: NOW_KR });
+  assert.deepEqual([...new Set(days())], ['2'], '같은 날이면 2일');
+  const r2 = workspace();
+  await pipeline(r2, { krAt: NOW_KR, krStatus: 'CLOSE' }, NOW_KR + 3 * 1440 * MIN); // 목요일 시세를 일요일에
+  assert.deepEqual([...new Set(days())], ['5'], '사흘 지나면 5일');
+  const r3 = workspace();
+  await pipeline(r3, { krAt: NOW_KR, krStatus: 'CLOSE' }, NOW_KR + 1440 * MIN);
+  assert.deepEqual([...new Set(days())], ['3'], '하루 지나면 3일');
+  const r4 = workspace();
+  await pipeline(r4, { krAt: NOW_KR, krStatus: 'CLOSE' }, NOW_KR + 6 * 1440 * MIN);
+  assert.deepEqual([...new Set(days())], ['5'], '엿새가 지나도 5일(상한)');
+  // 화면 — 그날 봉은 지금 가격으로, 없으면 덧붙임
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(block + '; ({ liveSeries })', {});
+  const d = (s) => T(s + 'T00:00:00Z'); // 야후 일봉 시각(한국 09:00)
+  const h = { closes: [100, 101, 102], dates: [d('2026-11-06'), d('2026-11-09'), d('2026-11-10')] };
+  const q = (x) => ({ ok: true, market: 'KR', price: 110, volume: 100, marketStatus: 'OPEN', asOf: '2026-11-10T10:30:00+09:00', ...x });
+  const plain = (x) => JSON.parse(JSON.stringify(x));
+  assert.deepEqual(plain(f.liveSeries(q(), h)), { closes: [100, 101, 110], dates: [h.dates[0], h.dates[1], T('2026-11-10T10:30:00+09:00')] }, '그날 봉 → 지금 가격');
+  assert.deepEqual(plain(f.liveSeries(q(), { closes: [100, 101], dates: [h.dates[0], h.dates[1]] })).closes, [100, 101, 110], '그날 봉이 아직 없으면 덧붙임');
+  assert.deepEqual(plain(f.liveSeries(q({ marketStatus: 'PREOPEN', asOf: '2026-11-11T08:30:00+09:00' }), h)).closes, [100, 101, 102], '개장 전은 그대로');
+  assert.deepEqual(plain(f.liveSeries(q({ volume: null }), h)).closes, [100, 101, 102], '첫 체결 전은 그대로');
+  assert.deepEqual(plain(f.liveSeries(q({ asOf: '2026-11-09T15:30:00+09:00' }), h)).closes, [100, 101, 102], '일봉이 더 새로우면 그대로');
+  assert.deepEqual(plain(f.liveSeries(q({ ok: false }), h)).closes, [100, 101, 102], '시세 실패면 그대로');
+  assert.equal(f.liveSeries(q(), null), null);
 });
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
