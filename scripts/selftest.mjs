@@ -2141,6 +2141,36 @@ await test('개장 전 예상 지수(35차): 08:55 전 값은 어제 종가·0%�
   assert.deepEqual(look(0.4, 'OPEN'), { est: false, dirCls: 'up', cardCls: 'brief-up', arrow: '▲', label: '오늘의 핵심' });
   assert.deepEqual(look(0, null), { est: false, dirCls: 'flat', cardCls: '', arrow: '–', label: '오늘의 핵심' });
 });
+await test('방향 낱말(36차): 휘청·무너·붕괴·밀려·껑충·뛰었 · 환율 강세·약세는 종목 방향 아님 · 여러 종목 제목은 이름이 든 절로 · [마감분석] "…% 내린 …원 마감"은 시세 · 봇·화면 같음', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(block + '; ({ pickReasonNews, priceOnly })', {});
+  const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const it = (title) => ({ title, pubMs: T('2026-11-10T09:30:00+09:00'), sentiment: src.tagSentiment(title) });
+  const pick = (title, pct, names) => {
+    const a = src.pickReasonNews([it(title)], pct, '20261110', kst, names), b = f.pickReasonNews([it(title)], pct, '20261110', kst, names);
+    assert.equal(b ? b.title : null, a ? a.title : null, '봇·화면 같은 선택: ' + title);
+    return !!a;
+  };
+  // 실제 11/10 '왜 움직였나'에 붙었던 제목 — 오른 날의 이유가 아니다
+  const opt = '[코스피 지수선물 옵션] 삼성SDI·효성중공업·삼양식품 휘청...한진칼·한미약품은 상승';
+  assert.equal(pick(opt, 11.17, ['효성중공업']), false, '이름 바로 뒤 휘청');
+  assert.equal(pick(opt, 7.35, ['삼성SDI']), false, '10자를 넘어도 같은 절의 휘청');
+  assert.equal(pick(opt, 3, ['한미약품']), true, '다른 절의 상승은 그 종목 것');
+  assert.equal(pick('19만 원 무너진 삼성전자…증권가 저가 매수론', 5.32, ['삼성전자']), false, '무너진');
+  assert.equal(pick('한화證 “현대차, 원화 강세·원자재 부담…목표가 49만원으로 하향”', 3.13, ['현대차']), false, '원화 강세는 종목 강세 아님 — 목표가 하향');
+  // 내림·오름 낱말
+  for (const t of ['삼성전기, 80만원선까지 밀려', '코스피 5000선 붕괴에 가나 곤두박질', '가나 3% 내린 5만원', '가나 주가 주저앉아', '가나 5% 빠졌다']) { assert.equal(pick(t, 4, ['가나', '삼성전기']), false, '오른 날 제외: ' + t); assert.equal(pick(t, -4, ['가나', '삼성전기']), true, '내린 날 이유: ' + t); }
+  for (const t of ['[속보] 두산에너빌리티 주가 장초반 9%대 껑충…VI 발동', '가나 하루 만에 30% 뛰었다', '가나 3% 오른 5만원', '가나 불기둥']) { assert.equal(pick(t, -4, ['가나', '두산에너빌리티']), false, '내린 날 제외: ' + t); assert.equal(pick(t, 4, ['가나', '두산에너빌리티']), true, '오른 날 이유: ' + t); }
+  // 낱말 경계 — 뜻이 다른 말
+  assert.equal(pick('가나 주문 밀려들어 공장 풀가동', 4, ['가나']), true, '밀려들어는 내림 아님');
+  assert.equal(pick('가나 오른쪽 날개 신규 생산', -4, ['가나']), true, '오른쪽은 오름 아님');
+  // 환율 말만 빼고 — 종목 강세는 그대로
+  assert.deepEqual(['달러 강세 지속', '원화 약세 전망', '반도체주 강세', '가나 휘청', '가나 껑충'].map((t) => src.tagSentiment(t).tone), ['neutral', 'neutral', 'pos', 'neg', 'pos']);
+  // 시세 안내
+  for (const t of ['[마감분석] 두산에너빌리티 3.02% 내린 4만3350원 마감 : 기업주식정보', '[마감분석] 대덕전자 19.80% 급락 마감 7만9800원 기록']) { assert.equal(src.priceOnly(t), true, '봇: ' + t); assert.equal(f.priceOnly(t), true, '화면: ' + t); }
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');

@@ -262,12 +262,12 @@ export function computeMood(indices0, vix) {
 }
 
 // ---------- 뉴스 + 호재/악재 태깅 ----------
-const NEG = ['급락', '폭락', '하락', '약세', '적자', '손실', '소송', '리콜', '제재', '규제', '감산', '하향', '매도', '우려', '경고', '부진', '쇼크', '미달', '결함', '파업', '횡령', '조사', '벌금', '연기', '취소', '철회', '구조조정', '감자', '디폴트', '하한가',
+const NEG = ['급락', '폭락', '하락', '약세', '적자', '손실', '소송', '리콜', '제재', '규제', '감산', '하향', '매도', '우려', '경고', '부진', '쇼크', '미달', '결함', '파업', '횡령', '조사', '벌금', '연기', '취소', '철회', '구조조정', '감자', '디폴트', '하한가', '휘청', '붕괴', '무너', '곤두박질',
   'downgrade', 'lawsuit', 'miss', 'plunge', 'fall', 'falls', 'drop', 'cut', 'cuts', 'warning', 'recall', 'probe', 'decline', 'loss', 'weak', 'slump', 'sink', 'tumble', 'bearish', 'selloff',
   // 영어 활용형(31차) — 'Stock Slides'·'Shares Slip'·'Stock Sinks'·'Plunges'를 중립으로 보던 것(미국 종목 이유·호재/악재 집계)
   'plunges', 'plunged', 'drops', 'dropped', 'sinks', 'sank', 'tumbles', 'tumbled', 'declines', 'declined', 'slide', 'slides', 'slid', 'sliding', 'slip', 'slips', 'slipped',
   'fell', 'falling', 'slumps', 'slumped', 'tanks', 'tanked', 'downgraded', 'downgrades', 'misses', 'missed', 'sell-off', 'rout'];
-const POS = ['급등', '폭등', '상승', '강세', '흑자', '호실적', '수주', '계약', '신고가', '인수', '합병', '자사주', '배당', '상향', '매수', '돌파', '신제품', '승인', '호재', '사상최대', '최대실적', '확대', '성장', '상한가', '훈풍',
+const POS = ['급등', '폭등', '상승', '강세', '흑자', '호실적', '수주', '계약', '신고가', '인수', '합병', '자사주', '배당', '상향', '매수', '돌파', '신제품', '승인', '호재', '사상최대', '최대실적', '확대', '성장', '상한가', '훈풍', '껑충', '불기둥', '훨훨', '랠리',
   'surge', 'jump', 'soar', 'beat', 'beats', 'upgrade', 'record', 'deal', 'approval', 'approved', 'contract', 'buyback', 'rally', 'gain', 'gains', 'strong', 'bullish', 'rise', 'rises', 'tops',
   'surges', 'surged', 'jumps', 'jumped', 'soars', 'soared', 'rallies', 'rallied', 'rose', 'climb', 'climbs', 'climbed', 'spikes', 'spiked', 'upgraded', 'upgrades', 'rebound', 'rebounds', 'rebounded', 'skyrockets'];
 
@@ -278,7 +278,7 @@ function kwHit(raw, low, w) {
 }
 
 export function tagSentiment(text) {
-  const raw = String(text || '');
+  const raw = String(text || '').replace(/(?:원화|달러|엔화|유로)\s?(?:강세|약세)/g, ''); // 환율 강세·약세는 종목 호재·악재가 아니다('현대차, 원화 강세·원자재 부담…목표가 하향')
   const low = raw.toLowerCase();
   const hits = { pos: [], neg: [] };
   for (const w of POS) if (kwHit(raw, low, w)) hits.pos.push(w);
@@ -486,7 +486,7 @@ export const PRICE_ONLY = [
   /거래량\s*[\d,]+만?주…?\s*[\d만,]+원서\s*[\d.]+%\s*(?:상승|하락|강세|약세)/,                   // '한화솔루션 거래량 1342만주…2만7050원서 3.39% 약세'
   /\|\s*Price:\s*[\d.,]+\s*\|\s*Chg%:/i,
   /주가,?\s*\d{1,2}월\s*\d{1,2}일\s*(?:장중|장\s?마감|오전|오후)?\s*[\d.]+%\s*(?:상승|하락)\s*동일업종/, // 'LS ELECTRIC 주가, 11월 5일 장중 11.94% 하락 동일업종 동반 약세'
-  /^\[마감분석\][^…]*?[\d.]+%\s*(?:상승|하락|급등|급락|강세|약세)\s*마감/,                          // '[마감분석] 대덕전자 19.80% 급락 마감 7만9800원 기록'                                                       // 'NVDA|NVIDIA Corp|Price:200.130|Chg%:-6.560'
+  /^\[마감분석\][^…]*?[\d.]+%\s*(?:상승|하락|급등|급락|강세|약세|내린|오른)\s*(?:[\d만,.]+원\s*)?마감/,                          // '[마감분석] 대덕전자 19.80% 급락 마감 7만9800원 기록'                                                       // 'NVDA|NVIDIA Corp|Price:200.130|Chg%:-6.560'
 ];
 // 제목 끝에 붙는 매체의 꼭지 이름(' : 기업주식정보'·' : 경제')은 떼고 판단한다
 const coreTitle = (t) => String(t ?? '').trim().replace(/\s:\s\S{1,10}$/, '');
@@ -498,9 +498,9 @@ export const priceOnly = (title) => { const t = coreTitle(title); return PRICE_O
 export const LISTING_RE = /(ELW|ETN|ETF|리츠|스팩)[^…]{0,30}상장|신규\s*상장/;
 // 기부·봉사 같은 사회공헌 기사('…김장 김치 2500박스 이웃에 전달') — 주가 움직임의 원인이 아니라 이유에서 뺀다(31차, 봇·화면 같게)
 const CSR_RE = /김장|기부|후원|봉사|성금|장학금|헌혈|연탄|사회공헌|이웃\s*사랑|나눔\s*(?:행사|활동|캠페인)/;
-const UP_RE = /상승|강세|급등|반등|↑|오름|올라|치솟|폭등|상한가|신고가/;
+const UP_RE = /상승|(?<!(?:원화|달러|엔화|유로)\s?)강세|급등|반등|↑|오름|올라|올랐|오른(?!쪽|손|팔)|치솟|솟구|폭등|껑충|뛰었|훨훨|불기둥|랠리|상한가|신고가/;
 // '…2.80% 조정'·'조정세'·'조정 국면'도 내림 말('목표가 상향 조정'처럼 방향이 붙은 조정은 아님)
-const DOWN_RE = /하락|약세|급락|↓|내림|내려|떨어|폭락|하한가|신저가|주춤|추락|[\d.]+%\s*조정|조정\s*(?:국면|장세|세|받)/;
+const DOWN_RE = /하락|(?<!(?:원화|달러|엔화|유로)\s?)약세|급락|↓|내림|내려|내린|내렸|떨어|폭락|하한가|신저가|주춤|추락|휘청|무너|붕괴|곤두박질|주저앉|미끄러|뒷걸음|고꾸라|털썩|빠졌|밀려(?!들)|밀린|[\d.]+%\s*조정|조정\s*(?:국면|장세|세|받)/;
 const roundupTitle = (t) => ((t.match(/[,，]/g) || []).length >= 3 && /등\s*$/.test(t)) || /^\[오늘의\s?[^\]]*\]/.test(t);
 const titleDir = (t) => (UP_RE.test(t) ? 1 : 0) - (DOWN_RE.test(t) ? 1 : 0); // 1 오름 말만 · -1 내림 말만 · 0 둘 다·없음
 // 그 종목의 방향 — 한 제목에 여러 종목이면('[특징주] 삼성전자 '상승' SK하이닉스 1%대 '하락'') 종목 이름 바로 뒤 10자 안의
@@ -512,6 +512,9 @@ function nameDir(t, names) {
     const seg = t.slice(i + n.length, i + n.length + 10);
     const d = (UP_RE.test(seg) ? 1 : 0) - (DOWN_RE.test(seg) ? 1 : 0);
     if (d) return d;
+    // 10자 안에 없으면 그 이름이 든 절(…·...·쉼표·쌍반점까지)에서 — 'A·B·C 휘청...D·E는 상승'의 A는 내림(36차)
+    const rest = t.slice(i + n.length), cut = rest.search(/\.\.\.|…|,|;/);
+    if (cut > 0) { const c = titleDir(rest.slice(0, cut)); if (c) return c; }
   }
   return titleDir(t);
 }
