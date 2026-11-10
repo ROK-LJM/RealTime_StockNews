@@ -21,8 +21,13 @@ const isWeekday = (p) => p.weekday !== 'Sat' && p.weekday !== 'Sun';
 // 한도가 리셋되는 '한도일' = 미 태평양시 날짜
 export function quotaDay(ms) { const p = parts(PT, ms); return `${p.year}-${p.month}-${p.day}`; }
 
-// 장 시간대 — 국내 평일 09:00~15:59 KST(마감 동시호가·시간외 일부 포함), 미국 평일 09:30~15:59 ET. 공휴일은 구분하지 않는다.
-export function isKrSession(ms) { const k = parts(KST, ms); const m = +k.hour * 60 + +k.minute; return isWeekday(k) && m >= 9 * 60 && m < 16 * 60; }
+// 국내 정규장 시간이 평소(09:00~15:30)와 다른 날 — 거래소 공지. 수능일은 개장·마감 모두 1시간 늦게(10:00~16:30),
+// 새해 첫 거래일은 개장식으로 10시 개장(마감은 그대로). 공지가 나오면 해마다 더한다 — docs/app.js의 KRX_LATE와 같게(자체 테스트가 비교, 46차)
+export const KRX_LATE = { '2026-11-19': [10 * 60, 16 * 60 + 30], '2027-01-04': [10 * 60, 15 * 60 + 30] };
+// 그날(한국 날짜) 국내 정규장 [개장, 마감] — 한국시간 0시부터 분
+export function krHours(ms) { const k = parts(KST, ms); return KRX_LATE[`${k.year}-${k.month}-${k.day}`] || [9 * 60, 15 * 60 + 30]; }
+// 장 시간대 — 국내 평일 개장~마감 30분 뒤(평소 09:00~15:59 KST — 마감 동시호가·시간외 일부 포함, 늦게 여는 날은 그만큼 늦게), 미국 평일 09:30~15:59 ET. 공휴일은 구분하지 않는다.
+export function isKrSession(ms) { const k = parts(KST, ms); const m = +k.hour * 60 + +k.minute, [open, close] = krHours(ms); return isWeekday(k) && m >= open && m < close + 30; }
 export function isUsSession(ms) { const e = parts(ET, ms); const m = +e.hour * 60 + +e.minute; return isWeekday(e) && m >= 9 * 60 + 30 && m < 16 * 60; }
 export const inSession = (market, ms) => (market === 'KR' ? isKrSession(ms) : isUsSession(ms));
 
@@ -44,10 +49,11 @@ export function usAfterPostSameDay(ms) {
 
 // 휴장 확인 시간대 — 정규장 개장 10분 뒤 ~ 마감 10분 전(국내 09:10~15:19 KST, 미국 09:40~15:49 ET)이면 그 시장의 날짜, 아니면 null.
 // 이 시간에 시세가 '장중'이 아니면 그날은 휴장(또는 조기 폐장)이다 — 화면의 '갱신 없음' 경고가 휴장일에 뜨지 않게 기록한다.
+// 국내는 그날 장 시간 기준(수능일 10:10~16:19 — 10시 전 '개장 전' 시세로 휴장 기록을 남기지 않게, 46차)
 export function closedCheckDay(market, ms) {
   const p = parts(market === 'KR' ? KST : ET, ms);
   const m = +p.hour * 60 + +p.minute;
-  const [open, close] = market === 'KR' ? [9 * 60, 15 * 60 + 30] : [9 * 60 + 30, 16 * 60];
+  const [open, close] = market === 'KR' ? krHours(ms) : [9 * 60 + 30, 16 * 60];
   return isWeekday(p) && m >= open + 10 && m < close - 10 ? `${p.year}-${p.month}-${p.day}` : null;
 }
 

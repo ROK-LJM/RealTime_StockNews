@@ -13,25 +13,27 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getKrQuotesLive, getKrIndices, computeMood } from './sources.mjs';
 import { writeJsonAtomic, manifestOf } from './util.mjs';
+import { krHours } from './aibudget.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-// 한국시간 분 — from부터 이 단계에 들어올 수 있고, 눈금은 first~last 분의 offsetSec초
+// 한국시간 분(평소 09:00 개장 기준) — from부터 이 단계에 들어올 수 있고, 눈금은 first~last 분의 offsetSec초.
+// 수능일·새해 첫 거래일처럼 10시에 여는 날은 그만큼 늦춘다(09:54~10:10 — krHours, 46차)
 export const BURST = { from: 8 * 60 + 54, first: 9 * 60, last: 9 * 60 + 10, offsetSec: 10 };
 const KST_MS = 9 * 3600e3;
 
 // 다음에 받을 시각 { at } 또는 끝낼 이유 { stop } — prevQuotes: 지금의 quotes.json
 export function burstPlan(now, prevQuotes) {
   const k = new Date(now + KST_MS); // 한국시간을 UTC 칸에 담아 읽는다
-  const min = k.getUTCHours() * 60 + k.getUTCMinutes();
+  const min = k.getUTCHours() * 60 + k.getUTCMinutes(), late = krHours(now)[0] - 9 * 60; // 늦게 여는 날 늦출 분
   if (k.getUTCDay() === 0 || k.getUTCDay() === 6) return { stop: '주말' };
-  if (min < BURST.from || min > BURST.last) return { stop: '창 밖' };
+  if (min < BURST.from + late || min > BURST.last + late) return { stop: '창 밖' };
   const kr = (prevQuotes?.quotes || []).filter((q) => q && q.ok && q.market === 'KR');
   if (!kr.length) return { stop: '국내 시세 없음' };
   const today = k.toISOString().slice(0, 10);
   if (prevQuotes.closed?.KR === today || !kr.some((q) => q.marketStatus === 'PREOPEN' || q.marketStatus === 'OPEN')) return { stop: '휴장' };
   const midnight = now - ((now + KST_MS) % 86400e3); // 오늘 한국시간 0시
   const off = BURST.offsetSec * 1000;
-  const first = midnight + BURST.first * 60e3 + off, last = midnight + BURST.last * 60e3 + off;
+  const first = midnight + (BURST.first + late) * 60e3 + off, last = midnight + (BURST.last + late) * 60e3 + off;
   const at = Math.max(first, Math.ceil((now - off) / 60e3) * 60e3 + off);
   return at > last ? { stop: '창 끝' } : { at };
 }

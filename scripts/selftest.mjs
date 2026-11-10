@@ -2415,6 +2415,66 @@ await test('이유·뉴스(45차): 시세 페이지는 뉴스에서 뺌 · 제�
   assert.ok(titles('AAPL').length >= 3 && !titles('AAPL').some((t) => src.QUOTE_PAGE_RE.test(t)), '시세 페이지 뺌: ' + titles('AAPL').join(' / '));
   assert.ok(titles('005930').includes('삼성전자 5%·SK하이닉스 8% 급등…반도체주 반등') && titles('005930').includes('삼성전자, 평택 새 공장 착공'), '매체 꼭지 뗌: ' + titles('005930').join(' / '));
 });
+await test('늦게 여는 날(46차): 수능일 10:00~16:30·새해 첫 거래일 10시 개장 — 장 시간·휴장 확인·예상 지수·집중 갱신·정규장 종가(봇)와 지연 경고·개장 전·체결 전 안내·20초 확인(화면)이 그날 장 시간 기준 · 표는 봇·화면 같음', async () => {
+  const at = (s) => T(s + '+09:00');
+  // 봇 — 장 시간 표
+  assert.deepEqual(bud.krHours(at('2026-11-19T12:00:00')), [600, 990], '수능일');
+  assert.deepEqual(bud.krHours(at('2027-01-04T09:30:00')), [600, 930], '새해 첫 거래일');
+  assert.deepEqual(bud.krHours(at('2026-11-18T12:00:00')), [540, 930], '평일');
+  assert.equal(bud.isKrSession(at('2026-11-19T09:30:00')), false, '수능일 10시 전은 장 밖');
+  assert.equal(bud.isKrSession(at('2026-11-19T16:45:00')), true, '수능일은 16:30 마감 뒤 30분까지');
+  assert.equal(bud.isKrSession(at('2026-11-18T16:45:00')), false, '평일은 16시까지');
+  assert.equal(bud.closedCheckDay('KR', at('2026-11-19T09:30:00')), null, '수능일 10시 전엔 휴장 확인 안 함');
+  assert.equal(bud.closedCheckDay('KR', at('2026-11-19T10:10:00')), '2026-11-19');
+  assert.equal(bud.closedCheckDay('KR', at('2026-11-19T16:19:00')), '2026-11-19');
+  assert.equal(bud.closedCheckDay('KR', at('2026-11-19T16:20:00')), null);
+  // 예상 지수 — 개장 5분 전부터
+  const pre = { symbol: '^KS11', name: '코스피', price: 5000, change: -100, changePct: -1.96, marketStatus: 'PREOPEN' };
+  assert.equal(src.calmExpected([pre], at('2026-11-19T09:50:00'))[0].changePct, 0, '수능일 09:55 전은 되돌림');
+  assert.equal(src.calmExpected([pre], at('2026-11-19T09:55:00'))[0].changePct, -1.96, '09:55부터 예상');
+  assert.equal(src.calmExpected([pre], at('2026-11-18T09:50:00'))[0].changePct, -1.96, '평일은 08:55부터');
+  // 집중 갱신 — 10시 개장이면 09:54~10:10
+  const q = (s) => ({ quotes: [{ code: '005930', market: 'KR', ok: true, marketStatus: s }] });
+  assert.deepEqual(burst.burstPlan(at('2026-11-19T08:55:30'), q('PREOPEN')), { stop: '창 밖' }, '수능일 08:55 회차는 끝');
+  assert.deepEqual(burst.burstPlan(at('2026-11-19T09:55:30'), q('PREOPEN')), { at: at('2026-11-19T10:00:10') }, '09:55 회차가 10:00:10까지 기다림');
+  assert.deepEqual(burst.burstPlan(at('2026-11-19T10:10:05'), q('OPEN')), { at: at('2026-11-19T10:10:10') }, '끝 눈금');
+  assert.deepEqual(burst.burstPlan(at('2026-11-19T10:10:20'), q('OPEN')), { stop: '창 끝' });
+  // 정규장 종가 — 수능일 16:30 시세(시간외 단일가 17시 전)는 closeFix · 놓쳤으면 야후 일봉 종가(시각은 그날 마감 16:30)
+  const kr = (root) => read(root, 'quotes.json').quotes.find((x) => x.code === '005930');
+  const r1 = workspace();
+  await pipeline(r1, { idxStatus: 'CLOSE', krAt: at('2026-11-19T16:30:00') }, at('2026-11-19T16:35:00'));
+  assert.deepEqual([kr(r1).marketStatus, kr(r1).closeFix], ['CLOSE', 1], '수능일 16:30 값이 정규장 종가');
+  const r2 = workspace();
+  writeData(r2, 'quotes.json', { quotes: [{ market: 'KR', code: '005930', name: '삼성전자', ok: true, currency: 'KRW', price: 70800, prevClose: 67178, change: 3622, changePct: 5.39, volume: 1234567, marketStatus: 'CLOSE', asOf: '2026-11-19T17:55:00+09:00' }] });
+  writeData(r2, 'history.json', { '005930': { dates: [T('2026-11-18T00:00:00Z'), T('2026-11-19T00:00:00Z')], closes: [67000, 69000] } });
+  await pipeline(r2, { idxStatus: 'CLOSE', krAt: at('2026-11-19T18:00:00'), krExtra: { '005930': { closePrice: '71,000' } } }, at('2026-11-19T18:05:00'));
+  assert.deepEqual([kr(r2).price, kr(r2).asOf], [69000, '2026-11-19T16:30:00+09:00'], '야후 종가 · 그날 마감 시각');
+  // 화면
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const a = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const b = appJs.slice(appJs.indexOf('// ---------- 데이터 지연 경고'), appJs.indexOf('// ---------- 내 종목 한눈에'));
+  const f = vm.runInNewContext(a + b + '; ({ KRX_LATE, krHours, staleOf, pollSec, preOpenNote, pendingNote, boardNote })', { lastTimeOf: () => '' });
+  assert.deepEqual(JSON.parse(JSON.stringify(f.KRX_LATE)), bud.KRX_LATE, '표는 봇·화면 같음');
+  assert.deepEqual([...f.krHours(at('2026-11-19T12:00:00'))], [600, 990]);
+  const old = (s, min, ms) => [{ ok: true, marketStatus: s, asOf: new Date(ms - min * MIN).toISOString() }];
+  assert.equal(f.staleOf('KR', old('PREOPEN', 600, at('2026-11-19T10:15:00')), null, at('2026-11-19T10:15:00')), '', '수능일 10:30 전은 첫 수집 대기');
+  assert.equal(f.staleOf('KR', old('PREOPEN', 600, at('2026-11-19T10:30:00')), null, at('2026-11-19T10:30:00')), '개장 후 갱신 없음');
+  assert.equal(f.staleOf('KR', old('CLOSE', 600, at('2026-11-19T16:15:00')), null, at('2026-11-19T16:15:00')), '개장 후 갱신 없음', '수능일 16:30까지 정규장');
+  assert.equal(f.staleOf('KR', old('PREOPEN', 600, at('2026-11-18T09:45:00')), null, at('2026-11-18T09:45:00')), '개장 후 갱신 없음', '평일은 9:30부터');
+  assert.equal(f.pollSec(60, at('2026-11-19T08:59:00')), 60, '수능일 9시 전후는 평소대로');
+  assert.equal(f.pollSec(60, at('2026-11-19T09:59:00')), 20, '수능일 09:59부터 20초');
+  assert.equal(f.pollSec(60, at('2026-11-19T10:11:00')), 20);
+  assert.equal(f.pollSec(60, at('2026-11-19T10:12:00')), 60);
+  const preQ = [{ ok: true, market: 'KR', marketStatus: 'PREOPEN', changePct: 0 }];
+  assert.match(f.preOpenNote('KR', preQ, at('2026-11-19T09:40:00')), /^10시 개장 전.*10시 10분까지/);
+  assert.match(f.preOpenNote('KR', preQ, at('2026-11-18T08:40:00')), /^9시 개장 전.*9시 10분까지/);
+  assert.match(f.boardNote('KR', preQ, at('2026-11-19T09:40:00')), /^10시 개장 전/, '한눈에 안내도 그날 시각');
+  const pend = { ok: true, market: 'KR', marketStatus: 'OPEN', volume: null, changePct: 0 };
+  assert.match(f.pendingNote('KR', [pend], at('2026-11-19T10:10:00')), /^1종목/, '수능일 10시~10시 30분');
+  assert.equal(f.pendingNote('KR', [pend], at('2026-11-19T09:10:00')), '');
+  assert.equal(f.pendingNote('KR', [pend], at('2026-11-19T10:30:00')), '');
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');

@@ -752,10 +752,13 @@ function marketClock(timeZone, ms) {
   for (const x of f.formatToParts(new Date(ms))) p[x.type] = x.value;
   return { day: `${p.year}-${p.month}-${p.day}`, weekend: p.weekday === 'Sat' || p.weekday === 'Sun', min: +p.hour * 60 + +p.minute };
 }
-// 개장 직후(평일 08:59~09:12)엔 봇이 1분마다 국내 시세를 올린다(scripts/burst.mjs) — 그동안은 20초마다 확인해 올라온 값을 1분 안에 보이게.
+// 국내 정규장 시간이 평소(09:00~15:30)와 다른 날 — scripts/aibudget.mjs의 KRX_LATE와 같게(자체 테스트가 비교). 수능일 10:00~16:30 · 새해 첫 거래일 10시 개장(46차)
+const KRX_LATE = { '2026-11-19': [10 * 60, 16 * 60 + 30], '2027-01-04': [10 * 60, 15 * 60 + 30] };
+const krHours = (ms) => KRX_LATE[marketClock('Asia/Seoul', ms).day] || [9 * 60, 15 * 60 + 30];
+// 개장 직후(평일 08:59~09:12 — 10시에 여는 날은 09:59~10:12)엔 봇이 1분마다 국내 시세를 올린다(scripts/burst.mjs) — 그동안은 20초마다 확인해 올라온 값을 1분 안에 보이게.
 // 설정이 더 짧으면 그대로, '수동'(0)은 0 그대로(자동으로 받지 않음)
 const BURST_SEC = 20;
-const burstWindow = (ms) => { const c = marketClock('Asia/Seoul', ms); return !c.weekend && c.min >= 8 * 60 + 59 && c.min < 9 * 60 + 12; };
+const burstWindow = (ms) => { const c = marketClock('Asia/Seoul', ms), late = krHours(ms)[0] - 9 * 60; return !c.weekend && c.min >= 8 * 60 + 59 + late && c.min < 9 * 60 + 12 + late; };
 const pollSec = (sec, ms = Date.now()) => (burstWindow(ms) ? Math.min(sec, BURST_SEC) : sec);
 function fmtAge(ms) {
   const m = Math.floor(ms / 60e3);
@@ -769,13 +772,13 @@ function staleOf(market, valid, closed, ms = Date.now()) {
   if (valid.some((q) => q.marketStatus === 'OPEN')) return age > STALE_OPEN_MIN * 60e3 ? `${fmtAge(age)}째 갱신 없음` : '';
   const s = REG_SESSION[market];
   if (!s || age <= 30 * 60e3) return '';
-  const c = marketClock(s[0], ms);
-  const regular = !c.weekend && c.min >= s[1] + 30 && c.min < s[2];
+  const c = marketClock(s[0], ms), [open, close] = market === 'KR' ? krHours(ms) : [s[1], s[2]]; // 국내는 그날 장 시간(수능일 10:00~16:30)
+  const regular = !c.weekend && c.min >= open + 30 && c.min < close;
   return regular && closed?.[market] !== c.day ? '개장 후 갱신 없음' : '';
 }
 // 개장 전(국내 08:00~09:00 첫 체결 전) — 네이버 시세가 모두 '개장 전'·어제 종가(0%)라 칸이 모두 무채색이다. 비어 보이지 않게 까닭을 한 줄로
-const PREOPEN_NOTE = '9시 개장 전이라 모두 어제 종가(0%)예요 — 첫 체결 뒤 1분쯤 지나 바뀌고, 9시 10분까지는 1분마다 새로 받아요.';
-const preOpenNote = (key, valid) => (key === 'KR' && valid.length && valid.every((q) => q.marketStatus === 'PREOPEN') ? PREOPEN_NOTE : '');
+const preOpenText = (h) => `${h}시 개장 전이라 모두 어제 종가(0%)예요 — 첫 체결 뒤 1분쯤 지나 바뀌고, ${h}시 10분까지는 1분마다 새로 받아요.`; // 수능일처럼 늦게 여는 날은 10시(46차)
+const preOpenNote = (key, valid, ms = Date.now()) => (key === 'KR' && valid.length && valid.every((q) => q.marketStatus === 'PREOPEN') ? preOpenText(Math.floor(krHours(ms)[0] / 60)) : '');
 // 한국시간 'HH:MM' — 시각을 모르면 ''
 function hmKst(iso) {
   const t = Date.parse(iso);
@@ -791,16 +794,16 @@ function haltNote(key, valid) {
   const first = h.map((q) => q.haltAt).filter((s) => hmKst(s)).sort((a, b) => Date.parse(a) - Date.parse(b))[0];
   return `${mk ? `${mk} ` : ''}시장 전체 매매가 ${first ? `${hmKst(first)}부터 ` : ''}멈춰 있어요(서킷브레이커 같은 시장 조치) — ‘매매 정지’ 칸은 멈추기 직전 가격이에요.`;
 }
-// 첫 체결 전 — 칸 말풍선 · 평일 9시~9시 30분엔 '한눈에' 안내 한 줄(그 뒤로는 칸에만)
+// 첫 체결 전 — 칸 말풍선 · 평일 개장~30분(평소 9시~9시 30분, 수능일 10시~10시 30분)엔 '한눈에' 안내 한 줄(그 뒤로는 칸에만)
 const PENDING_TIP = '오늘 아직 체결이 없어요(어제 종가 그대로). 개장 직후엔 체결이 늦게 잡히기도 하고, 시가가 10% 넘게 벌어지면 거래소가 시가 결정을 2분 미뤄요(변동성 완화장치)';
 function pendingNote(key, valid, ms = Date.now()) {
   const n = key === 'KR' ? valid.filter(pendingOf).length : 0;
-  const c = marketClock('Asia/Seoul', ms);
-  return n && !c.weekend && c.min >= 9 * 60 && c.min < 9 * 60 + 30
+  const c = marketClock('Asia/Seoul', ms), open = krHours(ms)[0]; // 그날 개장 시각
+  return n && !c.weekend && c.min >= open && c.min < open + 30
     ? `${n}종목은 아직 첫 체결 전이에요 — 개장 직후엔 체결이 늦게 잡히기도 하고, 시가가 10% 넘게 벌어지면 거래소가 시가 결정을 2분 미뤄요(변동성 완화장치).` : '';
 }
 // '한눈에' 시장 안내 한 줄 — 개장 전 → 시장 전체 매매 정지 → 첫 체결 전 순으로 하나만
-const boardNote = (key, valid, ms) => preOpenNote(key, valid) || haltNote(key, valid) || pendingNote(key, valid, ms);
+const boardNote = (key, valid, ms) => preOpenNote(key, valid, ms) || haltNote(key, valid) || pendingNote(key, valid, ms);
 // 오늘 시장 조치(봇 기록 quotes.json measures) — 서킷브레이커(주황 cb)·매도 사이드카(파랑 sell)·매수 사이드카(빨강 buy), 시각순.
 // 사이드카는 시장 전체의 프로그램 주문만 멈추는 조치라(종목 거래는 계속) 칸이 아니라 이 줄에. 지금 그 시장 전체가 멈춰 있으면 그 서킷브레이커는 안내 줄이 대신
 const MK_KO = { KOSPI: '코스피', KOSDAQ: '코스닥' };
