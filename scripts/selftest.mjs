@@ -2234,6 +2234,26 @@ await test('방향 낱말(38차): 증발·반토막·들썩 · 낮춰·물린·�
   assert.equal(pick(['가나 관련주 들썩…규제 우려'], -3, ['가나']), null, '들썩 — 악재 낱말이 있어도 오름');
   assert.deepEqual(['시총 10조 증발', '관련주 들썩', '목표가 낮춰', '수혜 기대'].map((t) => src.tagSentiment(t).tone), ['neg', 'pos', 'neg', 'pos']);
 });
+await test('이유(39차): 채용(공채)·사내 행사 기사도 이유 후보에서 뺌 — 사업 기사(채용 플랫폼 진출 등)는 그대로 · 봇·화면 같음', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(block + '; ({ pickReasonNews })', {});
+  const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const it = (title) => ({ title, pubMs: T('2026-11-10T09:30:00+09:00'), sentiment: { tone: 'neutral' } });
+  const pick = (titles, pct) => {
+    const list = titles.map(it), a = src.pickReasonNews(list, pct, '20261110', kst, []), b = f.pickReasonNews(list, pct, '20261110', kst, []);
+    assert.equal(b ? b.title : null, a ? a.title : null, '봇·화면 같은 선택: ' + titles.join(' / '));
+    return a ? a.title : null;
+  };
+  // 실제 11/10 뉴스 목록 제목
+  for (const t of ['안랩, 하반기 공채…전 직군 두 자릿수 모집', '안랩·클라우드메이트 하반기 공채…29일까지 접수', "HD현대중공업, '난타' 공연 관람...내·외국인 근로자 화합 목적",
+    'K리그-HD현대일렉트릭, 베트남 껀터서 축구 교실', '한화오션 현직자가 알려주는 실속 직업훈련 ‘주목’', '가나, 신입사원 채용 공고', '가나 인턴 모집']) {
+    assert.equal(pick([t, '가나 업황 점검'], 3), '가나 업황 점검', '이유 아님: ' + t);
+    assert.equal(pick([t], 3), null, '그것뿐이어도 이유 아님: ' + t);
+  }
+  for (const t of ['가나, AI 채용 플랫폼 사업 진출', '가나 신공장 착공']) assert.equal(pick([t], 3), t, '사업 기사는 그대로: ' + t);
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
