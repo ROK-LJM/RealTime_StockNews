@@ -2598,6 +2598,31 @@ await test('달력(51차): 시작과 끝이 같은 날인 기간 일정은 한 �
     ['005930', '20261121', '자사주 매입 끝', '2026.08.24 ~ 2026.11.21'],
   ]);
 });
+await test('이유(52차): 기간 요약 자동 기사·가운데 물음 낚시·"\'이 주식\'"·"…전망 및 대응전략"은 맨 뒤 · 인버스 상품·관람 행사·수상 홍보는 이유 아님 · 봇·화면 같음', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(block + '; ({ pickReasonNews })', {});
+  const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const it = (title) => ({ title, pubMs: T('2026-11-08T10:00:00+09:00'), sentiment: src.tagSentiment(title) });
+  const pick = (titles, pct, names) => {
+    const list = titles.map(it), a = src.pickReasonNews(list, pct, '20261108', kst, names), b = f.pickReasonNews(list, pct, '20261108', kst, names);
+    assert.equal(b ? b.title : null, a ? a.title : null, '봇·화면 같은 선택: ' + titles.join(' / '));
+    return a ? a.title : null;
+  };
+  // 실제 11/03~11/10 제목 — 맨 뒤
+  for (const [t, name, pct] of [['11월 1주차 심텍 주가 12만원대서 9만원대로 하락 마감', '심텍', -7.33], ['최근 5거래일 LS ELECTRIC 주가 하락세 뚜렷', 'LS ELECTRIC', -10.25],
+    ['한화오션 주가 5거래일 연속 하락세 47650원 종가 형성', '한화오션', -3.86], ['삼성전기 주가, 11월 첫째주 89만원대 마감 5거래일 하락', '삼성전기', -7.84],
+    ["삼성전자도 현대차도 아니다…하락장 속 개미들 돈 뭉친 '이 주식'", '현대차', -2.86], ['코어위브 11월 10일 실적발표 : SK하이닉스 주가 추가 하락할까? 아니면 반등할까? (feat. Soxl 투자)', 'SK하이닉스', -10.44],
+    ['삼성전기(009150)저점을 줄때마다 물량 모아둘 기회로 보이며 이후 전망 및 대응전략.', '삼성전기', 5.22]])
+    assert.equal(pick([t, name + ' 업황 점검'], pct, [name]), name + ' 업황 점검', '맨 뒤: ' + t);
+  // 이유 아님
+  for (const [t, name, pct] of [["반도체 급락에... 'SOL SK하이닉스 인버스2X' 지난주 수익률 45.4% 1위", 'SK하이닉스', -10.44], ['HD현대중공업 근로자 난타 관람…1800여명 초청', 'HD현대중공업', -3.14],
+    ['우태희 효성중공업 대표 글로벌품질경영인대상 수상', '효성중공업', -11.95]])
+    assert.equal(pick([t], pct, [name]), null, '이유 아님: ' + t);
+  assert.equal(pick(['가나, 수상한 자금 흐름 포착'], -3, ['가나']), '가나, 수상한 자금 흐름 포착', "'수상한'은 수상 홍보 아님");
+  assert.equal(pick(['외국인, 이번주 삼전닉스 7.6조원어치 매도…보유율 수년만 최저치'], -10.44, ['SK하이닉스', '삼전닉스']), '외국인, 이번주 삼전닉스 7.6조원어치 매도…보유율 수년만 최저치', '보통 기사는 그대로');
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
