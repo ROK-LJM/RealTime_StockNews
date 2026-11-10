@@ -476,7 +476,9 @@ function onlyAffiliate(raw, item) {
   for (const n of names) {
     for (let i = raw.indexOf(n); i >= 0; i = raw.indexOf(n, i + 1)) {
       found = true;
-      if (!AFFILIATE_SUFFIX.test(raw.slice(i + n.length))) return false; // 제대로 된 언급이 하나라도 있으면 관련 기사
+      // 제목 끝 '-현대차'는 증권사 리포트 출처 표기(현대차증권 — '고려아연, …목표가 129만원으로 하향-현대차')라 그 회사 언급이 아니다(50차)
+      const attr = /[-–]\s?$/.test(raw.slice(0, i)) && raw.slice(i + n.length).trim() === '';
+      if (!attr && !AFFILIATE_SUFFIX.test(raw.slice(i + n.length))) return false; // 제대로 된 언급이 하나라도 있으면 관련 기사
     }
   }
   return found; // 찾은 이름이 모두 다른 회사 이름의 앞부분(이름을 못 찾았으면 아래 일반 판정 그대로)
@@ -560,7 +562,7 @@ const REPORT_RE = /^\[리포트\s?브리핑\]|목표가\s*[\d,]+\s*원/;
 // 종목 추천·리포트·전망 칼럼 꼭지('… [오늘, 이 종목]'·'[버핏 리포트] …'·'… [주식 초고수는 지금]'·'[○○ 주가전망] …')도 앞이든 끝이든 같은 등급
 // — 사실을 전하는 꼭지('[핫종목]'·'[종목NOW]'·'[특징주]')는 그대로
 // 외국인·기관 매매만 전하는 자동 기사('[장중수급포착] … 외국인/기관 동시 순매수… 주가 +6.00%'·'[거래소 외국인] …'·'[공매도 브리핑] …')·매경 자동 신호('[MK시그널] …')·영어 'Stock Price Forecast'·'Is a Trending Stock'도 같은 등급(45차)
-const SPEC_RE = /지지선|저항선|과매도|과매수|\bRSI\b|기술적\s*분석|횡보|무슨\s?일|주가\s?전망|봤더니|[‘'"]이것[’'"]|(?:있을까|될까|갈까|할까)\s*\??\s*(?:$|…|\.\.\.)|\?\s*$|^\[[^\]]*[①-⑳][^\]]*\]|\[[^\]]*(?:이\s?종목|[eE]종목|추천|전망|리포트|고수|탐구|풍향계|돋보기|줌인)[^\]]*\]|\b[Ss]tock\s+[Ff]orecasts?\b|\b[Pp]rice\s+[Pp]redictions?\b|\b[Pp]rice\s+[Ff]orecasts?\b|\b[Tt]rending\s+[Ss]tock\b|\[(?:장중)?수급포착\]|\[MK시그널\]|\[공매도[^\]]*\]|^\[(?:거래소|유가증권|코스피|코스닥)\s?(?:외국인|기관|개인)[^\]]*\]/;
+const SPEC_RE = /지지선|저항선|과매도|과매수|\bRSI\b|기술적\s*분석|횡보|무슨\s?일|주가\s?전망|봤더니|[‘'"]이것[’'"]|(?:있을까|될까|갈까|할까)\s*\??\s*(?:$|…|\.\.\.)|\?\s*$|^\[[^\]]*[①-⑳][^\]]*\]|\[[^\]]*(?:이\s?종목|[eE]종목|추천|전망|리포트|고수|탐구|풍향계|돋보기|줌인)[^\]]*\]|\b[Ss]tock\s+[Ff]orecasts?\b|\b[Pp]rice\s+[Pp]redictions?\b|\b[Pp]rice\s+[Ff]orecasts?\b|\b[Tt]rending\s+[Ss]tock\b|\[(?:장중)?수급포착\]|\[MK시그널\]|\[공매도[^\]]*\]|^\[(?:거래소|유가증권|코스피|코스닥)\s?(?:외국인|기관|개인)[^\]]*\]|\[산업\s?오늘\]/;
 const weakTitle = (t) => { const c = coreTitle(t); return roundupTitle(c) || REPORT_RE.test(c) || SPEC_RE.test(c); };
 // '소식에도'·'불구'처럼 거스르는 말이 있으면 호재·악재 낱말로 방향을 짐작하지 않는다
 const CONTRA_RE = /에도[\s,.…'"‘’“”]|에도$|불구|무색/;

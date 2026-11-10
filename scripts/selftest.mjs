@@ -2563,6 +2563,27 @@ await test('이유(49차): 국내 자동 시세 기사(자동 [특징주] "장�
   const a = src.pickReasonNews(list, 7.38, '20261110', kst, ['두산에너빌리티']), b = f.pickReasonNews(list, 7.38, '20261110', kst, ['두산에너빌리티']);
   assert.equal(a && a.title, list[1].title); assert.equal(b && b.title, list[1].title, '화면');
 });
+await test('관련도(50차): 제목 끝 "-현대차"(증권사 리포트 출처 표기)로만 이름이 나오면 그 종목 뉴스가 아님 · 제목 안에 제대로 된 언급이 있으면 관련', () => {
+  const hy = { code: '005380', market: 'KR', name: '현대차' };
+  for (const t of ['고려아연, 금속값·환율 부담에 목표가 129만원으로 하향-현대차', '한전KPS, 원전 정비 장기화에 실적 부진…목표가 22%↓-현대차', '카카오게임즈, 오딘Q 일평균 매출 15억 전망…목표가 23%↑- 현대차'])
+    assert.equal(src.isRelevantNews(t, hy), false, '출처 표기: ' + t);
+  for (const t of ['현대차, 美 관세 15% 유지에 강세-현대차', '현대차 3분기 실적 호조…목표가 상향-키움', '현대차·기아 동반 강세', '기아-현대차 공동 개발 착수'])
+    assert.equal(src.isRelevantNews(t, hy), true, '관련 기사: ' + t);
+});
+await test('공시 방향·이유(50차): 전환청구권·신주인수권·교환청구권 행사는 희석이라 내림 쪽(오른 날 이유 아님 — 11/10 심텍) · [산업오늘] 소식 모음은 맨 뒤 · 봇·화면 같음', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(block + '; ({ pickReasonNews, discDir })', {});
+  for (const [t, d] of [['전환청구권행사', -1], ['신주인수권행사', -1], ['교환청구권 행사', -1], ['주식소각결정', 1], ['영업(잠정)실적(공정공시)', 0]]) {
+    assert.equal(dartm.discDir(t), d, '봇: ' + t); assert.equal(f.discDir(t), d, '화면: ' + t);
+  }
+  const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const it = (title) => ({ title, pubMs: T('2026-11-10T10:30:00+09:00'), sentiment: { tone: 'pos' } });
+  const list = [it('김동선, 한화M&S 주식 338만주 추가 공개매수…한화오션·ABB, 부유식 데이터센터 기술 협력 [산업오늘]'), it('한화오션 업황 점검')];
+  const a = src.pickReasonNews(list, 3.4, '20261110', kst, ['한화오션']), b = f.pickReasonNews(list, 3.4, '20261110', kst, ['한화오션']);
+  assert.equal(a && a.title, '한화오션 업황 점검'); assert.equal(b && b.title, '한화오션 업황 점검', '화면');
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
