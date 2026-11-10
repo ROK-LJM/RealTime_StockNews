@@ -2293,6 +2293,24 @@ await test('이유·뉴스(41차): 시세 안내 "…원 10,000원 6.22% 상승"
   assert.equal(pick(["[특징주] 삼성전자·SK하이닉스, 美 기술주 급반등.. 동반 '강세'", '삼성전자 신공장 착공'], 5, ['삼성전자']), "[특징주] 삼성전자·SK하이닉스, 美 기술주 급반등.. 동반 '강세'", '두 종목은 나열 아님');
   assert.equal(pick(['재능대·유진로봇, 로봇·AI 실무인재 양성 산학협력 협약'], 7, ['유진로봇']), null, '산학협력·인재 양성은 이유 아님');
 });
+await test('이유(42차): "미미" 평가는 악재 · "‘이것’을 봐라" 낚시 해설·[CEO 탐구생활]·[증시 풍향계] 기획 꼭지는 맨 뒤 · 봇·화면 같음', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(block + '; ({ pickReasonNews })', {});
+  const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const it = (title) => ({ title, pubMs: T('2026-11-10T09:30:00+09:00'), sentiment: src.tagSentiment(title) });
+  const pick = (titles, pct, names = []) => {
+    const list = titles.map(it), a = src.pickReasonNews(list, pct, '20261110', kst, names), b = f.pickReasonNews(list, pct, '20261110', kst, names);
+    assert.equal(b ? b.title : null, a ? a.title : null, '봇·화면 같은 선택: ' + titles.join(' / '));
+    return a ? a.title : null;
+  };
+  // 실제 11/10 제목
+  assert.equal(src.tagSentiment("한화오션 미국 해군 중형상륙함 수주는 '미미' 평가").tone, 'neutral', '수주(호재)와 미미(악재)가 맞섬');
+  for (const t of ['삼전닉스 올해 200조 주주환원에…“주가, 자사주 매입 아닌 ‘이것’을 봐라”', '곽동신 한미반도체 회장, HBM 장비 혁신 주도⋯3년 연속 매출 신기록 가시권 [CEO 탐구생활]', '[N2 증시 풍향계] 가나 ‘강세’'])
+    assert.equal(pick([t, '가나 업황 점검'], 6, ['가나']), '가나 업황 점검', '맨 뒤: ' + t);
+  assert.equal(pick(['[특징주] 가나 신공장 착공에 강세', '가나 업황 점검'], 6, ['가나']), '[특징주] 가나 신공장 착공에 강세', '사실을 전하는 꼭지는 그대로');
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
