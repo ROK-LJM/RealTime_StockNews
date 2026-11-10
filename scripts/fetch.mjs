@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis,
+  getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis, calmExpected,
   getSidecarNews, sidecarEvents, mergeMeasures,
   aiStatus, aiGate, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, pickReasonNews, strongNews, tagSentiment, krBaseName,
 } from './sources.mjs';
@@ -120,6 +120,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
     const market = await getMarket();
     marketNow = market;
     if (market?.indices?.length) {
+      market.indices = calmExpected(market.indices, now); // 동시호가 시작 직후(08:55 전) 예상 지수는 어제 종가·0%로
       try {
         const briefs = [];
         for (const [naverSym, ySym, nm] of [['KOSPI', '^KS11', '코스피'], ['KOSDAQ', '^KQ11', '코스닥']]) {
@@ -128,7 +129,9 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
           const prevReason = prevBriefs.find((b) => b.key === naverSym)?.reason || null;
           // 장 시간이어도 시세가 '마감'이면(휴장일) 장 밖으로 본다 — 등락이 그대로인데 뉴스만 바뀐 재판단 방지
           const open = isKrSession(now) && idx?.marketStatus !== 'CLOSE';
-          const [flow, reason] = await Promise.all([getIndexFlow(naverSym), getIndexReason(nm, changePct, prevReason, now, open)]);
+          // 개장 전(동시호가)엔 아직 오늘 움직임이 없다 — 예상 지수로 '급락 이유'를 찾거나 AI를 부르지 않고 지난 장 판단을 그대로 둔다(화면 '지난 장 핵심')
+          const pre = idx?.marketStatus === 'PREOPEN' && prevReason;
+          const [flow, reason] = await Promise.all([getIndexFlow(naverSym), pre ? prevReason : getIndexReason(nm, changePct, prevReason, now, open)]);
           briefs.push({ key: naverSym, name: nm, changePct, price: idx?.price ?? null, flow, reason });
         }
         market.briefs = briefs;

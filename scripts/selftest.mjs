@@ -2094,6 +2094,53 @@ await test('국내 정규장 뒤(34차): 지수가 마감이면 상태 마감 ·
   assert.deepEqual([g.extOf({ ok: true, market: 'US', marketStatus: 'CLOSE', ext }).label, g.extOf({ ok: true, market: 'US', marketStatus: 'CLOSE', ext: { ...ext, session: 'pre' } }).short], ['애프터마켓', '프리']);
   assert.equal(g.extOf({ ok: true, market: 'KR', marketStatus: 'OPEN', ext }), null, '장중엔 안 보임');
 });
+await test('개장 전 예상 지수(35차): 08:55 전 값은 어제 종가·0%로 · 08:55부터 예상 · 분위기엔 안 넣음 · 지수 핵심 이유는 지난 장 판단 그대로(AI 안 부름) · 화면 지난 장 핵심', async () => {
+  // 순수 함수 — 08:50 동시호가 시작 직후
+  const at = (hm) => T('2026-11-09T' + hm + ':00+09:00');
+  const pre = { name: '코스피', symbol: '^KS11', currency: 'KRW', price: 3968.4, change: -1110.4, changePct: -21.86, marketStatus: 'PREOPEN' };
+  const us = { name: '나스닥', symbol: '^IXIC', currency: 'USD', price: 100, change: 1, changePct: 1.09, marketStatus: 'CLOSE' };
+  assert.deepEqual(src.calmExpected([pre, us], at('08:50')), [{ ...pre, price: 5078.8, change: 0, changePct: 0 }, us], '08:55 전 → 어제 종가·0%(미국은 그대로)');
+  assert.deepEqual(src.calmExpected([pre, us], at('08:55')), [pre, us], '08:55부터는 예상 그대로');
+  assert.deepEqual(src.calmExpected([{ ...pre, marketStatus: 'OPEN' }], at('08:50')), [{ ...pre, marketStatus: 'OPEN' }], '장중 값은 안 건드림');
+  // 분위기 — 개장 전 예상 지수는 0%로(실제 11/09 08:50: 43 → 13)
+  const m0 = src.computeMood([{ ...pre, changePct: 0 }, us], 25.6);
+  assert.deepEqual(src.computeMood([pre, us], 25.6), m0, '예상 지수는 분위기에 안 들어감');
+  assert.ok(m0.summary.startsWith('나스닥 강세(1.09%)'), m0.summary);
+  assert.notDeepEqual(src.computeMood([{ ...pre, marketStatus: 'OPEN' }, us], 25.6), m0, '장중이면 들어감');
+  // 지수 핵심 이유 — 개장 전엔 지난 장 판단 그대로, AI·뉴스 안 부름
+  const prevReason = { dir: 'down', query: '코스피 급락 이유', headlines: [{ title: '지난 장 기사' }], ai: { summary: '지난 장 AI 판단', items: [{ title: 't', why: 'w' }], model: 'm' }, aiAt: NOW_KR - 900 * MIN, aiSig: '-2|x' };
+  const seed = { indices: [], briefs: [{ key: 'KOSPI', name: '코스피', changePct: -2, reason: prevReason }, { key: 'KOSDAQ', name: '코스닥', changePct: -2, reason: prevReason }] };
+  const r1 = workspace();
+  writeData(r1, 'market.json', seed);
+  await pipeline(r1, { idxStatus: 'PREOPEN', idxPct: -21.86, krStatus: 'PREOPEN', krPct: { '005930': 0, '000660': 0 }, krAt: at('08:50') }, at('08:50'));
+  const m1 = read(r1, 'market.json');
+  assert.deepEqual(m1.briefs[0].reason, prevReason, '지난 장 판단 그대로');
+  assert.equal(briefCalls(), 0, '예상 지수로 AI 안 부름');
+  assert.equal(NET.calls.filter((u) => /news\.google\.com/.test(decodeURIComponent(u)) && /급락 이유|급등 이유|증시 마감/.test(decodeURIComponent(u))).length, 0, '지수 이유 뉴스도 안 받음');
+  assert.deepEqual([m1.indices.find((i) => i.symbol === '^KS11').changePct, m1.briefs[0].changePct], [0, 0], '08:55 전 예상 지수는 0%');
+  const r2 = workspace();
+  writeData(r2, 'market.json', seed);
+  await pipeline(r2, { idxStatus: 'PREOPEN', idxPct: -8.21, krStatus: 'PREOPEN', krPct: { '005930': 0, '000660': 0 }, krAt: at('08:55') }, at('08:55'));
+  const m2 = read(r2, 'market.json');
+  assert.deepEqual([m2.indices.find((i) => i.symbol === '^KS11').changePct, m2.briefs[0].changePct, m2.briefs[0].reason.ai.summary], [-8.21, -8.21, '지난 장 AI 판단'], '08:55부터 예상 표시 · 이유는 그대로');
+  // 장이 열리면 그 등락으로 다시 찾는다(방향이 바뀌면 지난 판단 버림)
+  const r3 = workspace();
+  writeData(r3, 'market.json', seed);
+  await pipeline(r3, { idxStatus: 'OPEN', idxPct: 1.5, krAt: at('09:05') }, at('09:05'));
+  assert.deepEqual([read(r3, 'market.json').briefs[0].reason.dir, read(r3, 'market.json').briefs[0].reason.query], ['up', '코스피 급등 이유']);
+  // 화면 머리
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(block + '; ({ briefLook })', {});
+  const look = (p, st, c = p) => JSON.parse(JSON.stringify(f.briefLook(p, st ? { marketStatus: st, changePct: c } : undefined)));
+  assert.deepEqual(look(-8.21, 'PREOPEN'), { est: true, dirCls: 'flat', cardCls: '', arrow: '▼', label: '지난 장 핵심' }, '예상 지수');
+  assert.deepEqual(look(0, 'PREOPEN'), { est: false, dirCls: 'flat', cardCls: '', arrow: '–', label: '지난 장 핵심' }, '개장 전 0%');
+  assert.deepEqual(look(-2, 'OPEN'), { est: false, dirCls: 'down', cardCls: 'brief-down', arrow: '▼', label: '급락 핵심 이유' });
+  assert.deepEqual(look(2, 'CLOSE'), { est: false, dirCls: 'up', cardCls: 'brief-up', arrow: '▲', label: '급등 핵심 이유' });
+  assert.deepEqual(look(0.4, 'OPEN'), { est: false, dirCls: 'up', cardCls: 'brief-up', arrow: '▲', label: '오늘의 핵심' });
+  assert.deepEqual(look(0, null), { est: false, dirCls: 'flat', cardCls: '', arrow: '–', label: '오늘의 핵심' });
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');

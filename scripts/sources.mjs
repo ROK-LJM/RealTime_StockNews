@@ -231,8 +231,18 @@ export async function getMarket() {
 }
 
 // 시장 분위기(공포·탐욕) — 개장 직후 집중 갱신(burst.mjs)도 같은 식으로 다시 계산한다
-export function computeMood(indices, vix) {
+// 개장 전 예상 지수 — 동시호가가 막 시작된 08:55 전 값은 주문이 적어 크게 튄다(실측 08:50 코스피 → 실제 시가: 11/05 -3.6 → -1.7 · 11/06 -12.6 → -8.8 · 11/09 -21.9 → -0.9 · 11/10 +0.4 → +4.8).
+// 그 값은 어제 종가·0%로 되돌린다(화면은 그대로 '개장 전') — 08:55부터는 '예상'으로 보여 준다
+export function calmExpected(indices, now = Date.now()) {
+  const k = new Date(now + 9 * 3600e3);
+  if (k.getUTCHours() * 60 + k.getUTCMinutes() >= 8 * 60 + 55) return indices;
+  return (indices || []).map((i) => (i && i.marketStatus === 'PREOPEN' && i.changePct && Number.isFinite(i.price) && Number.isFinite(i.change)
+    ? { ...i, price: Math.round((i.price - i.change) * 100) / 100, change: 0, changePct: 0 } : i));
+}
+export function computeMood(indices0, vix) {
   let score = 50;
+  // 개장 전 예상 지수는 분위기에 넣지 않는다(08:50 코스피 -21.86%에 점수가 43 → 13으로 떨어졌다 9시에 40으로) — 어제 종가와 같은 0%로 본다
+  const indices = indices0.map((i) => (i && i.marketStatus === 'PREOPEN' ? { ...i, changePct: 0 } : i));
   const pcts = indices.map((i) => i.changePct).filter((x) => Number.isFinite(x));
   if (pcts.length) { const avg = pcts.reduce((a, b) => a + b, 0) / pcts.length; score += clamp(avg, -4, 4) * 7; }
   if (Number.isFinite(vix)) score += clamp(18 - vix, -15, 12) * 1.2;

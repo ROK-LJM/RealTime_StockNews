@@ -346,11 +346,8 @@ function renderBriefs(briefs) {
   if (!el) return;
   if (!briefs || !briefs.length) { el.innerHTML = ''; return; }
   el.innerHTML = briefs.map((b) => {
-    const pct = b.changePct ?? 0, est = expIdx((state.market?.indices || []).find((i) => i && i.currency === 'KRW' && i.name === b.name));
-    const dirCls = pct < 0 ? 'down' : pct > 0 ? 'up' : 'flat';
-    const cardCls = pct < 0 ? 'brief-down' : pct > 0 ? 'brief-up' : '';
-    const arrow = pct > 0 ? '▲' : pct < 0 ? '▼' : '–';
-    const label = pct <= -1 ? '급락 핵심 이유' : pct >= 1 ? '급등 핵심 이유' : '오늘의 핵심';
+    const pct = b.changePct ?? 0;
+    const { est, dirCls, cardCls, arrow, label } = briefLook(pct, (state.market?.indices || []).find((i) => i && i.currency === 'KRW' && i.name === b.name));
     const ai = b.reason && b.reason.ai;
     let reasonBlock;
     if (ai && ai.items && ai.items.length) {
@@ -540,7 +537,14 @@ function avgPct(list) {
 // 예상 지수 — 개장 직전(국내 8시 40~50분쯤부터)과 9시 몇 초 동안 네이버 지수는 '개장 전'인 채로 동시호가 주문으로 계산한 예상값을 준다.
 // 실제 지수처럼 보이지 않게 '예상'을 붙이고 종목과 비교(시장 대비)하지 않는다. 0%(어제 종가 그대로)는 예상값이 아님
 const expIdx = (i) => !!(i && i.marketStatus === 'PREOPEN' && Number.isFinite(i.changePct) && i.changePct !== 0);
-const EST_TIP = '9시 개장 전 동시호가 주문으로 계산한 예상 지수 — 실제 시가와 다를 수 있어요';
+const EST_TIP = '9시 개장 전 동시호가 주문으로 계산한 예상 지수 — 개장이 가까울수록 맞고 실제 시가와 다를 수 있어요';
+// 지수 핵심 이유 머리 — 개장 전엔 이유가 지난 장 판단이라 '지난 장 핵심'·색 없음. 예상 지수면 '예상'을 붙인다
+function briefLook(pct, idx) {
+  const pre = !!(idx && idx.marketStatus === 'PREOPEN');
+  const dirCls = pre || !pct ? 'flat' : pct < 0 ? 'down' : 'up';
+  return { est: expIdx(idx), dirCls, cardCls: dirCls === 'flat' ? '' : `brief-${dirCls}`, arrow: pct > 0 ? '▲' : pct < 0 ? '▼' : '–',
+    label: pre ? '지난 장 핵심' : pct <= -1 ? '급락 핵심 이유' : pct >= 1 ? '급등 핵심 이유' : '오늘의 핵심' };
+}
 // 같은 시장 지수(market.json의 기호) — '한눈에' 시장 머리에 내 종목 평균과 나란히(예상 지수면 exp)
 const BENCH = { KR: [['^KS11', '코스피'], ['^KQ11', '코스닥']], US: [['^GSPC', 'S&P 500'], ['^IXIC', '나스닥']] };
 function benchOf(key, indices) {
