@@ -1,1 +1,1 @@
-{"ai":{"state":"ok","model":"gemini-3.1-flash-lite","used":0,"cap":60},"budget":{"day":"2026-11-10","used":{},"out":{}},"dart":"ok"}
+{"ai":{"state":"wait","model":"gemini-3.1-flash-lite","used":0,"cap":60,"next":1794322680000},"budget":{"day":"2026-11-10","used":{},"out":{}},"dart":"ok"}
