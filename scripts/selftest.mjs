@@ -2267,6 +2267,32 @@ await test('AI 종합분석 순서(40차): 시장과 비슷하게 움직인 종�
   await pipeline(r2, { idxPct: 5.5, krPct: { '005930': 6, '000660': 3 }, krAt: NOW_KR });
   assert.deepEqual(geminiNames().slice(0, 2), ['삼성전자', 'SK하이닉스'], '시장을 모르면 등락 순');
 });
+await test('이유·뉴스(41차): 시세 안내 "…원 10,000원 6.22% 상승" · 유튜브 낚시 제목은 스팸 · "주가 전망."·"…봤더니"는 맨 뒤 · "·"로 4종목 넘게 나열은 나열 기사 · 산학협력·인재 양성은 이유 아님 · 봇·화면 같음', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(block + '; ({ pickReasonNews, priceOnly })', {});
+  const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const it = (title) => ({ title, pubMs: T('2026-11-10T09:30:00+09:00'), sentiment: { tone: 'neutral' } });
+  const pick = (titles, pct, names = []) => {
+    const list = titles.map(it), a = src.pickReasonNews(list, pct, '20261110', kst, names), b = f.pickReasonNews(list, pct, '20261110', kst, names);
+    assert.equal(b ? b.title : null, a ? a.title : null, '봇·화면 같은 선택: ' + titles.join(' / '));
+    return a ? a.title : null;
+  };
+  // 실제 11/10 '왜 움직였나'에 붙었던 제목
+  const price = '한미반도체 주가, 11월 10일 장중 170,700원 10,000원 6.22% 상승';
+  assert.equal(src.priceOnly(price), true); assert.equal(f.priceOnly(price), true);
+  assert.equal(src.priceOnly('한미반도체 주가, 11월 10일 장중 170,700원 6.22% 상승'), true, '예전 꼴도 그대로');
+  const yt = 'SK텔레콤 주가 전망. 오늘 심상치 않았죠? 가장 중요한 시기입니다. 반드시 체크해보세요. #k인베스터랩 #sk텔레콤 #sk텔레콤주가전망';
+  for (const t of [yt, '[SK텔레콤 주가전망] *오후 속보* 이 영상 주가 예측 모든걸 담았습니다, 틀리면 채널 지웁니다', '[LG에너지솔루션 주가전망] *새벽 속보* 와..이번주 실적발표'])
+    assert.equal(src.SPAM_RE.test(t), true, '유튜브 낚시: ' + t);
+  for (const t of ['SK텔레콤, 구독 서비스 출시', '삼성전자 #갤럭시 신제품 공개', '[속보] 두산에너빌리티 주가 장초반 9%대 껑충']) assert.equal(src.SPAM_RE.test(t), false, '보통 기사: ' + t);
+  assert.equal(pick(['SK텔레콤 주가 전망, 반등 이어질까', 'SK텔레콤 업황 점검'], 3), 'SK텔레콤 업황 점검', '주가 전망 글은 맨 뒤');
+  assert.equal(pick(['"주당 2,500원 나옵니다.." 현대차 11월 배당, 60대 100주 계산해봤더니', '현대차 업황 점검'], 2, ['현대차']), '현대차 업황 점검', '…봤더니 해설은 맨 뒤');
+  assert.equal(pick(['[N2 증시 풍향계] 삼성전자·SK하이닉스·한진칼·대한항공·NHN ‘강세’', 'SK하이닉스 신공장 착공'], 6, ['SK하이닉스']), 'SK하이닉스 신공장 착공', '나열 기사는 맨 뒤');
+  assert.equal(pick(["[특징주] 삼성전자·SK하이닉스, 美 기술주 급반등.. 동반 '강세'", '삼성전자 신공장 착공'], 5, ['삼성전자']), "[특징주] 삼성전자·SK하이닉스, 美 기술주 급반등.. 동반 '강세'", '두 종목은 나열 아님');
+  assert.equal(pick(['재능대·유진로봇, 로봇·AI 실무인재 양성 산학협력 협약'], 7, ['유진로봇']), null, '산학협력·인재 양성은 이유 아님');
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
