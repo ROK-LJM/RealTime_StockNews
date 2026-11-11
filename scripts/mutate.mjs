@@ -293,7 +293,7 @@ const MUTANTS = [
   ["[시장 흐름] 덜 움직였는데 시장 따라 표시", A, "const tag = vs && vs.follows ?", "const tag = vs && (vs.follows || vs.within) ?"],
   ["[시장 흐름] 이유 칸 지난 기사 날짜 없음", A, "${w.day ? `<span class=\"muted\">${esc(w.day)}</span> ` : ''}${esc(w.text)}", "${esc(w.text)}"],
   ["[사회공헌] 화면 안 뺌", A, " && !CSR_RE.test(it.title)", ""],
-  ["[사회공헌] 봇 안 뺌", S, " && !CSR_RE.test(it.title)", ""],
+  ["[사회공헌] 봇 안 뺌", S, " && !LISTING_RE.test(it.title) && !CSR_RE.test(it.title)", " && !LISTING_RE.test(it.title)"],
   ["[영어] 내림 활용형 없음", S, "'slide', 'slides', 'slid', 'sliding', 'slip', 'slips', 'slipped',", ""],
   ["[영어] 오름 활용형 없음", S, "'surges', 'surged', 'jumps', 'jumped', 'soars', 'soared',", ""],
   // ---------- 32차 — 급등락 기록의 시장 흐름 이유 · 시세 안내 '…상승 기록' · 영어 전망 글 ----------
@@ -509,6 +509,8 @@ const MUTANTS = [
   // ---------- 55차 — 2% 아래 그날 진단 유지 ----------
   ["[AI 유지] 2% 아래 그날 진단 버림", F, "if (q && q.ok && freshOf(it, q)) { analysis[it.code] = prev[it.code]; kept++; }", ""],
   ["[AI 유지] AI 끈 종목도 남김", F, "if (analysis[it.code] || it.ai === false) continue;", "if (analysis[it.code]) continue;"],
+  // ---------- 56차 — AI 입력 원인 아닌 기사 ----------
+  ["[AI 입력] 원인 아닌 기사도 넘김", S, ".filter((it) => it && it.title && !CSR_RE.test(it.title)).slice(0, 6)", ".slice(0, 6)"],
   ["[공시 방향] 화면 반대 공시도", A, " && !(dir && discDir(x.title) === -dir)", ""],
   ["[공시 방향] 화면 방향 안 넘김", A, "keyDiscToday(q.code, Math.sign(q.changePct || 0))", "keyDiscToday(q.code)"],
   ["[공시 방향] 봇 반대 공시도", F, " && discDir(x.title) !== -Math.sign(q.changePct)", ""],

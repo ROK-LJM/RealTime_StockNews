@@ -2674,6 +2674,16 @@ await test('AI 진단 유지(55차): 그날 진단은 등락이 잠깐 ±2% 아�
   await pipeline(r4, { krPct: { '005930': 4.2, '000660': 1.5 }, krAt: NOW_KR });
   assert.equal('000660' in read(r4, 'analysis.json'), false, 'AI 끈 종목 → 버림');
 });
+await test('AI 입력(56차): 종합분석에 넘기는 뉴스에서 원인이 아닌 기사(산학협력·수상·채용·행사 등)는 뺌 · 나머지는 그대로', async () => {
+  NET.routes = routes(); NET.calls = []; NET.bodies = []; NET.blocked = [];
+  const it = (title) => ({ title, pubMs: T('2026-11-11T10:00:00+09:00'), source: '테스트일보', sentiment: src.tagSentiment(title) });
+  const news = { ok: true, items: [it('재능대·유진로봇, 로봇·AI 실무인재 양성 산학협력 협약'), it('안랩, 디지털포렌식 챌린지 우수상 수상'), it('유진로봇, 물류 로봇 대규모 공급 계약')] };
+  const quote = { ok: true, code: '056080', market: 'KR', name: '유진로봇', price: 10000, changePct: 3.8, high: 10200, low: 9600, asOf: '2026-11-11T10:30:00+09:00' };
+  await src.aiStockAnalysis({ quote, news, flow: null, history: null, disclosures: null, schedule: [], now: T('2026-11-11T10:31:00+09:00') });
+  const body = NET.bodies.find((b, i) => isGemini(NET.calls[i])) || '';
+  assert.ok(body.includes('유진로봇, 물류 로봇 대규모 공급 계약'), '보통 기사는 넘김');
+  assert.ok(!body.includes('산학협력') && !body.includes('우수상'), '원인이 아닌 기사는 뺌: ' + body.slice(0, 600));
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');

@@ -852,7 +852,9 @@ export async function aiStockAnalysis({ quote, news, flow, history, disclosures,
   const tz = us ? 'America/New_York' : 'Asia/Seoul';
   const qt = Date.parse(quote.asOf);
   const tradeDay = ymdIn(Number.isFinite(qt) ? qt : now, tz);
-  const heads = (news?.items || []).slice(0, 6).map((it, i) => `${i + 1}. ${datedTitle(it, tz)}`).join('\n') || '(수집된 뉴스 없음)';
+  // 원인이 아닌 기사(사회공헌·채용·사내 행사·산학협력·수상·관람·인버스 상품 등 — '왜 움직였나'와 같은 CSR_RE)는 AI에도 넘기지 않는다(56차 —
+  // 11/11 유진로봇 '…인재 양성 협력 부각으로 상승세'·안랩 '…디지털포렌식 우수상 소식과 함께…'처럼 AI가 원인으로 썼다). 뉴스 목록 표시는 그대로
+  const heads = (news?.items || []).filter((it) => it && it.title && !CSR_RE.test(it.title)).slice(0, 6).map((it, i) => `${i + 1}. ${datedTitle(it, tz)}`).join('\n') || '(수집된 뉴스 없음)';
   // 시장 흐름(30차) — 같은 시장 지수(호출부가 화면 '시장 대비'와 같은 규칙으로 고름)와 그날 시장 조치. 지수가 1% 넘게 움직인 날엔 시장 몫과 종목 몫을 나눠 보게 한다
   const mk = market && market.name && Number.isFinite(market.pct) ? market : null;
   const sgn = (v) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`;
