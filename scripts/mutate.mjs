@@ -506,6 +506,9 @@ const MUTANTS = [
   ["[스팸] 무작위 영문 10자 안 뺌", S, "|\\((?=[A-Za-z]*[A-Z]{2,}[a-z])(?=[A-Za-z]*(?:[A-Z][a-z]+[A-Z]+[a-z]|[a-z][A-Z]+[a-z]+[A-Z]))[A-Za-z]{10}\\)\\s*$", ""],
   ["[스팸] 무작위 영문 대소문자 안 봄", S, "(?=[A-Za-z]*(?:[A-Z][a-z]+[A-Z]+[a-z]|[a-z][A-Z]+[a-z]+[A-Z]))[A-Za-z]{10}", "[A-Za-z]{10}"],
   ["[스팸] 무작위 영문 대문자 연속 안 봄", S, "(?=[A-Za-z]*[A-Z]{2,}[a-z])", ""],
+  // ---------- 55차 — 2% 아래 그날 진단 유지 ----------
+  ["[AI 유지] 2% 아래 그날 진단 버림", F, "if (q && q.ok && freshOf(it, q)) { analysis[it.code] = prev[it.code]; kept++; }", ""],
+  ["[AI 유지] AI 끈 종목도 남김", F, "if (analysis[it.code] || it.ai === false) continue;", "if (analysis[it.code]) continue;"],
   ["[공시 방향] 화면 반대 공시도", A, " && !(dir && discDir(x.title) === -dir)", ""],
   ["[공시 방향] 화면 방향 안 넘김", A, "keyDiscToday(q.code, Math.sign(q.changePct || 0))", "keyDiscToday(q.code)"],
   ["[공시 방향] 봇 반대 공시도", F, " && discDir(x.title) !== -Math.sign(q.changePct)", ""],

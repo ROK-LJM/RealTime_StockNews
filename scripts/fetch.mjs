@@ -405,7 +405,15 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
         else if (prev[it.code]) analysis[it.code] = prev[it.code]; // 일시적 실패 시 기존 분석 유지
       } catch (e) { console.error(`    종합분석 실패(${it.code}):`, e.message); if (prev[it.code]) analysis[it.code] = prev[it.code]; }
     }
-    console.log(`  · 종합분석 대상 ${movers.length}건 — 신규 호출 ${calls}건, 다음 회차로 미룸 ${deferred + waited}건${waited ? `(한도 배분 대기 ${waited})` : ''}`);
+    // 그날 진단은 등락이 잠깐 ±2% 아래로 내려가도 남긴다(55차) — 예전엔 지웠다가 다시 올라오면 처음부터 다시 분석해 호출을 썼다(11/11 첫 분석 23번 중 3번).
+    // 그날(그 시장 날짜)·같은 방향일 때만(freshOf) — 날이 바뀌거나 방향이 바뀌면 버린다. AI를 꺼 둔 종목은 그대로 버림. 카드엔 오늘 진단으로 보임
+    let kept = 0;
+    for (const it of items) {
+      if (analysis[it.code] || it.ai === false) continue;
+      const q = quotesByCode[it.code];
+      if (q && q.ok && freshOf(it, q)) { analysis[it.code] = prev[it.code]; kept++; }
+    }
+    console.log(`  · 종합분석 대상 ${movers.length}건 — 신규 호출 ${calls}건, 다음 회차로 미룸 ${deferred + waited}건${waited ? `(한도 배분 대기 ${waited})` : ''}${kept ? ` · 2% 아래로 내려간 그날 진단 ${kept}건 유지` : ''}`);
     write('analysis.json', analysis);
   } catch (e) { console.error('  ✗ 종합분석 실패 — analysis.json 유지:', e.message); }
 

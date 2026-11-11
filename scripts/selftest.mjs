@@ -2650,6 +2650,30 @@ await test('AI 종합분석 순서(54차): 그날 진단이 아직 없는 종목
   await pipeline(r3, { krPct: { '005930': 6, '000660': 3 }, krAt: NOW_KR });
   assert.deepEqual(geminiNames().slice(0, 2), ['삼성전자', 'SK하이닉스'], '방향이 바뀐 진단은 없는 것과 같은 차례');
 });
+await test('AI 진단 유지(55차): 그날 진단은 등락이 잠깐 ±2% 아래로 내려가도 남김(다시 분석 안 함) · 방향이 바뀌었거나 지난날 진단·AI 끈 종목은 버림', async () => {
+  const geminiNames = () => NET.bodies.filter((b, i) => isGemini(NET.calls[i]) && !b.includes('뉴스 목록')).map((b) => (b.match(/'(삼성전자|SK하이닉스|애플)'/) || [])[1]).filter(Boolean);
+  const entry = (sig, at) => ({ headline: '오전 진단', summary: '오전', model: 'model-primary', sig, at });
+  // SK하이닉스 +1.5%(2% 아래) — 오늘 +2% 때 만든 진단은 남고 다시 부르지 않음
+  const r1 = workspace();
+  writeData(r1, 'analysis.json', { '000660': entry('2|오전', NOW_KR - 60 * MIN) });
+  await pipeline(r1, { krPct: { '005930': 4.2, '000660': 1.5 }, krAt: NOW_KR });
+  assert.equal(read(r1, 'analysis.json')['000660']?.headline, '오전 진단', '그날 진단 유지');
+  assert.equal(geminiNames().includes('SK하이닉스'), false, '다시 분석하지 않음');
+  // 방향이 바뀌었으면(-2% 때 진단 → 지금 +1.5%) 버림 · 지난날 진단도 버림
+  const r2 = workspace();
+  writeData(r2, 'analysis.json', { '000660': entry('-2|오전', NOW_KR - 60 * MIN) });
+  await pipeline(r2, { krPct: { '005930': 4.2, '000660': 1.5 }, krAt: NOW_KR });
+  assert.equal('000660' in read(r2, 'analysis.json'), false, '방향 바뀜 → 버림');
+  const r3 = workspace();
+  writeData(r3, 'analysis.json', { '000660': entry('2|어제', NOW_KR - 1440 * MIN) });
+  await pipeline(r3, { krPct: { '005930': 4.2, '000660': 1.5 }, krAt: NOW_KR });
+  assert.equal('000660' in read(r3, 'analysis.json'), false, '지난날 진단 → 버림');
+  // AI를 꺼 둔 종목은 남기지 않음
+  const r4 = workspace([{ code: '005930', market: 'KR', name: '삼성전자' }, { code: '000660', market: 'KR', name: 'SK하이닉스', ai: false }]);
+  writeData(r4, 'analysis.json', { '000660': entry('2|오전', NOW_KR - 60 * MIN) });
+  await pipeline(r4, { krPct: { '005930': 4.2, '000660': 1.5 }, krAt: NOW_KR });
+  assert.equal('000660' in read(r4, 'analysis.json'), false, 'AI 끈 종목 → 버림');
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
