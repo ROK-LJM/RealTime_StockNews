@@ -2692,6 +2692,24 @@ await test('AI 지시(57차): 등락 폭에 맞는 말(±5% 안쪽은 상승·�
   assert.ok(body.includes('5%를 넘을 때만'), '등락 폭에 맞는 말');
   assert.ok(body.includes('막연한 말로 채우지 말고'), '막연한 말 금지');
 });
+await test('이름표(58차): 정규장 뒤 시간외 가격이 있으면 "정규장 마감 · 15:30 · 시간외 17:40"(미국은 애프터·프리) · 없으면 그대로 "마감" · 장중·개장 전은 그대로', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('// ---------- 데이터 지연 경고'), appJs.indexOf('// ---------- 내 종목 한눈에'));
+  const lt = appJs.slice(appJs.indexOf('function lastTimeOf('), appJs.indexOf('// ---------- 시장 비교'));
+  const f = vm.runInNewContext(lt + block + '; ({ groupInfo })', {});
+  const now = Date.now(), asOf = new Date(now - 60 * MIN).toISOString();
+  const kr = (x) => ({ ok: true, market: 'KR', marketStatus: 'CLOSE', asOf, ...x });
+  const a = f.groupInfo({ key: 'KR' }, [kr({ ext: { session: 'post', price: 206500, at: now - 5 * MIN } }), kr({})], null);
+  assert.match(a.status, /정규장 마감$/); assert.match(a.et, /^시간외 /);
+  const b = f.groupInfo({ key: 'KR' }, [kr({})], null);
+  assert.match(b.status, /마감$/); assert.doesNotMatch(b.status, /정규장/); assert.equal(b.et, '');
+  const us = (x) => ({ ok: true, market: 'US', marketStatus: 'CLOSE', asOf, ...x });
+  assert.match(f.groupInfo({ key: 'US' }, [us({ ext: { session: 'post', price: 1, at: now - 5 * MIN } })], null).et, /^애프터 /);
+  assert.match(f.groupInfo({ key: 'US' }, [us({ ext: { session: 'pre', price: 1, at: now - 5 * MIN } })], null).et, /^프리 /);
+  const o = f.groupInfo({ key: 'KR' }, [kr({ marketStatus: 'OPEN', asOf: new Date(now).toISOString(), ext: { session: 'post', price: 1, at: now } })], null);
+  assert.match(o.status, /장중/); assert.equal(o.et, '', '장중엔 시간외 시각 없음');
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');

@@ -842,7 +842,7 @@ function measuresOf(m, valid, ms = Date.now()) {
 
 // 시장별 묶음: 헤더(종목수·상승/하락 개수·해당 시장 장상태·갱신시각) + 그 시장의 카드 그리드
 function renderGroup(g, list, closed) {
-  const { valid, failed, up, down, t, stale, status } = groupInfo(g, list, closed);
+  const { valid, failed, up, down, t, stale, status, et } = groupInfo(g, list, closed);
   const titleId = 'mg-' + cssId(g.key);
   const cards = list.map((q) => {
     try { return renderCard(q, state.hist[q.code], state.inv[q.code]); }
@@ -855,7 +855,7 @@ function renderGroup(g, list, closed) {
       <span class="mgroup-count">${list.length}종목</span>
       ${failed && valid.length ? `<span class="mgroup-fail">${failed}개 수집 실패</span>` : ''}
       ${valid.length ? `<span class="mgroup-updown"><b class="up-c">▲ ${up}</b> <b class="down-c">▼ ${down}</b></span>` : ''}
-      <span class="mgroup-status${stale ? ' stale' : ''}"${stale ? ` title="${STALE_TIP}"` : ''}>${status}${t ? ` · ${t}` : ''}</span>
+      <span class="mgroup-status${stale ? ' stale' : ''}"${stale ? ` title="${STALE_TIP}"` : ''}>${status}${t ? ` · ${t}` : ''}${et ? ` · ${et}` : ''}</span>
     </div>
     <div class="grid">${cards}</div>
   </section>`;
@@ -878,7 +878,16 @@ function groupInfo(g, list, closed) {
   else if (valid.some((q) => q.marketStatus === 'PREOPEN')) status = '<span class="sdot"></span>개장 전';
   else if (valid.some((q) => q.marketStatus)) status = '<span class="sdot"></span>마감';
   else status = '';
-  return { valid, failed: list.length - valid.length, up, down, t: lastTimeOf(valid), stale, status };
+  // 정규장이 끝난 뒤 시간외 가격이 있으면 '정규장 마감 · 15:30 · 시간외 17:40'(58차) — '마감'만 보면 거래가 다 끝난 것처럼 읽혔다
+  // (국내는 16:00~18:00 시간외 단일가, 미국은 애프터·프리마켓). 큰 가격은 정규장 종가 그대로
+  let et = '';
+  const exs = !stale && status.endsWith('마감') ? valid.map((q) => q.ext).filter((e) => e && e.price > 0 && Number.isFinite(e.at)) : [];
+  if (exs.length) {
+    const last = exs.reduce((a, b) => (b.at > a.at ? b : a));
+    status = '<span class="sdot"></span>정규장 마감';
+    et = `${g.key === 'KR' ? '시간외' : last.session === 'pre' ? '프리' : '애프터'} ${lastTimeOf([{ asOf: new Date(last.at).toISOString() }])}`;
+  }
+  return { valid, failed: list.length - valid.length, up, down, t: lastTimeOf(valid), stale, status, et };
 }
 
 // ---------- 내 종목 한눈에 ----------
@@ -954,7 +963,7 @@ function renderBoard(groups, closed, measures) {
   if (!el) return;
   const byPct = (a, b) => tileRank(b) - tileRank(a) || 0;
   const mkts = groups.map(({ g, list }) => {
-    const { valid, up, down, t, stale, status } = groupInfo(g, list, closed);
+    const { valid, up, down, t, stale, status, et } = groupInfo(g, list, closed);
     const avg = avgPct(valid), bench = benchOf(g.key, state.market?.indices), note = boardNote(g.key, valid);
     const meas = g.key === 'KR' ? measuresOf(measures, valid) : [];
     const cmp = avg == null ? '' : `<span class="bm-avg" title="내 종목 등락률의 단순 평균(종목마다 같은 무게) — 같은 시장 지수와 비교">평균 <b class="${dirClass(avg)}-c">${fmtPct(avg)}</b>`
@@ -962,7 +971,7 @@ function renderBoard(groups, closed, measures) {
     return `<div class="bm" style="--n:${list.length}">
       <div class="bm-head"><span class="bm-title">${esc(g.label)}</span>
         ${valid.length ? `<span class="mgroup-updown"><b class="up-c">▲ ${up}</b> <b class="down-c">▼ ${down}</b></span>` : ''}${cmp}
-        <span class="bm-status${stale ? ' stale' : ''}"${stale ? ` title="${STALE_TIP}"` : ''}>${status}${t ? ` · ${t}` : ''}</span></div>
+        <span class="bm-status${stale ? ' stale' : ''}"${stale ? ` title="${STALE_TIP}"` : ''}>${status}${t ? ` · ${t}` : ''}${et ? ` · ${et}` : ''}</span></div>
       ${meas.length ? `<p class="bm-meas"><span>오늘 시장 조치</span>${meas.map((x) => `<b class="mc-${x.cls}" title="${esc(x.tip)}">${esc(x.text)}</b>`).join('')}</p>` : ''}${note ? `<p class="bm-note">${esc(note)}</p>` : ''}<div class="tiles">${[...list].sort(byPct).map(tileHtml).join('')}</div>
     </div>`;
   }).join('');

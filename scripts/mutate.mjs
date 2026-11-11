@@ -514,6 +514,10 @@ const MUTANTS = [
   // ---------- 57차 — AI 지시 강도 ----------
   ["[AI 지시] 등락 폭 말 기준 없음", S, "5%를 넘을 때만 '급등·급락'", "언제든 '급등·급락'"],
   ["[AI 지시] 막연한 말 허용", S, "막연한 말로 채우지 말고", "막연한 말로 채워도 되고"],
+  // ---------- 58차 — 이름표 정규장 마감 · 시간외 ----------
+  ["[이름표] 시간외 있어도 그냥 마감", A, "if (exs.length) {", "if (false) {"],
+  ["[이름표] 장중에도 시간외 시각", A, "!stale && status.endsWith('마감') ? ", "!stale ? "],
+  ["[이름표] 미국도 시간외라 씀", A, "${g.key === 'KR' ? '시간외' : last.session === 'pre' ? '프리' : '애프터'}", "시간외"],
   ["[공시 방향] 화면 반대 공시도", A, " && !(dir && discDir(x.title) === -dir)", ""],
   ["[공시 방향] 화면 방향 안 넘김", A, "keyDiscToday(q.code, Math.sign(q.changePct || 0))", "keyDiscToday(q.code)"],
   ["[공시 방향] 봇 반대 공시도", F, " && discDir(x.title) !== -Math.sign(q.changePct)", ""],
