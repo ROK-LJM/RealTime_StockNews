@@ -511,6 +511,9 @@ const MUTANTS = [
   ["[AI 유지] AI 끈 종목도 남김", F, "if (analysis[it.code] || it.ai === false) continue;", "if (analysis[it.code]) continue;"],
   // ---------- 56차 — AI 입력 원인 아닌 기사 ----------
   ["[AI 입력] 원인 아닌 기사도 넘김", S, ".filter((it) => it && it.title && !CSR_RE.test(it.title)).slice(0, 6)", ".slice(0, 6)"],
+  // ---------- 57차 — AI 지시 강도 ----------
+  ["[AI 지시] 등락 폭 말 기준 없음", S, "5%를 넘을 때만 '급등·급락'", "언제든 '급등·급락'"],
+  ["[AI 지시] 막연한 말 허용", S, "막연한 말로 채우지 말고", "막연한 말로 채워도 되고"],
   ["[공시 방향] 화면 반대 공시도", A, " && !(dir && discDir(x.title) === -dir)", ""],
   ["[공시 방향] 화면 방향 안 넘김", A, "keyDiscToday(q.code, Math.sign(q.changePct || 0))", "keyDiscToday(q.code)"],
   ["[공시 방향] 봇 반대 공시도", F, " && discDir(x.title) !== -Math.sign(q.changePct)", ""],

@@ -2684,6 +2684,14 @@ await test('AI 입력(56차): 종합분석에 넘기는 뉴스에서 원인이 �
   assert.ok(body.includes('유진로봇, 물류 로봇 대규모 공급 계약'), '보통 기사는 넘김');
   assert.ok(!body.includes('산학협력') && !body.includes('우수상'), '원인이 아닌 기사는 뺌: ' + body.slice(0, 600));
 });
+await test('AI 지시(57차): 등락 폭에 맞는 말(±5% 안쪽은 상승·하락, 넘을 때만 급등·급락) · 재료가 없으면 막연한 말로 채우지 않기', async () => {
+  NET.routes = routes(); NET.calls = []; NET.bodies = []; NET.blocked = [];
+  const quote = { ok: true, code: 'TSM', market: 'US', name: 'TSMC', currency: 'USD', price: 300, changePct: 2.02, high: 305, low: 295, asOf: '2026-11-10T16:00:00-05:00' };
+  await src.aiStockAnalysis({ quote, news: { ok: true, items: [] }, flow: null, history: null, disclosures: null, schedule: [], now: T('2026-11-11T10:00:00+09:00') });
+  const body = NET.bodies.find((b, i) => isGemini(NET.calls[i])) || '';
+  assert.ok(body.includes('5%를 넘을 때만'), '등락 폭에 맞는 말');
+  assert.ok(body.includes('막연한 말로 채우지 말고'), '막연한 말 금지');
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
