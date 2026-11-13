@@ -3003,6 +3003,36 @@ await test('AI 종합분석 판(69차): 지시문 판(ANALYSIS_PV)이 다르거�
   await pipeline(r, { krPct: { '005930': 4.2, '000660': 0.3 }, krAt: NOW_KR + 15 * MIN }, NOW_KR + 15 * MIN);
   assert.equal(stockCalls(), 1, '다른 판도 다시');
 });
+await test('AI 지시(70차): 위에 없는 사건을 배경지식으로 원인 삼지 않기(지금 연·월을 밝힘 — 한 줄 진단 묶음도) · 수집된 뉴스(원인 아닌 기사·시세 안내 뺀)도 오늘 공시도 없으면 재료가 없다고·요인도 확인되는 것만 · 시세 안내 기사는 AI에 안 넘김', async () => {
+  src.resetState(); src.setAiBudget(null);
+  const quote = { ok: true, code: '322000', market: 'KR', name: 'HD현대에너지솔루션', price: 30000, changePct: -3.58, high: 31500, low: 29800, marketStatus: 'CLOSE', asOf: '2026-11-13T15:30:00+09:00' };
+  const it = (title) => ({ title, pubMs: T('2026-11-13T10:00:00+09:00'), source: '테스트일보', sentiment: src.tagSentiment(title) });
+  const bodyOf = async (items, discs) => {
+    NET.routes = routes(); NET.calls = []; NET.bodies = []; NET.blocked = [];
+    await src.aiStockAnalysis({ quote, news: { ok: true, items }, flow: null, history: null, disclosures: { ok: true, items: discs }, schedule: [], now: T('2026-11-13T16:05:00+09:00') });
+    return NET.bodies.find((b, i) => isGemini(NET.calls[i])) || '';
+  };
+  const NOMAT = '이 종목만의 뉴스·오늘 공시가 없다';
+  let b = await bodyOf([], []);
+  assert.ok(b.includes('배경지식으로 끌어와 원인으로 쓰지 말 것') && b.includes('지금(2026년 11월)'), '배경지식 금지 · 지금 연·월: ' + b.slice(0, 1500));
+  assert.ok(b.includes(NOMAT) && b.includes("'뚜렷한 재료 없이 하락'") && b.includes('1~2개도 된다'), '뉴스·공시가 없으면 재료가 없다고 · 요인도 확인되는 것만');
+  b = await bodyOf([it('HD현대에너지솔루션, 태양광 모듈 대규모 수주')], []);
+  assert.ok(!b.includes(NOMAT) && b.includes('배경지식으로 끌어와'), '뉴스가 있으면 재료 없음 지시는 없음 · 배경지식 금지는 늘');
+  b = await bodyOf([it('HD현대에너지솔루션 주가, 11월 13일 장중 30,000원 3.58% 하락'), it('HD현대에너지솔루션, 산학협력 인재 양성 협약')], []);
+  assert.ok(b.includes(NOMAT) && !b.includes('30,000원 3.58%'), '시세 안내·원인 아닌 기사뿐이면 재료 없는 날(시세 안내도 AI에 안 넘김)');
+  b = await bodyOf([], [{ date: '20261113', tag: '계약', title: '단일판매ㆍ공급계약체결' }]);
+  assert.ok(!b.includes(NOMAT), '오늘 공시가 있으면 재료 없음 지시는 없음');
+  b = await bodyOf([], [{ date: '20261111', tag: 'IR', title: '기업설명회(IR)개최' }]);
+  assert.ok(b.includes(NOMAT), '지난 공시만 있으면 재료 없는 날');
+  // 한 줄 진단 묶음도 배경지식 금지
+  const reply = { items: [{ no: 1, headline: '가' }, { no: 2, headline: '나' }] };
+  NET.routes = routes({ gemini: () => json({ candidates: [{ content: { parts: [{ text: JSON.stringify(reply) }] } }] }) }); NET.calls = []; NET.bodies = []; NET.blocked = [];
+  const row = (code, pct) => ({ quote: { code, name: code, market: 'KR', changePct: pct, asOf: '2026-11-13T09:58:00+09:00' } });
+  await src.aiStockBriefs([row('000001', 3), row('000002', -3)], T('2026-11-13T10:00:00+09:00'));
+  const raw = NET.bodies.find((x, i) => isGemini(NET.calls[i])) || '{}';
+  const prompt = JSON.parse(raw).contents?.[0]?.parts?.[0]?.text || '';
+  assert.ok(prompt.includes('배경지식으로 끌어와 원인으로 쓰지 말 것') && prompt.includes('지금(2026년 11월)'), '한 줄 진단 묶음도: ' + prompt.slice(0, 900));
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');

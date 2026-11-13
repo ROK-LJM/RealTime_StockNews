@@ -841,6 +841,9 @@ export const STOCK_ANALYSIS_THRESHOLD = 2;
 const TONE_RULE = "등락 폭에 맞는 말을 써라 — ±5% 안쪽은 '상승·하락'(또는 강세·약세), 5%를 넘을 때만 '급등·급락'. '저가 매수세 유입'·'차익 실현 매물 출회'·'투자 심리 개선' 같은 막연한 말로 채우지 말고, 뉴스·공시·시장 흐름처럼 위에서 확인되는 사실을 근거로 써라.";
 // 시세의 장 상태 → AI 입력의 말(61차 한 줄 진단·66차 종합분석) — 장중 종목에 '마감했다'고 쓰지 않게
 const STATE_KO = { OPEN: '장중', CLOSE: '장 마감', PREOPEN: '개장 전' };
+// 배경지식 금지(70차, 종합분석·한 줄 진단) — 위에 없는 사건을 모델이 아는 지난 일로 채우지 않게. 지금 연·월을 밝혀 배경지식이 지금과 다를 수 있음을 알린다
+// (11/13 HD현대에너지솔루션 '트럼프 당선 이후 신재생에너지 정책 불확실성'(뉴스·공시 없음) · 11/09 안랩 '정치 테마주로서의 강한 모멘텀' · 11/07 플러그파워 '대선 이후 위험자산 선호')
+const outsideRule = (now) => { const d = new Date(now + 9 * 3600e3); return `위에 없는 사건·소식(선거·정권·정책 변화·실적·테마 등)을 배경지식으로 끌어와 원인으로 쓰지 말 것 — 네가 아는 일은 지금(${d.getUTCFullYear()}년 ${d.getUTCMonth() + 1}월)과 다를 수 있다.`; };
 
 // 과거 일봉에서 기간별 등락·고점대비 위치를 뽑아 분석 입력으로 쓴다.
 // 6개월 종가에 지금 가격을 끝값으로(44차, docs/app.js liveSeries와 같은 규칙) — 그날 봉이 있으면 바꾸고 없으면 덧붙임. 개장 전·첫 체결 전·날짜를 모르면 그대로
@@ -869,7 +872,8 @@ export function historyStats(history, quote = null) {
 // 종합분석 지시문 판(69차) — 지시문을 크게 고치면 올린다. 판이 다른 예전 진단은 입력(sig)이 같아도·장 밖이어도 다시 만든다(fetch.mjs reusable —
 // 차례는 평소대로: 그날 진단 없음 → 한 줄 진단 → 재분석). 2 = 64·66차(전날 수급을 오늘 원인으로 안 씀·막연한 말·장중 '마감'), 판이 없으면 그 전
 // (11/13 64차 전에 만든 '기관 매수세 유입으로 상승' 같은 진단이 입력이 그대로면 계속 쓰이고 마감 뒤엔 그대로 굳어 '지난 급등락' 기록에도 남았다)
-export const ANALYSIS_PV = 2;
+// 3 = 70차(배경지식 금지·그 종목 재료 없는 날·시세 안내 기사 뺌 — 11/13 '트럼프 당선 이후…'·'실적 부진 우려'가 그날 기록에 굳지 않게)
+export const ANALYSIS_PV = 3;
 // 뉴스·수급·추세·시세를 모두 넘겨 Gemini가 "오늘 왜 이렇게 움직이는지"를 종합 분석. 키 없거나 실패 시 null.
 export async function aiStockAnalysis({ quote, news, flow, history, disclosures, schedule, market = null, now = Date.now() }) {
   if (!GEMINI_KEY || !quote) return null;
@@ -888,7 +892,9 @@ export async function aiStockAnalysis({ quote, news, flow, history, disclosures,
   const tradeDay = ymdIn(Number.isFinite(qt) ? qt : now, tz);
   // 원인이 아닌 기사(사회공헌·채용·사내 행사·산학협력·수상·관람·인버스 상품 등 — '왜 움직였나'와 같은 CSR_RE)는 AI에도 넘기지 않는다(56차 —
   // 11/11 유진로봇 '…인재 양성 협력 부각으로 상승세'·안랩 '…디지털포렌식 우수상 소식과 함께…'처럼 AI가 원인으로 썼다). 뉴스 목록 표시는 그대로
-  const heads = (news?.items || []).filter((it) => it && it.title && !CSR_RE.test(it.title)).slice(0, 6).map((it, i) => `${i + 1}. ${datedTitle(it, tz)}`).join('\n') || '(수집된 뉴스 없음)';
+  // 시세만 알려 주는 기사(priceOnly — '…원 기록한 …, 거래대금 …')도 뺀다(70차, 한 줄 진단 묶음과 같음 — 원인이 아니고, 이것뿐이면 재료 없는 날로 본다)
+  const newsIn = (news?.items || []).filter((it) => it && it.title && !CSR_RE.test(it.title) && !priceOnly(it.title)).slice(0, 6);
+  const heads = newsIn.map((it, i) => `${i + 1}. ${datedTitle(it, tz)}`).join('\n') || '(수집된 뉴스 없음)';
   // 시장 흐름(30차) — 같은 시장 지수(호출부가 화면 '시장 대비'와 같은 규칙으로 고름)와 그날 시장 조치. 지수가 1% 넘게 움직인 날엔 시장 몫과 종목 몫을 나눠 보게 한다
   const mk = market && market.name && Number.isFinite(market.pct) ? market : null;
   const sgn = (v) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`;
@@ -915,6 +921,11 @@ export async function aiStockAnalysis({ quote, news, flow, history, disclosures,
     const ds = String(d.date || '');
     return `- ${ds === today ? '오늘' : `${ds.slice(4, 6)}/${ds.slice(6, 8)}`} [${d.tag || '기타'}] ${d.title}`;
   }).join('\n');
+  // 그 종목만의 재료가 없는 날(70차) — 수집된 뉴스(원인 아닌 기사·시세 안내 뺀)도 오늘 공시도 없으면 원인을 지어내지 말고 재료가 없다고, 요인도 확인되는 것만.
+  // 지난 7일 뉴스 없이 만든 종합분석 31/384건에서 HD현대에너지솔루션 '트럼프 당선 이후 신재생에너지 정책 불확실성'(11/13)·안랩 '정치 테마주로서의 강한
+  // 모멘텀'(11/09)·파두 '실적 부진 우려'(11/13)처럼 위에 없는 일을 원인으로 쓰고, 요인 2~4개를 채우려 '차익 실현'·'저가 매수세'를 붙였다
+  const noMaterial = !newsIn.length && !discs.some((d) => String(d.date || '') === today);
+  const matRule = noMaterial ? `이 종목만의 뉴스·오늘 공시가 없다 — 원인을 지어내지 말고, 위의 시장 흐름·과거 흐름·일정으로 설명되는 만큼만 쓰거나 '뚜렷한 재료 없이 ${dir}'처럼 재료가 없다고 써라. 요인(factors)도 위에서 확인되는 것만(1~2개도 된다).\n` : '';
   // 가까운 일정(공시 일정 달력 — 국내는 공시에 적힌 일정, 미국은 나스닥 실적·배당) — 그 시장 날짜 기준 '오늘'·'어제'·'내일', 그 밖은 날짜
   const localDay = new Intl.DateTimeFormat('en-CA', { timeZone: us ? 'America/New_York' : 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' })
     .format(now).replace(/-/g, '');
@@ -934,6 +945,7 @@ export async function aiStockAnalysis({ quote, news, flow, history, disclosures,
     `최근 뉴스 제목(앞의 [월/일]은 기사 날짜 — 거래일 전 기사는 그날까지 이어진 재료일 때만 원인으로):\n${heads}\n\n` +
     `단순 시황 중계가 아니라 '원인'에 집중하라. ${basis}를 서로 연결해 설명하고, 근거가 약하면 단정하지 말 것.\n` +
     `${TONE_RULE}\n` + flowRule + // 등락 폭에 맞는 말·막연한 말 금지(57·64차) · 수급 날짜(64차)
+    `${outsideRule(now)}\n` + matRule + // 배경지식 금지·그 종목 재료 없는 날(70차)
     (when === '장중' ? "아직 장중이다 — '마감'·'마감했다'로 쓰지 말 것.\n" : '') +
     (mk && Math.abs(mk.pct) >= 1 ? `시장 전체가 크게 움직인 날이다 — 시장 흐름 탓인 몫과 이 종목만의 요인을 나눠, 시장보다 더(덜) 움직인 까닭을 짚어라.\n` : '') +
     `반드시 이 JSON만 출력:\n` +
@@ -986,6 +998,7 @@ export async function aiStockBriefs(list, now = Date.now()) {
     `${TONE_RULE}\n종목끼리 소식을 섞지 말고, 각 종목은 그 종목 줄의 정보로만 진단하라.\n` +
     // 61차 — 11/13 첫 묶음: 기사 없는 샌즈랩 '시장 수급 개선에 따른 투자 심리 회복', 빚보증 기사로 '투자 심리 개선으로 상승'(한화솔루션), 장중인데 '상승 마감했다'(두산에너빌리티)
     `그 종목만의 재료가 뉴스·공시에 없으면 지어내지 말고 '뚜렷한 재료 없이 시장 흐름 따라 상승'처럼 재료가 없다고 써라(시장과 반대 방향이면 '뚜렷한 재료 없이 상승'). 오늘 방향과 반대인 소식(오른 날의 악재·내린 날의 호재)은 원인으로 쓰지 말 것. 외국인·기관 매매(수급)는 주어지지 않았으니 지어내지 말 것.\n` +
+    `${outsideRule(now)}\n` + // 배경지식 금지(70차 — 종합분석과 같음)
     `'…에 상승'·'…로 하락'처럼 짧게 끝맺어라('마감했다'·'보였다' 같은 문장 끝은 쓰지 말 것).\n\n` +
     `${lines}\n\n` +
     `반드시 이 JSON만 출력(종목 번호마다 하나): {"items":[{"no":번호,"headline":"오늘 왜 움직였는지 한 문장 진단(한국어, 40자 내외)"}]}`;

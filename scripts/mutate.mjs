@@ -510,7 +510,7 @@ const MUTANTS = [
   ["[AI 유지] 2% 아래 그날 진단 버림", F, "if (q && q.ok && freshOf(it, q)) { analysis[it.code] = prev[it.code]; kept++; }", ""],
   ["[AI 유지] AI 끈 종목도 남김", F, "if (analysis[it.code] || it.ai === false) continue;", "if (analysis[it.code]) continue;"],
   // ---------- 56차 — AI 입력 원인 아닌 기사 ----------
-  ["[AI 입력] 원인 아닌 기사도 넘김", S, ".filter((it) => it && it.title && !CSR_RE.test(it.title)).slice(0, 6)", ".slice(0, 6)"],
+  ["[AI 입력] 원인 아닌 기사도 넘김", S, ".filter((it) => it && it.title && !CSR_RE.test(it.title) && !priceOnly(it.title)).slice(0, 6)", ".filter((it) => it && it.title && !priceOnly(it.title)).slice(0, 6)"],
   // ---------- 57차 — AI 지시 강도 ----------
   ["[AI 지시] 등락 폭 말 기준 없음", S, "5%를 넘을 때만 '급등·급락'", "언제든 '급등·급락'"],
   ["[AI 지시] 막연한 말 허용", S, "막연한 말로 채우지 말고", "막연한 말로 채워도 되고"],
@@ -532,8 +532,8 @@ const MUTANTS = [
   ["[AI 간단] 이번 회차 한 줄 진단 덮어씀", F, "if (analysis[it.code]) continue; // 이번 회차", "// 이번 회차"],
   ["[AI 간단] 묶음 상한", S, "export const BRIEF_MAX = 5;", "export const BRIEF_MAX = 7;"],
   ["[AI 간단] 한 종목도 묶음", S, "if (!GEMINI_KEY || rows.length < 2) return null;", "if (!GEMINI_KEY || rows.length < 1) return null;"],
-  ["[AI 간단] 원인 아닌 기사도", S, "it.title && !CSR_RE.test(it.title) && !priceOnly(it.title))", "it.title && !priceOnly(it.title))"],
-  ["[AI 간단] 시세 안내도", S, "!CSR_RE.test(it.title) && !priceOnly(it.title))", "!CSR_RE.test(it.title))"],
+  ["[AI 간단] 원인 아닌 기사도", S, "it.title && !CSR_RE.test(it.title) && !priceOnly(it.title)).sort(", "it.title && !priceOnly(it.title)).sort("],
+  ["[AI 간단] 시세 안내도", S, "!CSR_RE.test(it.title) && !priceOnly(it.title)).sort(", "!CSR_RE.test(it.title)).sort("],
   ["[AI 간단] 최신순 아님", S, ".sort((a, b) => pub(b) - pub(a))", ""],
   ["[AI 간단] 장 상태 없음", S, "${when ? `(${when})` : ''}", ""],
   ["[AI 간단] 재료 없을 때 지시 없음", S, "'뚜렷한 재료 없이 시장 흐름 따라 상승'처럼 재료가 없다고 써라", "그럴듯한 이유를 써라"],
@@ -597,6 +597,15 @@ const MUTANTS = [
   // ---------- 69차 — 지시문 판 ----------
   ["[AI 판] 판 안 봄", F, " && p.pv === ANALYSIS_PV && (", " && ("],
   ["[AI 판] 판 안 남김", F, "{ ...a, sig, at: now, pv: ANALYSIS_PV }", "{ ...a, sig, at: now }"],
+  // ---------- 70차 — 배경지식 금지·재료 없는 날 ----------
+  ["[AI 지시] 배경지식 금지 안 넘김", S, "`${outsideRule(now)}\\n` + matRule + //", "matRule + //"],
+  ["[AI 지시] 재료 없음 지시 안 넘김", S, "`${outsideRule(now)}\\n` + matRule + //", "`${outsideRule(now)}\\n` + //"],
+  ["[AI 지시] 재료 없어도 지시 없음", S, "const matRule = noMaterial ? ", "const matRule = false ? "],
+  ["[AI 지시] 오늘 공시 있어도 재료 없음", S, " && !discs.some((d) => String(d.date || '') === today);", ";"],
+  ["[AI 지시] 지난 공시도 재료로", S, "discs.some((d) => String(d.date || '') === today)", "discs.some((d) => !!d)"],
+  ["[AI 지시] 배경지식 지금 연·월 틀림", S, "${d.getUTCMonth() + 1}월", "${d.getUTCMonth()}월"],
+  ["[AI 간단] 배경지식 금지 안 넘김", S, "`${outsideRule(now)}\\n` + // 배경지식 금지(70차", "// 배경지식 금지(70차"],
+  ["[AI 입력] 시세 안내도 넘김", S, "!CSR_RE.test(it.title) && !priceOnly(it.title)).slice(0, 6)", "!CSR_RE.test(it.title)).slice(0, 6)"],
   ["[공시 방향] 화면 반대 공시도", A, " && !(dir && discDir(x.title) === -dir)", ""],
   ["[공시 방향] 화면 방향 안 넘김", A, "keyDiscToday(q.code, Math.sign(q.changePct || 0))", "keyDiscToday(q.code)"],
   ["[공시 방향] 봇 반대 공시도", F, " && discDir(x.title) !== -Math.sign(q.changePct)", ""],
