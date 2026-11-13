@@ -2774,6 +2774,7 @@ await test('한 줄 진단 묶음(60차, 봇): 그날 진단 없는 종목이 �
   await pipeline(r1, { krPct: pctOf(6), krAt: NOW_KR, gemini: briefReply });
   assert.deepEqual(order(), ['batch:현대차,LG화학,카카오', '삼성전자', 'SK하이닉스', 'NAVER'], '묶음 1번 + 종합분석 3번');
   assert.deepEqual(view(r1), { '005930': '테스트 진단', '000660': '테스트 진단', '035420': '테스트 진단', '005380': '간단:간단 진단 005380', '051910': '간단:간단 진단 051910', '035720': '간단:간단 진단 035720' });
+  assert.equal(read(r1, 'analysis.json')['005380'].pv, src.ANALYSIS_PV, '한 줄 진단에도 지시문 판(69차 — 판이 같아도 재사용 안 함)');
   // ② 다음 회차(입력 그대로) — 한 줄 진단 종목은 종합분석으로, 종합분석 종목은 재사용
   await pipeline(r1, { krPct: pctOf(6), krAt: NOW_KR + 10 * MIN, gemini: briefReply }, NOW_KR + 10 * MIN);
   assert.deepEqual(order(), ['현대차', 'LG화학', '카카오'], '입력이 그대로여도 한 줄 진단은 종합분석 차례');
@@ -2983,6 +2984,24 @@ await test('지수 핵심 이유(68차): 판단 근거 검색어(aiQuery)를 남
   // 장 밖에서 방향이 바뀌면(급락 → 보합) 예전 판단은 버림 — 방향 확인(장중엔 검색어도 달라 함께 걸려 따로 본다)
   x = await run({ dir: 'down', query: '코스피 급락 이유', ai, aiAt: now - 5 * MIN, aiSig: '-2|x', aiQuery: '코스피 급락 이유' }, false, -0.5);
   assert.equal(x.n, 1, '장 밖 방향 바뀜 → 다시');
+});
+await test('AI 종합분석 판(69차): 지시문 판(ANALYSIS_PV)이 다르거나 없는 예전 진단은 입력이 같아도 다시 · 같은 판은 재사용 · 새 분석엔 판을 남김', async () => {
+  const stockCalls = () => NET.bodies.filter((b, i) => isGemini(NET.calls[i]) && b.includes("'삼성전자'이(가)")).length;
+  const r = workspace();
+  await pipeline(r, { krPct: { '005930': 4.2, '000660': 0.3 }, krAt: NOW_KR });
+  const a1 = read(r, 'analysis.json')['005930'];
+  assert.equal(a1.pv, src.ANALYSIS_PV, '새 분석엔 판');
+  // 같은 판·같은 입력 → 재사용
+  await pipeline(r, { krPct: { '005930': 4.2, '000660': 0.3 }, krAt: NOW_KR + 5 * MIN }, NOW_KR + 5 * MIN);
+  assert.equal(stockCalls(), 0, '같은 판은 재사용');
+  // 판이 없으면(예전 지시문) 입력이 같아도 다시 · 다른 판도
+  writeData(r, 'analysis.json', { '005930': { ...a1, pv: undefined } });
+  await pipeline(r, { krPct: { '005930': 4.2, '000660': 0.3 }, krAt: NOW_KR + 10 * MIN }, NOW_KR + 10 * MIN);
+  assert.equal(stockCalls(), 1, '판 없는 예전 진단은 다시');
+  assert.equal(read(r, 'analysis.json')['005930'].pv, src.ANALYSIS_PV);
+  writeData(r, 'analysis.json', { '005930': { ...a1, pv: src.ANALYSIS_PV - 1 } });
+  await pipeline(r, { krPct: { '005930': 4.2, '000660': 0.3 }, krAt: NOW_KR + 15 * MIN }, NOW_KR + 15 * MIN);
+  assert.equal(stockCalls(), 1, '다른 판도 다시');
 });
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');

@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis, aiStockBriefs, BRIEF_MAX, calmExpected,
+  getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis, aiStockBriefs, BRIEF_MAX, ANALYSIS_PV, calmExpected,
   getSidecarNews, sidecarEvents, mergeMeasures,
   aiStatus, aiGate, aiRoom, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, pickReasonNews, strongNews, tagSentiment, krBaseName,
 } from './sources.mjs';
@@ -388,7 +388,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
       .sort((a, b) => (a.d - b.d) || (a.f - b.f) || Math.abs(b.q.changePct ?? 0) - Math.abs(a.q.changePct ?? 0));
     // 직전 분석을 그대로 쓸지 — 입력이 같거나, 장 밖(장 시간이어도 시세가 '마감'이면 휴장일)인데 등락 구간이 그대로면 재사용.
     // 한 줄 진단('AI 간단', 60차)은 그대로 쓰지 않는다 — 종합분석 차례가 오면 바꾼다(차례 d: 진단 없음 0 → 한 줄 진단만 0.5 → 종합분석 재분석 1)
-    const reusable = ({ it, q, sig }) => { const p = prev[it.code], open = inSession(it.market, now) && q.marketStatus !== 'CLOSE'; return !!p && !p.lite && (p.sig === sig || (!open && sigMove(p.sig) === sigMove(sig))); };
+    const reusable = ({ it, q, sig }) => { const p = prev[it.code], open = inSession(it.market, now) && q.marketStatus !== 'CLOSE'; return !!p && !p.lite && p.pv === ANALYSIS_PV && (p.sig === sig || (!open && sigMove(p.sig) === sigMove(sig))); }; // 지시문 판이 다르면 다시(69차)
     let calls = 0, deferred = 0, waited = 0, briefed = 0;
     // 한 줄 진단 묶음(60차) — 그날 진단이 없는 종목이 이번 회차에 부를 수 있는 수(회차 상한·시간 배분 몫)보다 2개 넘게 많으면 한 번을 아껴,
     // 종합분석 차례가 못 가는 그 다음 종목들(최대 BRIEF_MAX개)을 AI 한 번에 묶어 한 줄 진단만 받는다. 앞쪽 종목은 예전처럼 종합분석
@@ -403,7 +403,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
         const got = await aiStockBriefs(pack.map((m) => ({ quote: m.q, news: news[m.it.code], disclosures: disclosures[m.it.code], market: benchOfQuote(m.q) })), now);
         for (const m of pack) {
           const g = got && got[m.it.code];
-          if (g) { analysis[m.it.code] = { headline: g.headline, lite: true, model: g.model, sig: m.sig, at: now }; briefed++; }
+          if (g) { analysis[m.it.code] = { headline: g.headline, lite: true, model: g.model, sig: m.sig, at: now, pv: ANALYSIS_PV }; briefed++; }
         }
       } catch (e) { console.error('    한 줄 진단 묶음 실패:', e.message); }
     }
@@ -420,7 +420,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
       calls++;
       try {
         const a = await aiStockAnalysis({ quote: q, news: news[it.code], flow: investors[it.code], history: history[it.code], disclosures: disclosures[it.code], schedule: scheduleOf(it), market: benchOfQuote(q), now });
-        if (a) analysis[it.code] = { ...a, sig, at: now };
+        if (a) analysis[it.code] = { ...a, sig, at: now, pv: ANALYSIS_PV };
         else if (prev[it.code]) analysis[it.code] = prev[it.code]; // 일시적 실패 시 기존 분석 유지
       } catch (e) { console.error(`    종합분석 실패(${it.code}):`, e.message); if (prev[it.code]) analysis[it.code] = prev[it.code]; }
     }

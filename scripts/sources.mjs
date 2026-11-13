@@ -866,6 +866,10 @@ export function historyStats(history, quote = null) {
   return { w1: ret(5), m1: ret(21), m3: ret(63), fromHigh: hi ? ((last - hi) / hi) * 100 : null };
 }
 
+// 종합분석 지시문 판(69차) — 지시문을 크게 고치면 올린다. 판이 다른 예전 진단은 입력(sig)이 같아도·장 밖이어도 다시 만든다(fetch.mjs reusable —
+// 차례는 평소대로: 그날 진단 없음 → 한 줄 진단 → 재분석). 2 = 64·66차(전날 수급을 오늘 원인으로 안 씀·막연한 말·장중 '마감'), 판이 없으면 그 전
+// (11/13 64차 전에 만든 '기관 매수세 유입으로 상승' 같은 진단이 입력이 그대로면 계속 쓰이고 마감 뒤엔 그대로 굳어 '지난 급등락' 기록에도 남았다)
+export const ANALYSIS_PV = 2;
 // 뉴스·수급·추세·시세를 모두 넘겨 Gemini가 "오늘 왜 이렇게 움직이는지"를 종합 분석. 키 없거나 실패 시 null.
 export async function aiStockAnalysis({ quote, news, flow, history, disclosures, schedule, market = null, now = Date.now() }) {
   if (!GEMINI_KEY || !quote) return null;
