@@ -2719,6 +2719,101 @@ await test('관련도(59차): 종목 이름 바로 뒤 "홀딩스"·"지주"는 
   assert.equal(src.isRelevantNews('심텍, 메모리 3사와 장기공급계약 협의', st), true);
   assert.equal(src.isRelevantNews('OCI홀딩스, 폴리실리콘 공급 확대', { code: '010060', market: 'KR', name: 'OCI홀딩스' }), true, '이름에 홀딩스가 든 종목');
 });
+await test('한 줄 진단 묶음(60차, AI 요청): 종목마다 [번호] 이름(시장 코드)·거래일 등락·시장 흐름·오늘 공시(국내만)·원인 아닌 기사 뺀 뉴스 3건 · 등락 폭 말 지시 · 번호로 받기(엉뚱한 번호·빈 진단·겹침은 버림) · 두 종목 미만이면 안 부름', async () => {
+  src.resetState(); src.setAiBudget(null);
+  const it = (title, iso) => ({ title, pubMs: T(iso) });
+  const kr = { quote: { code: '000001', name: '가나', market: 'KR', changePct: 4.2, asOf: '2026-11-13T09:58:00+09:00' }, market: { name: '코스피', pct: 1.2, events: ['매수 사이드카 09:12'] },
+    news: { items: [it('가나, 산학협력 인재 양성 협약', '2026-11-13T09:00:00+09:00'), it('가나, 대규모 공급 계약', '2026-11-13T09:10:00+09:00'), it('가나 신제품 출시', '2026-11-12T15:00:00+09:00'),
+      it('가나 실적 기대', '2026-11-12T10:00:00+09:00'), it('가나 넷째 기사', '2026-11-12T09:00:00+09:00')] },
+    disclosures: { items: [{ date: '20261113', tag: '계약', title: '단일판매ㆍ공급계약체결' }, { date: '20261112', tag: '실적', title: '영업(잠정)실적(공정공시)' }] } };
+  const us = { quote: { code: 'NVDA', name: '엔비디아', market: 'US', changePct: -3.1, asOf: '2026-11-12T21:00:00Z' }, news: { items: [it('Nvidia falls on export curbs', '2026-11-12T18:00:00Z')] },
+    disclosures: { items: [{ date: '20261113', tag: '계약', title: '미국 종목엔 없는 공시' }] } };
+  const none = { quote: { code: '000002', name: '다라', market: 'KR', changePct: -2.5, asOf: '2026-11-13T09:58:00+09:00' } };
+  const reply = { items: [{ no: 1, headline: '  공급 계약에 상승  ' }, { no: '2', headline: '수출 규제 우려에 하락' }, { no: 9, headline: '엉뚱한 번호' }, { no: 3, headline: '' }, { no: 1, headline: '겹침' }] };
+  NET.routes = routes({ gemini: () => json({ candidates: [{ content: { parts: [{ text: JSON.stringify(reply) }] } }] }) }); NET.calls = []; NET.bodies = []; NET.blocked = [];
+  const got = await src.aiStockBriefs([kr, us, none], T('2026-11-13T10:00:00+09:00'));
+  assert.deepEqual(Object.entries(got || {}).map(([c, v]) => [c, v.headline]), [['000001', '공급 계약에 상승'], ['NVDA', '수출 규제 우려에 하락']], '번호로 받기 — 엉뚱한 번호·빈 진단·겹침은 버림');
+  assert.equal(geminiCalls(), 1, 'AI 한 번');
+  const prompt = JSON.parse(NET.bodies.find((b, i) => isGemini(NET.calls[i]))).contents[0].parts[0].text;
+  assert.ok(prompt.includes('[1] 가나(한국 000001) · 11/13 거래일 +4.20% · 시장 코스피 +1.20%(오늘 매수 사이드카 09:12)\n'), prompt);
+  assert.ok(prompt.includes('  오늘 공시: [계약] 단일판매ㆍ공급계약체결\n') && !prompt.includes('영업(잠정)실적'), '국내는 오늘 공시만');
+  assert.ok(prompt.includes('  뉴스: [11/13] 가나, 대규모 공급 계약 / [11/12] 가나 신제품 출시 / [11/12] 가나 실적 기대\n'), '원인 아닌 기사 빼고 3건 · 기사 날짜');
+  assert.ok(prompt.includes('[2] 엔비디아(미국 NVDA) · 11/12 거래일 -3.10%\n  뉴스: [11/12] Nvidia falls on export curbs\n') && !prompt.includes('미국 종목엔 없는 공시'), '미국 — 뉴욕 날짜·공시 없음');
+  assert.ok(prompt.includes('[3] 다라(한국 000002) · 11/13 거래일 -2.50%\n  뉴스: (수집된 뉴스 없음)\n'), prompt);
+  assert.ok(prompt.includes("5%를 넘을 때만 '급등·급락'") && prompt.includes('막연한 말로 채우지 말고'), '등락 폭 말 지시(57차와 같음)');
+  NET.calls = []; NET.bodies = [];
+  assert.equal(await src.aiStockBriefs([kr], T('2026-11-13T10:00:00+09:00')), null, '한 종목이면 안 부름');
+  assert.equal(geminiCalls(), 0);
+});
+await test('한 줄 진단 묶음(60차, 봇): 그날 진단 없는 종목이 회차 몫보다 2개 넘게 많으면 묶음 1번 — 앞쪽은 종합분석, 그 다음 종목들(최대 5개)은 한 줄 진단 · 다음 회차엔 입력이 그대로여도 종합분석으로(재분석보다 먼저, 다시 묶지 않음) · 몫이 1번이면 앞 5종목 묶음', async () => {
+  const LIST = [['005930', '삼성전자', 9], ['000660', 'SK하이닉스', 8], ['035420', 'NAVER', 7], ['005380', '현대차', 6], ['051910', 'LG화학', 5], ['035720', '카카오', 4], ['068270', '셀트리온', 3]];
+  const itemsOf = (n) => LIST.slice(0, n).map(([code, name]) => ({ code, market: 'KR', name }));
+  const pctOf = (n) => Object.fromEntries(LIST.slice(0, n).map(([c, , p]) => [c, p]));
+  const promptOf = (b) => JSON.parse(b).contents[0].parts[0].text;
+  // 묶음 요청이면 번호마다 '간단 진단 코드', 아니면 보통 응답
+  const briefReply = () => {
+    const body = NET.bodies.at(-1);
+    if (!body.includes('종목마다')) return json(geminiOk);
+    const items = [...promptOf(body).matchAll(/^\[(\d+)\] [^(\n]+\(한국 (\d{6})\)/gm)].map((m) => ({ no: +m[1], headline: `간단 진단 ${m[2]}` }));
+    return json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ items }) }] } }] });
+  };
+  // 종목 AI 요청 차례 — 묶음은 'batch:종목들', 종합분석은 종목 이름
+  const order = () => NET.bodies.filter((b, i) => isGemini(NET.calls[i]) && !b.includes('뉴스 목록'))
+    .map((b) => (b.includes('종목마다') ? `batch:${[...promptOf(b).matchAll(/^\[\d+\] ([^(\n]+)\(/gm)].map((m) => m[1]).join(',')}` : (b.match(/'([^']+)'이\(가\)/) || [])[1]));
+  const view = (root) => Object.fromEntries(Object.entries(read(root, 'analysis.json')).map(([c, v]) => [c, v.lite ? `간단:${v.headline}` : v.headline]));
+  // ① 6종목·몫 4번 — 많이 움직인 셋은 종합분석, 그 다음 셋은 묶음 1번(현대차의 어제 진단은 오늘 한 줄 진단으로)
+  const r1 = workspace(itemsOf(6));
+  writeData(r1, 'analysis.json', { '005380': { headline: '어제 진단', summary: '어제', model: 'model-primary', sig: '6|어제', at: NOW_KR - 1440 * MIN } });
+  await pipeline(r1, { krPct: pctOf(6), krAt: NOW_KR, gemini: briefReply });
+  assert.deepEqual(order(), ['batch:현대차,LG화학,카카오', '삼성전자', 'SK하이닉스', 'NAVER'], '묶음 1번 + 종합분석 3번');
+  assert.deepEqual(view(r1), { '005930': '테스트 진단', '000660': '테스트 진단', '035420': '테스트 진단', '005380': '간단:간단 진단 005380', '051910': '간단:간단 진단 051910', '035720': '간단:간단 진단 035720' });
+  // ② 다음 회차(입력 그대로) — 한 줄 진단 종목은 종합분석으로, 종합분석 종목은 재사용
+  await pipeline(r1, { krPct: pctOf(6), krAt: NOW_KR + 10 * MIN, gemini: briefReply }, NOW_KR + 10 * MIN);
+  assert.deepEqual(order(), ['현대차', 'LG화학', '카카오'], '입력이 그대로여도 한 줄 진단은 종합분석 차례');
+  assert.ok(Object.values(view(r1)).every((v) => v === '테스트 진단'), JSON.stringify(view(r1)));
+  // ③ 한 줄 진단 6종목 + 종합분석 1종목, 입력이 모두 바뀜 — 한 줄 진단 종목 먼저(다시 묶지 않음), 종합분석 재분석은 그 뒤
+  const r2 = workspace(itemsOf(7));
+  writeData(r2, 'analysis.json', Object.fromEntries(LIST.map(([c, , p], i) => [c, { headline: i ? '옛 간단' : '옛 종합', ...(i ? { lite: true } : { summary: '옛' }), model: 'model-primary', sig: `${p}|옛`, at: NOW_KR - 30 * MIN }])));
+  await pipeline(r2, { krPct: pctOf(7), krAt: NOW_KR, gemini: briefReply });
+  assert.deepEqual(order(), ['SK하이닉스', 'NAVER', '현대차', 'LG화학'], '한 줄 진단 종목 먼저(많이 움직인 순)');
+  assert.equal(view(r2)['005930'], '옛 종합', '종합분석 종목의 재분석은 그 뒤');
+  // ④ 5종목·몫 4번 — 묶어도 1종목만 더 덮어 묶지 않음
+  const r3 = workspace(itemsOf(5));
+  await pipeline(r3, { krPct: pctOf(5), krAt: NOW_KR, gemini: briefReply });
+  assert.deepEqual(order(), ['삼성전자', 'SK하이닉스', 'NAVER', '현대차'], '묶지 않음');
+  // ⑤ 시간 배분 몫이 1번뿐(지수 AI 없음) — 앞 5종목을 묶음 1번, 나머지 둘은 다음 회차
+  const r4 = workspace(itemsOf(7));
+  const b = bud.startBudget(null, NOW_KR), cap = Math.floor(bud.capacity(b, ['model-primary', 'model-fallback']) * b.fraction);
+  writeData(r4, 'status.json', statusSeed({ 'model-primary': Math.ceil((cap - 1) / 2), 'model-fallback': Math.floor((cap - 1) / 2) }));
+  const noIdx = (m, u) => text(/이유|마감/.test(new URL(u).searchParams.get('q')) ? '<?xml version="1.0"?><rss><channel></channel></rss>' : rss('', queryName(u)));
+  await pipeline(r4, { krPct: pctOf(7), krAt: NOW_KR, gemini: briefReply, news: noIdx });
+  assert.deepEqual(order(), ['batch:삼성전자,SK하이닉스,NAVER,현대차,LG화학'], '몫 1번 → 앞 5종목 묶음');
+  assert.deepEqual(Object.keys(view(r4)).sort(), ['000660', '005380', '005930', '035420', '051910']);
+});
+await test('한 줄 진단 묶음(60차, 화면): 카드는 "AI 간단" 배지와 진단 한 줄(펼침 없음 · 지난 거래일 것이면 주황 배지에 날짜) · "왜 움직였나" 출처도 "AI 간단" · 종합분석은 그대로', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const line = (k) => appJs.slice(appJs.indexOf(k), appJs.indexOf('\n', appJs.indexOf(k)));
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const ra = appJs.slice(appJs.indexOf('function renderAnalysis('), appJs.indexOf('// 수급 날짜 표시'));
+  const why = appJs.slice(appJs.indexOf('function whyOf('), appJs.indexOf('function tileHtml('));
+  const el = { innerHTML: '', classList: { toggle() {} }, querySelector: () => ({ addEventListener() {} }) };
+  const ctx = { document: { getElementById: () => el }, state: { analysis: {}, news: {}, status: null, openAnalysis: new Set() }, keyDiscToday: () => null,
+    fmtAiTime: () => '09:55', fmtNextAt: () => '', basisOf: () => '뉴스', WHY_MIN: 2 };
+  const f = vm.runInNewContext([line('function cssId('), line('function esc('), block, ra, why].join('\n') + '; ({ renderAnalysis, whyOf })', ctx);
+  const q = { code: 'A', name: '가나', market: 'KR', ok: true, changePct: 4.2, asOf: '2026-11-13T10:00:00+09:00' };
+  const lite = { headline: '공급 계약 기대에 상승', lite: true, at: T('2026-11-13T09:55:00+09:00') };
+  f.renderAnalysis(q, lite);
+  assert.ok(el.innerHTML.startsWith('<div class="an-lite up"') && el.innerHTML.includes('<span class="an-badge">AI 간단</span><span class="an-head">공급 계약 기대에 상승</span>') && !el.innerHTML.includes('an-toggle'), el.innerHTML);
+  f.renderAnalysis(q, { ...lite, at: T('2026-11-12T14:00:00+09:00') });
+  assert.ok(el.innerHTML.includes('<span class="an-badge old">AI 간단 · 11/12</span>'), '지난 거래일 것: ' + el.innerHTML);
+  f.renderAnalysis(q, { headline: '종합 진단', summary: '요약', factors: ['요인'], at: lite.at });
+  assert.ok(el.innerHTML.includes('an-toggle') && el.innerHTML.includes('AI 종합분석') && !el.innerHTML.includes('AI 간단'), '종합분석은 그대로: ' + el.innerHTML);
+  ctx.state.analysis.A = lite;
+  assert.deepEqual([f.whyOf(q).src, f.whyOf(q).text], ['AI 간단', '공급 계약 기대에 상승']);
+  ctx.state.analysis.A = { headline: '종합 진단', at: lite.at };
+  assert.equal(f.whyOf(q).src, 'AI');
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');

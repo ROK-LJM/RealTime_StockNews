@@ -904,7 +904,8 @@ function keyDiscToday(code, dir = 0) {
 }
 function whyOf(q) {
   const a = state.analysis[q.code];
-  if (q.ai !== false && a && a.headline && aiFresh(q, a)) return { src: 'AI', label: 'AI 진단', text: a.headline }; // 전날 분석·AI를 꺼 둔 종목이면 오늘 공시·뉴스로
+  // 전날 분석·AI를 꺼 둔 종목이면 오늘 공시·뉴스로 · 한 줄 진단만 있으면(60차) 출처 'AI 간단'
+  if (q.ai !== false && a && a.headline && aiFresh(q, a)) return { src: a.lite ? 'AI 간단' : 'AI', label: a.lite ? 'AI 한 줄 진단(여러 종목을 한 번에 본 것 — 종합분석 전)' : 'AI 진단', text: a.headline };
   const d = keyDiscToday(q.code, Math.sign(q.changePct || 0)), disc = d && { src: '공시', label: '오늘 주요 공시', text: `[${d.tag || '공시'}] ${d.title}` };
   if (d && !MINOR_DISC_RE.test(d.title)) return disc;
   const m = marketOf(q), at = +new Date(q.asOf), day = Number.isFinite(at) ? marketYmd(at, m) : '';
@@ -1132,6 +1133,13 @@ function renderAnalysis(q, data) {
   // 지난 거래일에 만든 분석(장이 새로 열렸는데 아직 새 분석 전) — 배지에 그날 날짜를 주황으로
   const oldYmd = aiFresh(q, data) ? '' : marketYmd(data.at, marketOf(q));
   const oldMd = oldYmd ? `${+oldYmd.slice(4, 6)}/${+oldYmd.slice(6, 8)}` : '';
+  // 한 줄 진단만 있을 때(60차 — 여러 종목을 AI 한 번에 묶어 받은 진단) — 펼칠 내용이 없어 'AI 간단' 배지와 진단 한 줄만. 종합분석 차례가 오면 바뀐다
+  if (data.lite) {
+    const tip = `여러 종목을 AI 한 번에 묶어 받은 한 줄 진단${fmtAiTime(data.at) ? `(${fmtAiTime(data.at)})` : ''}${oldMd ? ` — 지난 거래일(${oldMd}) 것` : ''}. 종합분석은 AI 차례가 오면 바뀌어요. 투자조언이 아닙니다.`;
+    el.innerHTML = `<div class="an-lite ${dirCls}" title="${esc(tip)}"><span class="an-badge${oldMd ? ' old' : ''}">AI 간단${oldMd ? ` · ${oldMd}` : ''}</span><span class="an-head">${esc(data.headline)}</span></div>`;
+    el.classList.toggle('open', false);
+    return;
+  }
   const badge = oldMd
     ? `<span class="an-badge old" title="지난 거래일(${oldMd})에 만든 분석 — 오늘 움직임 분석은 AI 차례가 오면 바뀌어요">AI 종합분석 · ${oldMd}</span>`
     : '<span class="an-badge">AI 종합분석</span>';

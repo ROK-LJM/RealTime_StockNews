@@ -14,9 +14,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis, calmExpected,
+  getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis, aiStockBriefs, BRIEF_MAX, calmExpected,
   getSidecarNews, sidecarEvents, mergeMeasures,
-  aiStatus, aiGate, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, pickReasonNews, strongNews, tagSentiment, krBaseName,
+  aiStatus, aiGate, aiRoom, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, pickReasonNews, strongNews, tagSentiment, krBaseName,
 } from './sources.mjs';
 import { startBudget, toStored, totalUsed, capacity, inSession, isKrSession, nextAllowanceAt, closedCheckDay, usExtWindow, usAfterPostSameDay, krHours } from './aibudget.mjs';
 import { validateWatchlist, writeJsonAtomic, analysisSig, sigMove, manifestOf } from './util.mjs';
@@ -354,6 +354,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
   //    ⑥ 종목 편집에서 AI를 꺼 둔 종목(ai: false)은 분석하지 않는다 — 무료 한도를 고른 종목에만(직전 분석도 버린다).
   //    ⑤ 공시 일정 달력의 가까운 일정(그 시장 날짜로 그제~7일 뒤 — 실적 발표 예정·IR·배당락 등)을 원인 후보로 함께 넘긴다.
   //       시그니처에는 넣지 않는다(일정만 바뀌었다고 다시 분석하지 않음 — 새 공시는 공시 쪽 시그니처로 이미 다시 분석된다).
+  //    ⑦ 그날 진단이 없는 종목이 이번 회차 몫보다 많으면 일부를 AI 한 번에 묶어 한 줄 진단('AI 간단')만 먼저 받는다(60차 — 아래 '한 줄 진단 묶음').
   if (!Object.values(quotesByCode).some((q) => q && q.ok)) console.warn('  ! 시세 없음 — analysis.json 유지');
   else try {
     const prev = readJson('analysis.json') || {};
@@ -383,15 +384,33 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
     const movers = items
       .map((it) => ({ it, q: quotesByCode[it.code] }))
       .filter(({ it, q }) => it.ai !== false && q && q.ok && Math.abs(q.changePct ?? 0) >= STOCK_ANALYSIS_THRESHOLD)
-      .map((m) => ({ ...m, f: follows(m.q) ? 1 : 0, d: freshOf(m.it, m.q) ? 1 : 0 }))
+      .map((m) => ({ ...m, sig: analysisSig(m.q, news[m.it.code], investors[m.it.code], disclosures[m.it.code]), f: follows(m.q) ? 1 : 0, d: freshOf(m.it, m.q) ? (prev[m.it.code].lite ? 0.5 : 1) : 0 }))
       .sort((a, b) => (a.d - b.d) || (a.f - b.f) || Math.abs(b.q.changePct ?? 0) - Math.abs(a.q.changePct ?? 0));
-    let calls = 0, deferred = 0, waited = 0;
-    for (const { it, q } of movers) {
-      const sig = analysisSig(q, news[it.code], investors[it.code], disclosures[it.code]);
-      const p = prev[it.code];
-      const open = inSession(it.market, now) && q.marketStatus !== 'CLOSE'; // 장 시간이어도 시세가 '마감'이면 휴장일
-      const settled = p && !open && sigMove(p.sig) === sigMove(sig);
-      if (p && (p.sig === sig || settled)) { analysis[it.code] = p; continue; } // 입력 동일·장 밖 → 재사용
+    // 직전 분석을 그대로 쓸지 — 입력이 같거나, 장 밖(장 시간이어도 시세가 '마감'이면 휴장일)인데 등락 구간이 그대로면 재사용.
+    // 한 줄 진단('AI 간단', 60차)은 그대로 쓰지 않는다 — 종합분석 차례가 오면 바꾼다(차례 d: 진단 없음 0 → 한 줄 진단만 0.5 → 종합분석 재분석 1)
+    const reusable = ({ it, q, sig }) => { const p = prev[it.code], open = inSession(it.market, now) && q.marketStatus !== 'CLOSE'; return !!p && !p.lite && (p.sig === sig || (!open && sigMove(p.sig) === sigMove(sig))); };
+    let calls = 0, deferred = 0, waited = 0, briefed = 0;
+    // 한 줄 진단 묶음(60차) — 그날 진단이 없는 종목이 이번 회차에 부를 수 있는 수(회차 상한·시간 배분 몫)보다 2개 넘게 많으면 한 번을 아껴,
+    // 종합분석 차례가 못 가는 그 다음 종목들(최대 BRIEF_MAX개)을 AI 한 번에 묶어 한 줄 진단만 받는다. 앞쪽 종목은 예전처럼 종합분석
+    // (11/13 10:00 급등락 종목의 28%만 진단 — 몫이 한두 번뿐인 장 초반에 여러 종목이 한꺼번에 움직이면 대부분 진단 없이 기다렸다).
+    // 묶어도 1종목만 더 덮을 때는 묶지 않는다 — 종합분석 하나를 줄이고 나중에 한 번 더 불러야 해 남는 게 없다
+    const need = movers.filter((m) => m.d === 0 && !reusable(m));
+    const room = Math.min(AI_CALLS_PER_RUN, aiRoom());
+    if (room >= 1 && need.length - room >= 2) {
+      const pack = need.slice(room - 1, room - 1 + BRIEF_MAX);
+      calls++;
+      try {
+        const got = await aiStockBriefs(pack.map((m) => ({ quote: m.q, news: news[m.it.code], disclosures: disclosures[m.it.code], market: benchOfQuote(m.q) })), now);
+        for (const m of pack) {
+          const g = got && got[m.it.code];
+          if (g) { analysis[m.it.code] = { headline: g.headline, lite: true, model: g.model, sig: m.sig, at: now }; briefed++; }
+        }
+      } catch (e) { console.error('    한 줄 진단 묶음 실패:', e.message); }
+    }
+    for (const m of movers) {
+      const { it, q, sig } = m;
+      if (analysis[it.code]) continue; // 이번 회차에 한 줄 진단을 받은 종목(60차)
+      if (reusable(m)) { analysis[it.code] = prev[it.code]; continue; } // 입력 동일·장 밖 → 재사용
       const gate = aiGate();
       if (calls >= AI_CALLS_PER_RUN || gate !== 'go') { // 회차 상한·시간 배분·AI 꺼짐 → 기존 분석 유지, 다음 회차에 갱신
         if (prev[it.code]) analysis[it.code] = prev[it.code];
@@ -413,7 +432,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
       const q = quotesByCode[it.code];
       if (q && q.ok && freshOf(it, q)) { analysis[it.code] = prev[it.code]; kept++; }
     }
-    console.log(`  · 종합분석 대상 ${movers.length}건 — 신규 호출 ${calls}건, 다음 회차로 미룸 ${deferred + waited}건${waited ? `(한도 배분 대기 ${waited})` : ''}${kept ? ` · 2% 아래로 내려간 그날 진단 ${kept}건 유지` : ''}`);
+    console.log(`  · 종합분석 대상 ${movers.length}건 — 신규 호출 ${calls}건${briefed ? `(한 줄 진단 묶음 1번 — ${briefed}종목)` : ''}, 다음 회차로 미룸 ${deferred + waited}건${waited ? `(한도 배분 대기 ${waited})` : ''}${kept ? ` · 2% 아래로 내려간 그날 진단 ${kept}건 유지` : ''}`);
     write('analysis.json', analysis);
   } catch (e) { console.error('  ✗ 종합분석 실패 — analysis.json 유지:', e.message); }
 

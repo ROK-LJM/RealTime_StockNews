@@ -701,6 +701,8 @@ export function aiGate() {
   if (!GEMINI_KEY || ai.disabled || !nextModel()) return 'off';
   return !budget || allowance(budget, GEMINI_MODELS) > 0 ? 'go' : 'wait';
 }
+// 지금 더 부를 수 있는 횟수(시간 배분 몫) — 한 줄 진단을 묶을지 정할 때(60차). 부를 수 없으면 0, 예산이 없으면 제한 없음
+export function aiRoom() { return aiGate() !== 'go' ? 0 : budget ? allowance(budget, GEMINI_MODELS) : Infinity; }
 // 시간 배분상 이번엔 부르지 않았음을 기록(호출부가 aiGate로 직접 판단해 건너뛸 때 — 화면에 '순서 대기'로 보인다)
 export function noteAiSkipped() { ai.skipped++; }
 export function aiStatus() {
@@ -811,6 +813,9 @@ export async function aiCoreNews(name, changePct, headlines, now = Date.now()) {
 
 // 보유 종목 ±이 임계치 이상 변동 시, 뉴스만이 아니라 수급·추세·시세를 종합해 "왜 오르내리는지" 분석.
 export const STOCK_ANALYSIS_THRESHOLD = 2;
+// 등락 폭에 맞는 말·막연한 말 금지(57차 — 11/11 TSMC +2.02%를 '급등', 근거 기사 없이 '저가 매수세 유입'·'투자 심리 개선'으로 채운 진단이 많았다).
+// 종합분석과 한 줄 진단 묶음(60차)이 같이 쓴다
+const TONE_RULE = "등락 폭에 맞는 말을 써라 — ±5% 안쪽은 '상승·하락'(또는 강세·약세), 5%를 넘을 때만 '급등·급락'. 뉴스·공시에 그 종목만의 재료가 보이지 않으면 '저가 매수세 유입'·'투자 심리 개선' 같은 막연한 말로 채우지 말고 시장 흐름·수급처럼 위에서 확인되는 근거만 써라.";
 
 // 과거 일봉에서 기간별 등락·고점대비 위치를 뽑아 분석 입력으로 쓴다.
 // 6개월 종가에 지금 가격을 끝값으로(44차, docs/app.js liveSeries와 같은 규칙) — 그날 봉이 있으면 바꾸고 없으면 덧붙임. 개장 전·첫 체결 전·날짜를 모르면 그대로
@@ -893,8 +898,7 @@ export async function aiStockAnalysis({ quote, news, flow, history, disclosures,
     (sched.length ? `가까운 일정(${us ? '나스닥' : '전자공시'} 기준 — 오늘 움직임과 이어질 때만 원인으로):\n${schedLines}\n` : '') +
     `최근 뉴스 제목(앞의 [월/일]은 기사 날짜 — 거래일 전 기사는 그날까지 이어진 재료일 때만 원인으로):\n${heads}\n\n` +
     `단순 시황 중계가 아니라 '원인'에 집중하라. ${basis}를 서로 연결해 설명하고, 근거가 약하면 단정하지 말 것.\n` +
-    // 57차 — 11/11 TSMC +2.02%를 '급등', 근거 기사 없이 '저가 매수세 유입'·'투자 심리 개선'으로 채운 진단이 많았다
-    `등락 폭에 맞는 말을 써라 — ±5% 안쪽은 '상승·하락'(또는 강세·약세), 5%를 넘을 때만 '급등·급락'. 뉴스·공시에 그 종목만의 재료가 보이지 않으면 '저가 매수세 유입'·'투자 심리 개선' 같은 막연한 말로 채우지 말고 시장 흐름·수급처럼 위에서 확인되는 근거만 써라.\n` +
+    `${TONE_RULE}\n` + // 등락 폭에 맞는 말·막연한 말 금지(57차)
     (mk && Math.abs(mk.pct) >= 1 ? `시장 전체가 크게 움직인 날이다 — 시장 흐름 탓인 몫과 이 종목만의 요인을 나눠, 시장보다 더(덜) 움직인 까닭을 짚어라.\n` : '') +
     `반드시 이 JSON만 출력:\n` +
     `{"headline":"오늘 왜 ${dir}하는지 한 문장 진단(한국어, 50자 내외)",` +
@@ -912,6 +916,46 @@ export async function aiStockAnalysis({ quote, news, flow, history, disclosures,
     model: r.model,
     ...(mk ? { mkt: mk.name } : {}), // 화면 면책 문구의 근거에 '시장'
   };
+}
+
+// 한 줄 진단 묶음(60차) — 아직 그날 진단이 없는 종목 여럿을 AI 호출 1번에 묶어 종목마다 '오늘 왜 움직였나' 한 문장만 받는다(화면 'AI 간단').
+// 장 초반처럼 여러 종목이 한꺼번에 움직이면 시간 배분 몫이 한두 번뿐이라 대부분 진단 없이 기다렸다(11/13 10:00 급등락 종목의 28%만 진단).
+// 종합분석은 그 종목 차례가 오면 바꾼다(fetch.mjs). list: [{ quote, news, disclosures, market }](호출부가 BRIEF_MAX개까지 고름)
+// → { 코드: { headline, model } }(받은 종목만), 실패하면 null. 두 종목 미만이면 부르지 않는다(한 종목은 종합분석이 낫다)
+export const BRIEF_MAX = 5;
+export async function aiStockBriefs(list, now = Date.now()) {
+  const rows = (Array.isArray(list) ? list : []).filter((x) => x && x.quote && x.quote.code);
+  if (!GEMINI_KEY || rows.length < 2) return null;
+  const sgn = (v) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`;
+  const today = new Date(now + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, ''); // 한국 날짜 — 공시 접수일과 같은 기준
+  const lines = rows.map(({ quote: q, news, disclosures, market }, i) => {
+    const us = q.market === 'US' || q.currency === 'USD';
+    const tz = us ? 'America/New_York' : 'Asia/Seoul';
+    const qt = Date.parse(q.asOf);
+    const mk = market && market.name && Number.isFinite(market.pct) ? market : null;
+    // 원인이 아닌 기사(CSR_RE, 56차)는 빼고 3건(기사 날짜 붙임) · 국내는 오늘 접수한 공시 2건까지
+    const heads = (news?.items || []).filter((it) => it && it.title && !CSR_RE.test(it.title)).slice(0, 3).map((it) => datedTitle(it, tz));
+    const discs = us ? [] : (disclosures?.items || []).filter((d) => d && d.title && String(d.date) === today).slice(0, 2).map((d) => `[${d.tag || '기타'}] ${d.title}`);
+    return `[${i + 1}] ${q.name || q.code}(${us ? '미국' : '한국'} ${q.code}) · ${mdOf(ymdIn(Number.isFinite(qt) ? qt : now, tz))} 거래일 ${sgn(q.changePct ?? 0)}%`
+      + (mk ? ` · 시장 ${mk.name} ${sgn(mk.pct)}%${Array.isArray(mk.events) && mk.events.length ? `(오늘 ${mk.events.join('·')})` : ''}` : '')
+      + (discs.length ? `\n  오늘 공시: ${discs.join(' / ')}` : '')
+      + `\n  뉴스: ${heads.length ? heads.join(' / ') : '(수집된 뉴스 없음)'}`;
+  }).join('\n');
+  const prompt =
+    `너는 증시 애널리스트다(답은 한국어로). 아래 종목들이 오늘 크게 움직였다. 종목마다 오늘 왜 움직였는지 핵심 원인을 한 문장으로 진단하라.\n` +
+    `뉴스 앞 [월/일]은 기사 날짜 — 거래일 전 기사는 그날까지 이어진 재료일 때만 원인으로. 근거가 약하면 단정하지 말 것.\n` +
+    `${TONE_RULE}\n종목끼리 소식을 섞지 말고, 각 종목은 그 종목 줄의 정보로만 진단하라.\n\n` +
+    `${lines}\n\n` +
+    `반드시 이 JSON만 출력(종목 번호마다 하나): {"items":[{"no":번호,"headline":"오늘 왜 움직였는지 한 문장 진단(한국어, 40자 내외)"}]}`;
+  const r = await geminiJSON(prompt);
+  const got = r && r.json && Array.isArray(r.json.items) ? r.json.items : null;
+  if (!got) return null;
+  const out = {};
+  for (const x of got) {
+    const row = rows[(parseInt(x && x.no, 10) || 0) - 1], h = String((x && x.headline) || '').trim();
+    if (row && h && !out[row.quote.code]) out[row.quote.code] = { headline: h.slice(0, 120), model: r.model };
+  }
+  return out;
 }
 
 // 지수 급등락 "핵심 이유" — 구글뉴스 헤드라인 + (키 있으면) AI 핵심 판단. (전 세계 접근 가능)
