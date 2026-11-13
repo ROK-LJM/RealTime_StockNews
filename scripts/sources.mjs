@@ -808,12 +808,14 @@ const datedTitle = (h, timeZone) => `${Number.isFinite(h && h.pubMs) ? `[${mdOf(
 
 // 헤드라인 목록을 주고 "오늘 가장 가치 있는 핵심 뉴스 1~3개 + 한 줄 요약"을 JSON으로 받는다.
 // 이틀치 기사라 제목 앞에 기사 날짜(한국 날짜)를 붙인다 — 어제 기사를 오늘 원인으로 고르지 않게(30차)
-export async function aiCoreNews(name, changePct, headlines, now = Date.now()) {
+// open: 국내 장중인지(67차 — 장중이면 '지금 …% 보합 중'·'마감' 금지. 11/13 12:10 코스피 -0.35%에 '…코스피가 보합 마감했습니다'를 어제 마감 기사로 썼다)
+export async function aiCoreNews(name, changePct, headlines, now = Date.now(), open = false) {
   if (!GEMINI_KEY || !headlines || !headlines.length) return null;
   const dir = changePct <= -1 ? '급락' : changePct >= 1 ? '급등' : '보합';
   const list = headlines.map((h, i) => `${i + 1}. ${datedTitle(h, 'Asia/Seoul')}${h.source ? ` (${h.source})` : ''}`).join('\n');
   const prompt =
-    `너는 한국 증시 애널리스트다. 오늘(${mdOf(ymdIn(now, 'Asia/Seoul'))}) ${name}이(가) ${changePct.toFixed(2)}% ${dir}했다.\n` +
+    `너는 한국 증시 애널리스트다. 오늘(${mdOf(ymdIn(now, 'Asia/Seoul'))}${open ? ' 장중' : ''}) ${name}이(가) ${open ? `지금 ${changePct.toFixed(2)}%로 ${dir} 중이다` : `${changePct.toFixed(2)}% ${dir}했다`}.\n` +
+    (open ? `아직 장중이다 — '마감'·'마감했다'로 쓰지 말고, 지난 장 마감 기사는 오늘 움직임과 이어질 때만 고를 것.\n` : '') +
     `아래 뉴스 제목 중 오늘 이 움직임을 설명하는, 투자자에게 가장 가치 있고 핵심적인 것만 1~3개 골라라.\n` +
     `제목 앞 [월/일]은 기사 날짜다 — 오늘 기사를 먼저 보고, 지난 기사는 오늘까지 이어진 원인일 때만 고른다.\n` +
     `광고·홍보·중복·단순 시황중계·무관한 것은 제외하고, 실제 원인/재료가 되는 것만 고른다.\n` +
@@ -1006,7 +1008,8 @@ export const INDEX_AI_MIN_INTERVAL_MS = 90 * 60 * 1000;
 // open: 국내 시장이 열려 있는지(기본은 시계 기준 장 시간 — 호출부가 시세의 '마감' 상태로 휴장일을 반영해 넘긴다)
 export async function getIndexReason(name, changePct, prev = null, now = Date.now(), open = isKrSession(now)) {
   const dir = changePct <= -1 ? 'down' : changePct >= 1 ? 'up' : 'flat';
-  const q = dir === 'down' ? `${name} 급락 이유` : dir === 'up' ? `${name} 급등 이유` : `${name} 증시 마감`;
+  // 보합(±1% 안쪽)은 장중엔 '장중' 기사, 장 밖엔 '증시 마감' 기사(67차 — 장중에 '증시 마감'을 찾으면 어제 마감 기사만 나왔다)
+  const q = dir === 'down' ? `${name} 급락 이유` : dir === 'up' ? `${name} 급등 이유` : open ? `${name} 장중` : `${name} 증시 마감`;
   // (aiSig가 없던 이전 형식은 sig가 곧 판단 당시 입력)
   const keep = prev && prev.dir === dir && prev.ai
     ? { ai: prev.ai, aiAt: prev.aiAt ?? null, aiSig: prev.aiSig ?? prev.sig ?? null }
@@ -1018,7 +1021,7 @@ export async function getIndexReason(name, changePct, prev = null, now = Date.no
     const recent = ai && aiAt != null && now - aiAt >= 0 && now - aiAt < INDEX_AI_MIN_INTERVAL_MS;
     const settled = !open && sigMove(aiSig) === sigMove(sig); // 장 밖(휴장 포함) + 등락 그대로 → 뉴스만 바뀜
     if (!ai || (aiSig !== sig && !recent && !settled)) {
-      const fresh = await aiCoreNews(name, changePct, items, now);
+      const fresh = await aiCoreNews(name, changePct, items, now, open);
       if (fresh) { ai = fresh; aiAt = now; aiSig = sig; }
     }
     return { dir, query: q, headlines: items.slice(0, 4), ai, aiAt, aiSig };

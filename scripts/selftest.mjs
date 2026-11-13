@@ -1749,7 +1749,7 @@ await test('AI 입력(30차): 종목 분석에 시장 흐름(같은 시장 지�
   assert.equal(read(root, 'analysis.json')['005930'].mkt, '코스피');
   assert.equal(read(root, 'analysis.json').AAPL.mkt, '나스닥');
   const brief = briefOf();
-  assert.ok(brief.includes('오늘(10/15) 코스피이(가)') && brief.includes('\n1. [' + kstMd(Date.now() - 3600e3) + '] ') && brief.includes('제목 앞 [월/일]은 기사 날짜다'), brief.slice(0, 500));
+  assert.ok(brief.includes('오늘(10/15 장중) 코스피이(가) 지금 -1.20%로 급락 중이다') && brief.includes("아직 장중이다 — '마감'") && brief.includes('\n1. [' + kstMd(Date.now() - 3600e3) + '] ') && brief.includes('제목 앞 [월/일]은 기사 날짜다'), brief.slice(0, 500)); // 장중(67차)
   // 상장 시장을 모르면(검색 목록 없음) 시장 줄·mkt 없음
   const plain = workspace();
   await pipeline(plain, { krAt: NOW_KR });
@@ -2118,7 +2118,7 @@ await test('개장 전 예상 지수(35차): 08:55 전 값은 어제 종가·0%�
   const m1 = read(r1, 'market.json');
   assert.deepEqual(m1.briefs[0].reason, prevReason, '지난 장 판단 그대로');
   assert.equal(briefCalls(), 0, '예상 지수로 AI 안 부름');
-  assert.equal(NET.calls.filter((u) => /news\.google\.com/.test(decodeURIComponent(u)) && /급락 이유|급등 이유|증시 마감/.test(decodeURIComponent(u))).length, 0, '지수 이유 뉴스도 안 받음');
+  assert.equal(NET.calls.filter((u) => /news\.google\.com/.test(decodeURIComponent(u)) && /급락 이유|급등 이유|증시 마감|코스피 장중|코스닥 장중/.test(decodeURIComponent(u))).length, 0, '지수 이유 뉴스도 안 받음');
   assert.deepEqual([m1.indices.find((i) => i.symbol === '^KS11').changePct, m1.briefs[0].changePct], [0, 0], '08:55 전 예상 지수는 0%');
   const r2 = workspace();
   writeData(r2, 'market.json', seed);
@@ -2938,6 +2938,23 @@ await test('이유(65차): 미국 투자 의견·해설 글(Seeking Alpha "X: �
   for (const [t, name, code, pct] of [['Tesla Stock Best Run in a Year on SpaceX Merger Report - Tesla (NASDAQ:TSLA)', '테슬라', 'TSLA', 3],
     ["Super Micro Computer falls 5%, retracing some of Wednesday's gains (SMCI:NASDAQ)", '슈퍼 마이크로 컴퓨터', 'SMCI', -5]])
     assert.equal(pick([t, `${code} annual shareholder meeting scheduled`], pct, [name, code]), t, '뉴스: ' + t);
+});
+await test('지수 핵심 이유(67차): 장중 보합이면 "○○ 장중" 기사·장 밖 보합은 "○○ 증시 마감" · AI에 장중이면 "지금 …% 보합 중"과 "마감 금지", 장 밖이면 "…% 보합했다"', async () => {
+  src.resetState(); src.setAiBudget(null);
+  const now = T('2026-11-13T12:10:00+09:00');
+  const q = () => NET.calls.map((u) => decodeURIComponent(u)).filter((u) => /news\.google\.com/.test(u)).map((u) => new URL(u).searchParams.get('q').replace(/\s+when:\S+/, ''));
+  const body = () => { const b = NET.bodies.find((x, i) => isGemini(NET.calls[i])); return b ? JSON.parse(b).contents[0].parts[0].text : ''; };
+  NET.routes = routes(); NET.calls = []; NET.bodies = []; NET.blocked = [];
+  await src.getIndexReason('코스피', -0.35, null, now, true);
+  assert.ok(q().includes('코스피 장중') && !q().includes('코스피 증시 마감'), '장중 보합 → 장중 기사: ' + q().join(' / '));
+  assert.ok(body().includes('오늘(11/13 장중) 코스피이(가) 지금 -0.35%로 보합 중이다') && body().includes("아직 장중이다 — '마감'·'마감했다'로 쓰지 말고"), body().slice(0, 400));
+  NET.routes = routes(); NET.calls = []; NET.bodies = []; NET.blocked = [];
+  await src.getIndexReason('코스피', -0.35, null, T('2026-11-13T16:30:00+09:00'), false);
+  assert.ok(q().includes('코스피 증시 마감') && !q().includes('코스피 장중'), '장 밖 보합 → 증시 마감 기사');
+  assert.ok(body().includes('오늘(11/13) 코스피이(가) -0.35% 보합했다') && !body().includes('아직 장중이다'), body().slice(0, 300));
+  NET.routes = routes(); NET.calls = []; NET.bodies = []; NET.blocked = [];
+  await src.getIndexReason('코스닥', 2.4, null, now, true);
+  assert.ok(q().includes('코스닥 급등 이유'), '급등락은 그대로 이유 기사');
 });
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');

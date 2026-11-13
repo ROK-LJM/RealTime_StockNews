@@ -283,7 +283,7 @@ const MUTANTS = [
   ["[날짜] 종목 기사 날짜 없음", S, "`${i + 1}. ${datedTitle(it, tz)}`", "`${i + 1}. ${it.title}`"],
   ["[날짜] 지수 기사 날짜 없음", S, "`${i + 1}. ${datedTitle(h, 'Asia/Seoul')}", "`${i + 1}. ${h.title}"],
   ["[날짜] 거래일 대신 지금", S, "const tradeDay = ymdIn(Number.isFinite(qt) ? qt : now, tz);", "const tradeDay = ymdIn(Date.now(), tz);"],
-  ["[날짜] 지수 오늘 날짜 없음", S, "오늘(${mdOf(ymdIn(now, 'Asia/Seoul'))}) ${name}", "오늘 ${name}"],
+  ["[날짜] 지수 오늘 날짜 없음", S, "오늘(${mdOf(ymdIn(now, 'Asia/Seoul'))}${open ? ' 장중' : ''}) ${name}", "오늘${open ? ' 장중' : ''} ${name}"],
   ["[날짜] 왜 움직였나 지난 기사 날짜 없음", A, "...(nd && nd !== day ? {", "...(false ? {"],
   // ---------- 31차 — 시장보다 덜 움직인 종목 · 사회공헌 기사 · 영어 활용형 ----------
   ["[시장 흐름] 덜 움직임 안 봄", A, "within: same && Math.abs(q.changePct) < Math.abs(b.pct) + 1", "within: false"],
@@ -585,6 +585,11 @@ const MUTANTS = [
   ["[AI 지시] 차익 실현 상투어 허용", S, "·'차익 실현 매물 출회'", ""],
   ["[AI 지시] 장중인데 마감 허용", S, "(when === '장중' ? \"아직 장중이다", "(false ? \"아직 장중이다"],
   ["[AI 지시] 종합분석에 장 상태 안 넘김", S, "거래일${when ? ` · ${when}` : ''}): ", "거래일): "],
+  // ---------- 67차 — 지수 핵심 이유 장중 ----------
+  ["[지수 이유] 장중 보합도 마감 기사", S, ": open ? `${name} 장중` : `${name} 증시 마감`;", ": `${name} 증시 마감`;"],
+  ["[지수 이유] 장중 여부 안 넘김", S, "const fresh = await aiCoreNews(name, changePct, items, now, open);", "const fresh = await aiCoreNews(name, changePct, items, now);"],
+  ["[지수 이유] 장중인데 마감 허용", S, "(open ? `아직 장중이다", "(false ? `아직 장중이다"],
+  ["[지수 이유] 장중인데 지난 꼴 말", S, "${open ? ' 장중' : ''}) ${name}이(가) ${open ? `지금", "${open ? ' 장중' : ''}) ${name}이(가) ${false ? `지금"],
   ["[공시 방향] 화면 반대 공시도", A, " && !(dir && discDir(x.title) === -dir)", ""],
   ["[공시 방향] 화면 방향 안 넘김", A, "keyDiscToday(q.code, Math.sign(q.changePct || 0))", "keyDiscToday(q.code)"],
   ["[공시 방향] 봇 반대 공시도", F, " && discDir(x.title) !== -Math.sign(q.changePct)", ""],
