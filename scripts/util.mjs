@@ -89,3 +89,11 @@ export function analysisSig(q, news, flow, disc) {
 }
 // 시그니처의 등락 구간(맨 앞 1% 버킷) — 종목·지수 시그니처 모두 이 형식으로 시작한다
 export const sigMove = (sig) => String(sig ?? '').split('|')[0];
+// 등락만 조금 바뀌었나(71차, 장중 재분석 건너뛰기) — 등락 말고는 입력(수급·뉴스·공시)이 같고, 방향이 같고, 5% 선(급등·급락 말의 기준)을 넘나들지 않고,
+// 차이가 max(2%p, 직전 등락의 30%) 안쪽. 11/08~13 같은 장 재분석 152번 중 47번(전체 호출 309번의 15%)이 등락 구간(1%p)만 바뀐 것이었다 —
+// 슈퍼 마이크로 컴퓨터는 -9~-13%를 오가며 하룻밤 10번, LIG는 11/09 하루 15번 같은 뉴스로 다시 분석됐다
+export function nearSig(a, b) {
+  const [ma, ...ra] = String(a ?? '').split('|'), [mb, ...rb] = String(b ?? '').split('|');
+  const x = Number(ma), y = Number(mb);
+  return ra.join('|') === rb.join('|') && Math.sign(x) === Math.sign(y) && (Math.abs(x) > 5) === (Math.abs(y) > 5) && Math.abs(x - y) < Math.max(2, Math.abs(x) * 0.3);
+}

@@ -3033,6 +3033,37 @@ await test('AI 지시(70차): 위에 없는 사건을 배경지식으로 원인 
   const prompt = JSON.parse(raw).contents?.[0]?.parts?.[0]?.text || '';
   assert.ok(prompt.includes('배경지식으로 끌어와 원인으로 쓰지 말 것') && prompt.includes('지금(2026년 11월)'), '한 줄 진단 묶음도: ' + prompt.slice(0, 900));
 });
+await test('AI 재분석(71차): 장중 등락만 조금 바뀌면(방향·5% 선·뉴스·수급·공시 그대로, 차이 max(2%p, 직전의 30%) 안쪽) 직전 분석 그대로 · 많이 바뀌면 다시 · 장이 끝나면 마감 등락 구간이 다를 때 한 번 다시', async () => {
+  assert.equal(util.nearSig('12|f|뉴스', '13|f|뉴스'), true, '12→13');
+  assert.equal(util.nearSig('12|f|뉴스', '9|f|뉴스'), true, '12→9 — 차이 3 < 3.6');
+  assert.equal(util.nearSig('12|f|뉴스', '8|f|뉴스'), false, '12→8 — 차이 4 ≥ 3.6');
+  assert.equal(util.nearSig('3|f|뉴스', '4|f|뉴스'), true, '3→4 — 차이 1 < 2');
+  assert.equal(util.nearSig('3|f|뉴스', '5|f|뉴스'), false, '3→5 — 차이 2면 다시');
+  assert.equal(util.nearSig('-12|f|뉴스|d:1', '-11|f|뉴스|d:1'), true, '내린 쪽·공시 그대로');
+  assert.equal(util.nearSig('2|f|뉴스', '-2|f|뉴스'), false, '방향이 바뀌면 다시');
+  assert.equal(util.nearSig('1|f|뉴스', '0|f|뉴스'), false, '부호가 다르면(0 포함) 차이가 작아도 다시 — 기준이 바뀌어도 방향은 늘 따로 본다');
+  assert.equal(util.nearSig('6|f|뉴스', '5|f|뉴스'), false, '5% 선을 넘나들면 다시(급등·급락 말)');
+  assert.equal(util.nearSig('5|f|뉴스', '4|f|뉴스'), true, '5% 선 안쪽끼리');
+  assert.equal(util.nearSig('12|f|뉴스', '12|f|새 뉴스'), false, '뉴스가 바뀌면 다시');
+  assert.equal(util.nearSig('12|f|뉴스', '13|g|뉴스'), false, '수급이 바뀌면 다시');
+  assert.equal(util.nearSig('12|f|뉴스|d:1', '13|f|뉴스|d:2'), false, '공시가 바뀌면 다시');
+  assert.equal(util.nearSig(null, '3|f'), false);
+  assert.equal(util.nearSig('x|f', 'y|f'), false, '등락이 숫자가 아니면 다시');
+  // 봇 — 장중 12% 분석 → 13% 그대로 → 8% 다시 → 마감 9%(구간 다름) 한 번 다시 → 마감 9% 그대로
+  const stockCalls = () => NET.bodies.filter((b, i) => isGemini(NET.calls[i]) && b.includes("'삼성전자'이(가)")).length;
+  const r = workspace();
+  await pipeline(r, { krPct: { '005930': 12, '000660': 0.3 }, krAt: NOW_KR });
+  assert.equal(stockCalls(), 1);
+  await pipeline(r, { krPct: { '005930': 13, '000660': 0.3 }, krAt: NOW_KR + 5 * MIN }, NOW_KR + 5 * MIN);
+  assert.equal(stockCalls(), 0, '장중 12→13% — 직전 분석 그대로');
+  assert.equal(read(r, 'analysis.json')['005930'].sig.split('|')[0], '12', '비교 기준은 직전 분석 때 등락(조금씩 밀려도 쌓임)');
+  await pipeline(r, { krPct: { '005930': 8, '000660': 0.3 }, krAt: NOW_KR + 10 * MIN }, NOW_KR + 10 * MIN);
+  assert.equal(stockCalls(), 1, '장중 12→8% — 다시');
+  await pipeline(r, { krPct: { '005930': 9, '000660': 0.3 }, krAt: NOW_KR + 15 * MIN, krStatus: 'CLOSE' }, NOW_KR + 15 * MIN);
+  assert.equal(stockCalls(), 1, '마감 9%(분석 때 8%) — 한 번 다시');
+  await pipeline(r, { krPct: { '005930': 9, '000660': 0.3 }, krAt: NOW_KR + 20 * MIN, krStatus: 'CLOSE' }, NOW_KR + 20 * MIN);
+  assert.equal(stockCalls(), 0, '마감 9% 그대로 — 재사용');
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');

@@ -19,7 +19,7 @@ import {
   aiStatus, aiGate, aiRoom, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, pickReasonNews, strongNews, tagSentiment, krBaseName,
 } from './sources.mjs';
 import { startBudget, toStored, totalUsed, capacity, inSession, isKrSession, nextAllowanceAt, closedCheckDay, usExtWindow, usAfterPostSameDay, krHours } from './aibudget.mjs';
-import { validateWatchlist, writeJsonAtomic, analysisSig, sigMove, manifestOf } from './util.mjs';
+import { validateWatchlist, writeJsonAtomic, analysisSig, sigMove, nearSig, manifestOf } from './util.mjs';
 import { dartEnabled, resetDart, dartHalted, ensureCorpTable, getDisclosures, MINOR_DISC_RE, discDir } from './dart.mjs';
 import { calendarDue, buildCalendar } from './calendar.mjs';
 
@@ -387,8 +387,9 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
       .map((m) => ({ ...m, sig: analysisSig(m.q, news[m.it.code], investors[m.it.code], disclosures[m.it.code]), f: follows(m.q) ? 1 : 0, d: freshOf(m.it, m.q) ? (prev[m.it.code].lite ? 0.5 : 1) : 0 }))
       .sort((a, b) => (a.d - b.d) || (a.f - b.f) || Math.abs(b.q.changePct ?? 0) - Math.abs(a.q.changePct ?? 0));
     // 직전 분석을 그대로 쓸지 — 입력이 같거나, 장 밖(장 시간이어도 시세가 '마감'이면 휴장일)인데 등락 구간이 그대로면 재사용.
+    // 장중엔 등락만 조금 바뀐 것도 재사용(71차, nearSig) — 장이 끝나면 마감 등락과 구간이 다를 때 한 번 다시(그날 기록엔 마감 등락에 맞는 말이 남게)
     // 한 줄 진단('AI 간단', 60차)은 그대로 쓰지 않는다 — 종합분석 차례가 오면 바꾼다(차례 d: 진단 없음 0 → 한 줄 진단만 0.5 → 종합분석 재분석 1)
-    const reusable = ({ it, q, sig }) => { const p = prev[it.code], open = inSession(it.market, now) && q.marketStatus !== 'CLOSE'; return !!p && !p.lite && p.pv === ANALYSIS_PV && (p.sig === sig || (!open && sigMove(p.sig) === sigMove(sig))); }; // 지시문 판이 다르면 다시(69차)
+    const reusable = ({ it, q, sig }) => { const p = prev[it.code], open = inSession(it.market, now) && q.marketStatus !== 'CLOSE'; return !!p && !p.lite && p.pv === ANALYSIS_PV && (p.sig === sig || (!open && sigMove(p.sig) === sigMove(sig)) || (open && nearSig(p.sig, sig))); }; // 지시문 판이 다르면 다시(69차)
     let calls = 0, deferred = 0, waited = 0, briefed = 0;
     // 한 줄 진단 묶음(60차) — 그날 진단이 없는 종목이 이번 회차에 부를 수 있는 수(회차 상한·시간 배분 몫)보다 2개 넘게 많으면 한 번을 아껴,
     // 종합분석 차례가 못 가는 그 다음 종목들(최대 BRIEF_MAX개)을 AI 한 번에 묶어 한 줄 진단만 받는다. 앞쪽 종목은 예전처럼 종합분석
