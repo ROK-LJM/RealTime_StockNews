@@ -1040,7 +1040,12 @@ export async function getIndexReason(name, changePct, prev = null, now = Date.no
     let { ai, aiAt, aiSig, aiQuery } = keep;
     const recent = ai && aiAt != null && now - aiAt >= 0 && now - aiAt < INDEX_AI_MIN_INTERVAL_MS;
     const settled = !open && sigMove(aiSig) === sigMove(sig); // 장 밖(휴장 포함) + 등락 그대로 → 뉴스만 바뀜
-    if (!ai || (aiSig !== sig && !recent && !settled)) {
+    // 장이 끝나면 다른 검색어(보합의 '장중')로 만든 판단을 마감 기사로 한 번 다시(73차) — 오늘 날짜에 제목에 '마감'이 든 기사가 나온 뒤에만(마감 직후엔
+    // 어제 마감 기사뿐일 수 있다). 11/13 코스피 -0.98%: 15:25 '장중' 기사로 만든 '…코스피가 하락세로 돌아섰습니다'가 등락 구간이 그대로라 마감 뒤·주말 내내 남았다.
+    // 장중엔 검색어가 다른 판단을 이미 버려(68차) 해당 없고, 급등락은 장 안팎 검색어가 같아 해당 없다
+    const kstDay = ymdIn(now, 'Asia/Seoul');
+    const closeRedo = aiQuery !== q && items.some((i) => Number.isFinite(i.pubMs) && ymdIn(i.pubMs, 'Asia/Seoul') === kstDay && /마감/.test(i.title));
+    if (!ai || closeRedo || (aiSig !== sig && !recent && !settled)) {
       const fresh = await aiCoreNews(name, changePct, items, now, open);
       if (fresh) { ai = fresh; aiAt = now; aiSig = sig; aiQuery = q; }
     }

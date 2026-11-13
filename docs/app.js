@@ -1332,7 +1332,8 @@ async function loadStatus() {
     if (!ai || !AI_STATE[ai.state]) { el.hidden = true; return; }
     const [dot, baseLabel] = AI_STATE[ai.state];
     const next = ai.state === 'wait' ? fmtNextAt(ai.next) : '';
-    const label = next ? `AI 순서 대기 — 다음 분석 ${next === '곧' ? '곧 재개' : `${next}부터`} (국내 장 우선 배분)` : baseLabel;
+    // 괄호는 '장 시간에 맞춰 나눠 씀'(73차 — 예전 '국내 장 우선 배분'은 금요일 밤처럼 한도일(17시~다음 날 17시)에 국내 장이 없으면 틀린 말이었다)
+    const label = next ? `AI 순서 대기 — 다음 분석 ${next === '곧' ? '곧 재개' : `${next}부터`} (장 시간에 맞춰 나눠 씀)` : baseLabel;
     const count = Number.isFinite(ai.used) && Number.isFinite(ai.cap) && ai.cap > 0 ? ` · 무료 한도 ${ai.used}/${ai.cap}회` : '';
     el.innerHTML = `<span class="sdot${dot ? ' ' + dot : ''}"></span>${esc(label + count)}`;
     // 자세한 내용은 마우스를 올리면 — 모델별 사용 횟수·제외된 모델·초기화 시각

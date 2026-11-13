@@ -616,6 +616,11 @@ const MUTANTS = [
   ["[AI 재분석] 차이 기준 2%p 없음", U, "Math.max(2, Math.abs(x) * 0.3)", "Math.abs(x) * 0.3"],
   ["[AI 재분석] 차이 기준 30% 없음", U, "Math.max(2, Math.abs(x) * 0.3)", "2"],
   ["[AI 재분석] 경계 포함", U, "Math.abs(x - y) < Math.max(", "Math.abs(x - y) <= Math.max("],
+  // ---------- 73차 — 지수 핵심 마감 뒤 한 번 다시 ----------
+  ["[지수 마감] 장 끝나도 다시 안 함", S, "if (!ai || closeRedo || (", "if (!ai || ("],
+  ["[지수 마감] 검색어 같아도 다시", S, "const closeRedo = aiQuery !== q && ", "const closeRedo = "],
+  ["[지수 마감] 오늘 날짜 안 봄", S, "ymdIn(i.pubMs, 'Asia/Seoul') === kstDay && ", ""],
+  ["[지수 마감] 마감 기사 안 봄", S, " && /마감/.test(i.title));", ");"],
   ["[공시 방향] 화면 반대 공시도", A, " && !(dir && discDir(x.title) === -dir)", ""],
   ["[공시 방향] 화면 방향 안 넘김", A, "keyDiscToday(q.code, Math.sign(q.changePct || 0))", "keyDiscToday(q.code)"],
   ["[공시 방향] 봇 반대 공시도", F, " && discDir(x.title) !== -Math.sign(q.changePct)", ""],
