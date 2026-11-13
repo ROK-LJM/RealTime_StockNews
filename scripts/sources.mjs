@@ -933,10 +933,13 @@ export async function aiStockBriefs(list, now = Date.now()) {
     const tz = us ? 'America/New_York' : 'Asia/Seoul';
     const qt = Date.parse(q.asOf);
     const mk = market && market.name && Number.isFinite(market.pct) ? market : null;
-    // 원인이 아닌 기사(CSR_RE, 56차)는 빼고 3건(기사 날짜 붙임) · 국내는 오늘 접수한 공시 2건까지
-    const heads = (news?.items || []).filter((it) => it && it.title && !CSR_RE.test(it.title)).slice(0, 3).map((it) => datedTitle(it, tz));
+    // 원인이 아닌 기사(CSR_RE, 56차)와 시세만 알려 주는 기사(priceOnly)는 빼고 최신 3건(기사 날짜 붙임) · 국내는 오늘 접수한 공시 2건까지
+    // (61차 — 11/13 LS ELECTRIC은 앞 3건이 지난 기사·시세 안내라 오늘 기사가 밀렸다)
+    const pub = (it) => (Number.isFinite(it.pubMs) ? it.pubMs : 0);
+    const heads = (news?.items || []).filter((it) => it && it.title && !CSR_RE.test(it.title) && !priceOnly(it.title)).sort((a, b) => pub(b) - pub(a)).slice(0, 3).map((it) => datedTitle(it, tz));
     const discs = us ? [] : (disclosures?.items || []).filter((d) => d && d.title && String(d.date) === today).slice(0, 2).map((d) => `[${d.tag || '기타'}] ${d.title}`);
-    return `[${i + 1}] ${q.name || q.code}(${us ? '미국' : '한국'} ${q.code}) · ${mdOf(ymdIn(Number.isFinite(qt) ? qt : now, tz))} 거래일 ${sgn(q.changePct ?? 0)}%`
+    const when = { OPEN: '장중', CLOSE: '장 마감', PREOPEN: '개장 전' }[q.marketStatus] || ''; // 장중 종목에 '마감했다'고 쓰지 않게(61차)
+    return `[${i + 1}] ${q.name || q.code}(${us ? '미국' : '한국'} ${q.code}) · ${mdOf(ymdIn(Number.isFinite(qt) ? qt : now, tz))} 거래일 ${sgn(q.changePct ?? 0)}%${when ? `(${when})` : ''}`
       + (mk ? ` · 시장 ${mk.name} ${sgn(mk.pct)}%${Array.isArray(mk.events) && mk.events.length ? `(오늘 ${mk.events.join('·')})` : ''}` : '')
       + (discs.length ? `\n  오늘 공시: ${discs.join(' / ')}` : '')
       + `\n  뉴스: ${heads.length ? heads.join(' / ') : '(수집된 뉴스 없음)'}`;
@@ -944,7 +947,10 @@ export async function aiStockBriefs(list, now = Date.now()) {
   const prompt =
     `너는 증시 애널리스트다(답은 한국어로). 아래 종목들이 오늘 크게 움직였다. 종목마다 오늘 왜 움직였는지 핵심 원인을 한 문장으로 진단하라.\n` +
     `뉴스 앞 [월/일]은 기사 날짜 — 거래일 전 기사는 그날까지 이어진 재료일 때만 원인으로. 근거가 약하면 단정하지 말 것.\n` +
-    `${TONE_RULE}\n종목끼리 소식을 섞지 말고, 각 종목은 그 종목 줄의 정보로만 진단하라.\n\n` +
+    `${TONE_RULE}\n종목끼리 소식을 섞지 말고, 각 종목은 그 종목 줄의 정보로만 진단하라.\n` +
+    // 61차 — 11/13 첫 묶음: 기사 없는 샌즈랩 '시장 수급 개선에 따른 투자 심리 회복', 빚보증 기사로 '투자 심리 개선으로 상승'(한화솔루션), 장중인데 '상승 마감했다'(두산에너빌리티)
+    `그 종목만의 재료가 뉴스·공시에 없으면 지어내지 말고 '뚜렷한 재료 없이 시장 흐름 따라 상승'처럼 재료가 없다고 써라(시장과 반대 방향이면 '뚜렷한 재료 없이 상승'). 오늘 방향과 반대인 소식(오른 날의 악재·내린 날의 호재)은 원인으로 쓰지 말 것.\n` +
+    `'…에 상승'·'…로 하락'처럼 짧게 끝맺어라('마감했다'·'보였다' 같은 문장 끝은 쓰지 말 것).\n\n` +
     `${lines}\n\n` +
     `반드시 이 JSON만 출력(종목 번호마다 하나): {"items":[{"no":번호,"headline":"오늘 왜 움직였는지 한 문장 진단(한국어, 40자 내외)"}]}`;
   const r = await geminiJSON(prompt);

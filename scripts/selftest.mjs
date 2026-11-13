@@ -2719,14 +2719,14 @@ await test('관련도(59차): 종목 이름 바로 뒤 "홀딩스"·"지주"는 
   assert.equal(src.isRelevantNews('심텍, 메모리 3사와 장기공급계약 협의', st), true);
   assert.equal(src.isRelevantNews('OCI홀딩스, 폴리실리콘 공급 확대', { code: '010060', market: 'KR', name: 'OCI홀딩스' }), true, '이름에 홀딩스가 든 종목');
 });
-await test('한 줄 진단 묶음(60차, AI 요청): 종목마다 [번호] 이름(시장 코드)·거래일 등락·시장 흐름·오늘 공시(국내만)·원인 아닌 기사 뺀 뉴스 3건 · 등락 폭 말 지시 · 번호로 받기(엉뚱한 번호·빈 진단·겹침은 버림) · 두 종목 미만이면 안 부름', async () => {
+await test('한 줄 진단 묶음(60·61차, AI 요청): 종목마다 [번호] 이름(시장 코드)·거래일 등락(장 상태)·시장 흐름·오늘 공시(국내만)·원인 아닌 기사·시세 안내 뺀 최신 뉴스 3건 · 등락 폭 말·재료 없으면 없다고·반대 소식 금지·짧은 끝맺음 · 번호로 받기(엉뚱한 번호·빈 진단·겹침은 버림) · 두 종목 미만이면 안 부름', async () => {
   src.resetState(); src.setAiBudget(null);
   const it = (title, iso) => ({ title, pubMs: T(iso) });
-  const kr = { quote: { code: '000001', name: '가나', market: 'KR', changePct: 4.2, asOf: '2026-11-13T09:58:00+09:00' }, market: { name: '코스피', pct: 1.2, events: ['매수 사이드카 09:12'] },
-    news: { items: [it('가나, 산학협력 인재 양성 협약', '2026-11-13T09:00:00+09:00'), it('가나, 대규모 공급 계약', '2026-11-13T09:10:00+09:00'), it('가나 신제품 출시', '2026-11-12T15:00:00+09:00'),
-      it('가나 실적 기대', '2026-11-12T10:00:00+09:00'), it('가나 넷째 기사', '2026-11-12T09:00:00+09:00')] },
+  const kr = { quote: { code: '000001', name: '가나', market: 'KR', changePct: 4.2, marketStatus: 'OPEN', asOf: '2026-11-13T09:58:00+09:00' }, market: { name: '코스피', pct: 1.2, events: ['매수 사이드카 09:12'] },
+    news: { items: [it('가나 지난주 기사', '2026-11-10T09:00:00+09:00'), it('가나, 산학협력 인재 양성 협약', '2026-11-13T09:00:00+09:00'), it('가나 주가, 11월 13일 장중 10,000원 4.20% 상승', '2026-11-13T09:50:00+09:00'),
+      it('가나 신제품 출시', '2026-11-12T15:00:00+09:00'), it('가나, 대규모 공급 계약', '2026-11-13T09:10:00+09:00'), it('가나 실적 기대', '2026-11-12T10:00:00+09:00')] },
     disclosures: { items: [{ date: '20261113', tag: '계약', title: '단일판매ㆍ공급계약체결' }, { date: '20261112', tag: '실적', title: '영업(잠정)실적(공정공시)' }] } };
-  const us = { quote: { code: 'NVDA', name: '엔비디아', market: 'US', changePct: -3.1, asOf: '2026-11-12T21:00:00Z' }, news: { items: [it('Nvidia falls on export curbs', '2026-11-12T18:00:00Z')] },
+  const us = { quote: { code: 'NVDA', name: '엔비디아', market: 'US', changePct: -3.1, marketStatus: 'CLOSE', asOf: '2026-11-12T21:00:00Z' }, news: { items: [it('Nvidia falls on export curbs', '2026-11-12T18:00:00Z')] },
     disclosures: { items: [{ date: '20261113', tag: '계약', title: '미국 종목엔 없는 공시' }] } };
   const none = { quote: { code: '000002', name: '다라', market: 'KR', changePct: -2.5, asOf: '2026-11-13T09:58:00+09:00' } };
   const reply = { items: [{ no: 1, headline: '  공급 계약에 상승  ' }, { no: '2', headline: '수출 규제 우려에 하락' }, { no: 9, headline: '엉뚱한 번호' }, { no: 3, headline: '' }, { no: 1, headline: '겹침' }] };
@@ -2735,12 +2735,15 @@ await test('한 줄 진단 묶음(60차, AI 요청): 종목마다 [번호] 이�
   assert.deepEqual(Object.entries(got || {}).map(([c, v]) => [c, v.headline]), [['000001', '공급 계약에 상승'], ['NVDA', '수출 규제 우려에 하락']], '번호로 받기 — 엉뚱한 번호·빈 진단·겹침은 버림');
   assert.equal(geminiCalls(), 1, 'AI 한 번');
   const prompt = JSON.parse(NET.bodies.find((b, i) => isGemini(NET.calls[i]))).contents[0].parts[0].text;
-  assert.ok(prompt.includes('[1] 가나(한국 000001) · 11/13 거래일 +4.20% · 시장 코스피 +1.20%(오늘 매수 사이드카 09:12)\n'), prompt);
+  assert.ok(prompt.includes('[1] 가나(한국 000001) · 11/13 거래일 +4.20%(장중) · 시장 코스피 +1.20%(오늘 매수 사이드카 09:12)\n'), prompt);
   assert.ok(prompt.includes('  오늘 공시: [계약] 단일판매ㆍ공급계약체결\n') && !prompt.includes('영업(잠정)실적'), '국내는 오늘 공시만');
-  assert.ok(prompt.includes('  뉴스: [11/13] 가나, 대규모 공급 계약 / [11/12] 가나 신제품 출시 / [11/12] 가나 실적 기대\n'), '원인 아닌 기사 빼고 3건 · 기사 날짜');
-  assert.ok(prompt.includes('[2] 엔비디아(미국 NVDA) · 11/12 거래일 -3.10%\n  뉴스: [11/12] Nvidia falls on export curbs\n') && !prompt.includes('미국 종목엔 없는 공시'), '미국 — 뉴욕 날짜·공시 없음');
+  assert.ok(prompt.includes('  뉴스: [11/13] 가나, 대규모 공급 계약 / [11/12] 가나 신제품 출시 / [11/12] 가나 실적 기대\n') && !prompt.includes('장중 10,000원') && !prompt.includes('지난주 기사'),
+    '원인 아닌 기사·시세 안내 빼고 최신 3건 · 기사 날짜: ' + prompt);
+  assert.ok(prompt.includes('[2] 엔비디아(미국 NVDA) · 11/12 거래일 -3.10%(장 마감)\n  뉴스: [11/12] Nvidia falls on export curbs\n') && !prompt.includes('미국 종목엔 없는 공시'), '미국 — 뉴욕 날짜·공시 없음');
   assert.ok(prompt.includes('[3] 다라(한국 000002) · 11/13 거래일 -2.50%\n  뉴스: (수집된 뉴스 없음)\n'), prompt);
   assert.ok(prompt.includes("5%를 넘을 때만 '급등·급락'") && prompt.includes('막연한 말로 채우지 말고'), '등락 폭 말 지시(57차와 같음)');
+  assert.ok(prompt.includes("'뚜렷한 재료 없이 시장 흐름 따라 상승'처럼 재료가 없다고") && prompt.includes('오늘 방향과 반대인 소식') && prompt.includes("'…에 상승'·'…로 하락'처럼 짧게 끝맺어라"),
+    '재료가 없으면 없다고 · 반대 방향 소식은 원인 아님 · 짧은 끝맺음(61차)');
   NET.calls = []; NET.bodies = [];
   assert.equal(await src.aiStockBriefs([kr], T('2026-11-13T10:00:00+09:00')), null, '한 종목이면 안 부름');
   assert.equal(geminiCalls(), 0);
