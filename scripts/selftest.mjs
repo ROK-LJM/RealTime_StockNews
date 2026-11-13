@@ -2292,6 +2292,8 @@ await test('이유·뉴스(41차): 시세 안내 "…원 10,000원 6.22% 상승"
   assert.equal(pick(['SK텔레콤 주가 전망, 반등 이어질까', 'SK텔레콤 업황 점검'], 3), 'SK텔레콤 업황 점검', '주가 전망 글은 맨 뒤');
   assert.equal(pick(['"주당 2,500원 나옵니다.." 현대차 11월 배당, 60대 100주 계산해봤더니', '현대차 업황 점검'], 2, ['현대차']), '현대차 업황 점검', '…봤더니 해설은 맨 뒤');
   assert.equal(pick(['[N2 증시 풍향계] 삼성전자·SK하이닉스·한진칼·대한항공·NHN ‘강세’', 'SK하이닉스 신공장 착공'], 6, ['SK하이닉스']), 'SK하이닉스 신공장 착공', '나열 기사는 맨 뒤');
+  // 꼭지 이름 없이 가운뎃점만으로도(62차 — 위 제목은 42차부터 '풍향계' 꼭지 규칙에도 걸려 가운뎃점 규칙이 가려져 있었다)
+  assert.equal(pick(['삼성전자·SK하이닉스·한진칼·대한항공·NHN 동반 강세', 'SK하이닉스 신공장 착공'], 6, ['SK하이닉스']), 'SK하이닉스 신공장 착공', '가운뎃점 4종목 넘게 나열은 맨 뒤');
   assert.equal(pick(["[특징주] 삼성전자·SK하이닉스, 美 기술주 급반등.. 동반 '강세'", '삼성전자 신공장 착공'], 5, ['삼성전자']), "[특징주] 삼성전자·SK하이닉스, 美 기술주 급반등.. 동반 '강세'", '두 종목은 나열 아님');
   assert.equal(pick(['재능대·유진로봇, 로봇·AI 실무인재 양성 산학협력 협약'], 7, ['유진로봇']), null, '산학협력·인재 양성은 이유 아님');
 });
@@ -2816,6 +2818,49 @@ await test('한 줄 진단 묶음(60차, 화면): 카드는 "AI 간단" 배지�
   assert.deepEqual([f.whyOf(q).src, f.whyOf(q).text], ['AI 간단', '공급 계약 기대에 상승']);
   ctx.state.analysis.A = { headline: '종합 진단', at: lite.at };
   assert.equal(f.whyOf(q).src, 'AI');
+});
+await test('이유(62차): 잡포스트식 자동 시세 기사(…원 형성·…원 기록한…거래대금·…원 약보합)는 시세 안내 · 자동 해설 틀(N% 하락한 X,·…점검한 X, N% 상승·N% 하락…이 변수·…에 시선)은 맨 뒤 · 동반성장·추모는 이유 아님 · 목표주가 방향은 호재·악재로 · 규제·제재 완화는 호재 · 봇·화면 같음', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(block + '; ({ pickReasonNews, priceOnly })', {});
+  const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const it = (title) => ({ title, pubMs: T('2026-11-13T10:00:00+09:00'), sentiment: src.tagSentiment(title) });
+  const pick = (titles, pct, names) => {
+    const list = titles.map(it), a = src.pickReasonNews(list, pct, '20261113', kst, names), b = f.pickReasonNews(list, pct, '20261113', kst, names);
+    assert.equal(b ? b.title : null, a ? a.title : null, '봇·화면 같은 선택: ' + titles.join(' / '));
+    return a ? a.title : null;
+  };
+  // 시세 안내(실제 11/12~11/13 잡포스트 제목) — 봇·화면 같게
+  for (const t of ['한화오션 거래량 587,295주…47,650원 형성', '109,100원 기록한 안랩, 거래대금 43,839백만원', 'LS ELECTRIC 12만400원 약보합…장중 낙폭 축소', '대덕전자 14만6200원 보합권…고사양 기판 수율이 관건', '한화솔루션 2만4500원 강보합…거래량 359만주']) {
+    assert.equal(src.priceOnly(t), true, '봇: ' + t); assert.equal(f.priceOnly(t), true, '화면: ' + t);
+  }
+  for (const t of ['삼성전자 7만원 돌파…외국인 순매수', '현대차 거래량 급증…로봇 기대감에 5% 상승', '한화오션, 보합권 등락 속 수주 소식']) {
+    assert.equal(src.priceOnly(t), false, '봇: ' + t); assert.equal(f.priceOnly(t), false, '화면: ' + t);
+  }
+  // 자동 해설 틀은 맨 뒤 — 보통 기사가 있으면 그것
+  for (const [t, name, pct] of [['5.88% 하락한 한화솔루션, 태양광 모듈·미국 생산 점검', '한화솔루션', -5], ['해외 플랜트 수주와 원가 관리 점검한 삼성E&A, 2.79% 상승', '삼성E&A', 4.4],
+    ['한화오션 6.39% 하락…LNG선 수주잔고와 공정 손익이 변수', '한화오션', -6.4], ['현대건설 8만4700원 마감…원가 정상화와 수주잔고에 시선', '현대건설', 2.9],
+    ['조선 수주잔고와 고선가 선박 인도에 시선…HD현대중공업 장중 271,500원', 'HD현대중공업', 3.4]])
+    assert.equal(pick([t, name + ' 업황 점검'], pct, [name]), name + ' 업황 점검', '맨 뒤: ' + t);
+  // 이유 아님
+  for (const [t, name] of [['두산에너빌리티, 동반위 동반성장지수평가 ‘최우수 명예기업’ 선정', '두산에너빌리티'], ["[기업] HD건설기계, 에티오피아에 6·25 '추모의 벽' 건립", 'HD건설기계'],
+    ["한화솔루션, 물류개선경진'대상'", '한화솔루션'], ["삼성E&A, 중동 'MEED 프로젝트상' 쾌거", '삼성E&A'], ['안랩, ‘디지털포렌식 챌린지 2026’ 우수상…민간 부문 1위', '안랩']])
+    assert.equal(pick([t], 2.5, [name]), null, '이유 아님: ' + t);
+  // 목표주가 방향 — 오른 날의 목표가 하향 기사는 이유 아님, 내린 날엔 이유
+  const tp = '유안타증권 "HD현대중공업 목표주가 하향, 마스가 수혜 기대감 낮아져"';
+  assert.equal(src.tagSentiment(tp).tone, 'neg', '[수혜·하향]이어도 목표주가 하향이면 악재');
+  assert.equal(pick([tp], 4.3, ['HD현대중공업']), null, '오른 날의 목표가 하향 기사');
+  assert.equal(pick([tp], -3, ['HD현대중공업']), tp, '내린 날엔 이유');
+  assert.equal(src.tagSentiment('LS증권 "LIG D&A, 방사청 제재 정지·수주 증가 확인 필요"…목표가↓').tone, 'neg', '목표가↓');
+  assert.equal(src.tagSentiment('"삼성전자 69만원"…목표주가 더 높인 반도체 애널리스트의 근거는?').tone, 'pos', '목표주가 높임');
+  // 규제·제재 완화·유예는 호재 · 규제 강화는 그대로 악재
+  const rx = '씨에스윈드 미국 해상풍력 규제 완화 논의에 기대감, 방성훈 보조금 공백에 대비 가능해져';
+  assert.equal(src.tagSentiment(rx).tone, 'pos', '규제 완화');
+  assert.equal(pick([rx], -5.9, ['씨에스윈드']), null, '내린 날의 규제 완화 기사');
+  assert.equal(src.tagSentiment('中, 한화오션 美자회사 제재 유예 2개월 연장').tone, 'pos', '제재 유예');
+  assert.equal(src.tagSentiment('정부, 플랫폼 규제 강화 추진').tone, 'neg', '규제 강화');
+  assert.equal(src.tagSentiment('현대차, 원화 강세·원자재 부담…목표가 하향').tone, 'neg');
 });
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
