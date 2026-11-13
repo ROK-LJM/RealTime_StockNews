@@ -431,7 +431,9 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
     for (const it of items) {
       if (analysis[it.code] || it.ai === false) continue;
       const q = quotesByCode[it.code];
-      if (q && q.ok && freshOf(it, q)) { analysis[it.code] = prev[it.code]; kept++; }
+      // 판이 다른 예전 진단은 남기지 않는다(72차) — 2% 아래로 내려간 종목은 다시 분석하지 않아, 지시문을 고치기 전 진단('외국인 순매수 유입으로 상승'·
+      // '시장 반등에 따른 저가 매수세 유입')이 장이 끝난 뒤에도 카드에 남았다(11/13 마감 뒤 휴림로봇·한화오션·HD현대중공업 등 — 주말엔 이틀 넘게). 다시 ±2%를 넘으면 처음부터
+      if (q && q.ok && freshOf(it, q) && prev[it.code].pv === ANALYSIS_PV) { analysis[it.code] = prev[it.code]; kept++; }
     }
     console.log(`  · 종합분석 대상 ${movers.length}건 — 신규 호출 ${calls}건${briefed ? `(한 줄 진단 묶음 1번 — ${briefed}종목)` : ''}, 다음 회차로 미룸 ${deferred + waited}건${waited ? `(한도 배분 대기 ${waited})` : ''}${kept ? ` · 2% 아래로 내려간 그날 진단 ${kept}건 유지` : ''}`);
     write('analysis.json', analysis);

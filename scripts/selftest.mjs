@@ -2655,7 +2655,7 @@ await test('AI 종합분석 순서(54차): 그날 진단이 아직 없는 종목
 });
 await test('AI 진단 유지(55차): 그날 진단은 등락이 잠깐 ±2% 아래로 내려가도 남김(다시 분석 안 함) · 방향이 바뀌었거나 지난날 진단·AI 끈 종목은 버림', async () => {
   const geminiNames = () => NET.bodies.filter((b, i) => isGemini(NET.calls[i]) && !b.includes('뉴스 목록')).map((b) => (b.match(/'(삼성전자|SK하이닉스|애플)'/) || [])[1]).filter(Boolean);
-  const entry = (sig, at) => ({ headline: '오전 진단', summary: '오전', model: 'model-primary', sig, at });
+  const entry = (sig, at) => ({ headline: '오전 진단', summary: '오전', model: 'model-primary', sig, at, pv: src.ANALYSIS_PV });
   // SK하이닉스 +1.5%(2% 아래) — 오늘 +2% 때 만든 진단은 남고 다시 부르지 않음
   const r1 = workspace();
   writeData(r1, 'analysis.json', { '000660': entry('2|오전', NOW_KR - 60 * MIN) });
@@ -2676,6 +2676,16 @@ await test('AI 진단 유지(55차): 그날 진단은 등락이 잠깐 ±2% 아�
   writeData(r4, 'analysis.json', { '000660': entry('2|오전', NOW_KR - 60 * MIN) });
   await pipeline(r4, { krPct: { '005930': 4.2, '000660': 1.5 }, krAt: NOW_KR });
   assert.equal('000660' in read(r4, 'analysis.json'), false, 'AI 끈 종목 → 버림');
+  // 지시문 판이 다른(또는 없는) 예전 진단은 남기지 않음(72차) — 2% 아래 종목은 다시 분석하지 않으니
+  const r5 = workspace();
+  writeData(r5, 'analysis.json', { '000660': { ...entry('2|오전', NOW_KR - 60 * MIN), pv: src.ANALYSIS_PV - 1 } });
+  await pipeline(r5, { krPct: { '005930': 4.2, '000660': 1.5 }, krAt: NOW_KR });
+  assert.equal('000660' in read(r5, 'analysis.json'), false, '판이 다른 진단 → 버림');
+  assert.equal(geminiNames().includes('SK하이닉스'), false, '2% 아래라 다시 분석도 안 함');
+  const r6 = workspace();
+  writeData(r6, 'analysis.json', { '000660': { ...entry('2|오전', NOW_KR - 60 * MIN), pv: undefined } });
+  await pipeline(r6, { krPct: { '005930': 4.2, '000660': 1.5 }, krAt: NOW_KR });
+  assert.equal('000660' in read(r6, 'analysis.json'), false, '판 없는 진단 → 버림');
 });
 await test('AI 입력(56차): 종합분석에 넘기는 뉴스에서 원인이 아닌 기사(산학협력·수상·채용·행사 등)는 뺌 · 나머지는 그대로', async () => {
   NET.routes = routes(); NET.calls = []; NET.bodies = []; NET.blocked = [];

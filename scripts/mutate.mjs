@@ -507,7 +507,8 @@ const MUTANTS = [
   ["[스팸] 무작위 영문 대소문자 안 봄", S, "(?=[A-Za-z]*(?:[A-Z][a-z]+[A-Z]+[a-z]|[a-z][A-Z]+[a-z]+[A-Z]))[A-Za-z]{10}", "[A-Za-z]{10}"],
   ["[스팸] 무작위 영문 대문자 연속 안 봄", S, "(?=[A-Za-z]*[A-Z]{2,}[a-z])", ""],
   // ---------- 55차 — 2% 아래 그날 진단 유지 ----------
-  ["[AI 유지] 2% 아래 그날 진단 버림", F, "if (q && q.ok && freshOf(it, q)) { analysis[it.code] = prev[it.code]; kept++; }", ""],
+  ["[AI 유지] 2% 아래 그날 진단 버림", F, "if (q && q.ok && freshOf(it, q) && prev[it.code].pv === ANALYSIS_PV) { analysis[it.code] = prev[it.code]; kept++; }", ""],
+  ["[AI 유지] 판 다른 진단도 남김", F, " && freshOf(it, q) && prev[it.code].pv === ANALYSIS_PV)", " && freshOf(it, q))"],
   ["[AI 유지] AI 끈 종목도 남김", F, "if (analysis[it.code] || it.ai === false) continue;", "if (analysis[it.code]) continue;"],
   // ---------- 56차 — AI 입력 원인 아닌 기사 ----------
   ["[AI 입력] 원인 아닌 기사도 넘김", S, ".filter((it) => it && it.title && !CSR_RE.test(it.title) && !priceOnly(it.title)).slice(0, 6)", ".filter((it) => it && it.title && !priceOnly(it.title)).slice(0, 6)"],
