@@ -2496,8 +2496,9 @@ await test('이유(47차): 미국 종목은 같은 방향 기사 중 티커 뒤�
     'NVIDIA (NVDA) Stocks Rebound 6.78% as Lawmakers Call Jensen Huang to Closed-Door Briefing', '소수점이 끼어도');
   // 티커 앞의 움직임은 다른 회사 얘기 · 티커가 없으면 해당 없음(그대로 최신순)
   assert.equal(pick([it('NVIDIA (NVDA) to host investor day next month', 'pos'), it('TSMC jumps as Nvidia (NVDA) orders more chips', 'pos')], 3, ['엔비디아', 'NVDA']), 'NVIDIA (NVDA) to host investor day next month', '티커 앞 움직임은 아님');
-  assert.equal(pick([it('Microsoft Stock: The Selloff Proved Why It Is Different (NASDAQ:MSFT)', 'neg'), it('IREN stock plunges 18% as Microsoft raises concerns over data center delays', 'neg')], -3.58, ['마이크로소프트', 'MSFT']),
-    'Microsoft Stock: The Selloff Proved Why It Is Different (NASDAQ:MSFT)', '다른 회사가 주어');
+  // (65차부터 Seeking Alpha 분석 글 'Microsoft Stock: … (NASDAQ:MSFT)'은 맨 뒤라 비교 기사를 보통 뉴스로)
+  assert.equal(pick([it('Microsoft shares slip in late trading (MSFT:NASDAQ)', 'neg'), it('IREN stock plunges 18% as Microsoft raises concerns over data center delays', 'neg')], -3.58, ['마이크로소프트', 'MSFT']),
+    'Microsoft shares slip in late trading (MSFT:NASDAQ)', '다른 회사가 주어');
   assert.equal(pick([it('삼성전자, 평택 신공장 착공', 'pos'), it('Samsung Electronics shares jump as chip demand surges', 'pos')], 3, ['삼성전자']), '삼성전자, 평택 신공장 착공', '국내 종목은 그대로');
   // 이름 목록 — 미국만 티커
   assert.deepEqual([...f.reasonNames({ market: 'US', name: '아마존닷컴', code: 'AMZN' })].slice(-1), ['AMZN']);
@@ -2905,6 +2906,31 @@ await test('AI 지시(64차): 수급이 전날 확정치면 오늘 원인으로 
   const us = await body(null, { ...quote, code: 'TSM', market: 'US', name: 'TSMC', currency: 'USD', price: 300, asOf: '2026-11-12T21:00:00Z' });
   assert.ok(!us.includes('수급 정보가 없다') && !us.includes('오늘 장중 매매가 아니니'), '미국 종목은 수급 지시 없음');
   assert.ok(yday.includes('뉴스·공시·시장 흐름처럼 위에서 확인되는 사실을 근거로') && !yday.includes('시장 흐름·수급처럼') && !yday.includes('재료가 보이지 않으면'), '막연한 말 늘 금지 · 수급을 근거로 부추기지 않음');
+});
+await test('이유(65차): 미국 투자 의견·해설 글(Seeking Alpha "X: … (NASDAQ:XXX)"·"(Rating Upgrade/Downgrade)"·"X: Buy/Sell/Hold …"·"Looks Fully Priced"·"May Be Undervalued"·"Prediction: …"·"… - Here\'s Why")은 맨 뒤 · 뉴스(Benzinga "… - Tesla (NASDAQ:TSLA)"·SA 뉴스 "… (SMCI:NASDAQ)")는 그대로 · 봇·화면 같음', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(block + '; ({ pickReasonNews })', {});
+  const ny = (ms) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(ms).replace(/-/g, '');
+  const it = (title) => ({ title, pubMs: T('2026-11-12T18:00:00Z'), sentiment: src.tagSentiment(title) });
+  const pick = (titles, pct, names) => {
+    const list = titles.map(it), a = src.pickReasonNews(list, pct, '20261112', ny, names), b = f.pickReasonNews(list, pct, '20261112', ny, names);
+    assert.equal(b ? b.title : null, a ? a.title : null, '봇·화면 같은 선택: ' + titles.join(' / '));
+    return a ? a.title : null;
+  };
+  // 실제 11/05~11/13 제목 — 방향 모를 보통 기사가 있으면 그것
+  for (const [t, name, code, pct] of [['Plug Power: Sell On Increased Risk Of Near-Term Dilution (Rating Downgrade) (NASDAQ:PLUG)', '플러그파워', 'PLUG', -8.9],
+    ['Nvidia: Goodbye Jensen Huang (NASDAQ:NVDA)', '엔비디아', 'NVDA', -4.3], ['Apple: Capex-Light AI Amid Regulatory Uncertainty (Rating Upgrade)', '애플', 'AAPL', 2.5],
+    ['Apple: Sell - The Premium Without The Growth', '애플', 'AAPL', -2.5], ['Plug Power (PLUG) Stock Looks Fully Priced On Its 97% Five Year Slump', '플러그파워', 'PLUG', -8.9],
+    ['Supermicro (SMCI) Stock May Be Undervalued Following Fresh AI Server Launches', '슈퍼 마이크로 컴퓨터', 'SMCI', 3],
+    ['Prediction: After Losing Over $1.7 Trillion in Market Cap This Year, Nvidia Stock Will Rebound in Epic Fashion', '엔비디아', 'NVDA', 3],
+    ["Amazon.com (NASDAQ:AMZN) Stock Falls 1.7% - Here's Why", '아마존닷컴', 'AMZN', -2.1]])
+    assert.equal(pick([t, `${code} annual shareholder meeting scheduled`], pct, [name, code]), `${code} annual shareholder meeting scheduled`, '맨 뒤: ' + t);
+  // 뉴스는 그대로
+  for (const [t, name, code, pct] of [['Tesla Stock Best Run in a Year on SpaceX Merger Report - Tesla (NASDAQ:TSLA)', '테슬라', 'TSLA', 3],
+    ["Super Micro Computer falls 5%, retracing some of Wednesday's gains (SMCI:NASDAQ)", '슈퍼 마이크로 컴퓨터', 'SMCI', -5]])
+    assert.equal(pick([t, `${code} annual shareholder meeting scheduled`], pct, [name, code]), t, '뉴스: ' + t);
 });
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
