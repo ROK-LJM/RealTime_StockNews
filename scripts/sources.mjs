@@ -1011,19 +1011,22 @@ export async function getIndexReason(name, changePct, prev = null, now = Date.no
   // 보합(±1% 안쪽)은 장중엔 '장중' 기사, 장 밖엔 '증시 마감' 기사(67차 — 장중에 '증시 마감'을 찾으면 어제 마감 기사만 나왔다)
   const q = dir === 'down' ? `${name} 급락 이유` : dir === 'up' ? `${name} 급등 이유` : open ? `${name} 장중` : `${name} 증시 마감`;
   // (aiSig가 없던 이전 형식은 sig가 곧 판단 당시 입력)
-  const keep = prev && prev.dir === dir && prev.ai
-    ? { ai: prev.ai, aiAt: prev.aiAt ?? null, aiSig: prev.aiSig ?? prev.sig ?? null }
-    : { ai: null, aiAt: null, aiSig: null };
+  // 판단 근거 검색어(aiQuery, 68차) — 장중엔 지금 검색어와 다른 기사로 만든 판단을 90분 안이어도 다시 한다(67차 직전 13:45 '증시 마감' 기사로 만든
+  // '…코스피가 하락 마감했습니다'가 재사용으로 남던 것). aiQuery가 없던 예전 판단은 보합이면 모름(장중이면 다시), 급등락은 검색어가 늘 같아 그대로
+  const basisQ = prev && (prev.aiQuery ?? (prev.dir === 'flat' ? null : prev.query));
+  const keep = prev && prev.dir === dir && prev.ai && !(open && basisQ !== q)
+    ? { ai: prev.ai, aiAt: prev.aiAt ?? null, aiSig: prev.aiSig ?? prev.sig ?? null, aiQuery: basisQ }
+    : { ai: null, aiAt: null, aiSig: null, aiQuery: null };
   try {
     const items = await googleNews(q, true, 2);
     const sig = `${Math.round(changePct ?? 0)}|${items.slice(0, 4).map((i) => i.title).join('|')}`;
-    let { ai, aiAt, aiSig } = keep;
+    let { ai, aiAt, aiSig, aiQuery } = keep;
     const recent = ai && aiAt != null && now - aiAt >= 0 && now - aiAt < INDEX_AI_MIN_INTERVAL_MS;
     const settled = !open && sigMove(aiSig) === sigMove(sig); // 장 밖(휴장 포함) + 등락 그대로 → 뉴스만 바뀜
     if (!ai || (aiSig !== sig && !recent && !settled)) {
       const fresh = await aiCoreNews(name, changePct, items, now, open);
-      if (fresh) { ai = fresh; aiAt = now; aiSig = sig; }
+      if (fresh) { ai = fresh; aiAt = now; aiSig = sig; aiQuery = q; }
     }
-    return { dir, query: q, headlines: items.slice(0, 4), ai, aiAt, aiSig };
+    return { dir, query: q, headlines: items.slice(0, 4), ai, aiAt, aiSig, aiQuery };
   } catch { return { dir, query: q, headlines: [], ...keep }; }
 }

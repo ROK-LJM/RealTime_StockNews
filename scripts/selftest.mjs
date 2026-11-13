@@ -2956,6 +2956,34 @@ await test('지수 핵심 이유(67차): 장중 보합이면 "○○ 장중" 기
   await src.getIndexReason('코스닥', 2.4, null, now, true);
   assert.ok(q().includes('코스닥 급등 이유'), '급등락은 그대로 이유 기사');
 });
+await test('지수 핵심 이유(68차): 판단 근거 검색어(aiQuery)를 남겨 장중엔 지금 검색어와 다른 기사로 만든 판단을 다시 함(90분 안이어도) · 같으면 재사용 · 장 밖은 그대로 · aiQuery 없던 예전 보합 판단은 장중이면 다시, 급등락은 그대로', async () => {
+  src.resetState(); src.setAiBudget(null);
+  const now = T('2026-11-13T13:50:00+09:00');
+  const run = async (prev, open, pct = -0.5) => {
+    NET.routes = routes(); NET.calls = []; NET.bodies = []; NET.blocked = [];
+    const r = await src.getIndexReason('코스피', pct, prev, now, open);
+    return { r, n: NET.calls.filter((u) => isGemini(u)).length };
+  };
+  const ai = { summary: '13:45 판단', items: [{ title: 't', why: 'w' }], model: 'm' };
+  // 예전 형식(aiQuery 없음) 보합 판단 — 장중이면 5분 전 것이어도 다시
+  let x = await run({ dir: 'flat', query: '코스피 장중', ai, aiAt: now - 5 * MIN, aiSig: '-1|x' }, true);
+  assert.deepEqual([x.n, x.r.aiQuery], [1, '코스피 장중'], '예전 보합 판단은 장중에 다시');
+  // 방금 만든 판단(근거 검색어 같음) — 90분 안이면 재사용
+  const again = await run(x.r, true);
+  assert.deepEqual([again.n, again.r.ai.summary], [0, x.r.ai.summary], '같은 검색어 판단은 재사용');
+  // 장 밖에 '증시 마감' 기사로 만든 판단 — 장중이면 다시
+  x = await run({ dir: 'flat', query: '코스피 증시 마감', ai, aiAt: now - 5 * MIN, aiSig: '-1|x', aiQuery: '코스피 증시 마감' }, true);
+  assert.equal(x.n, 1, '다른 검색어 판단은 장중에 다시');
+  // 장 밖이면 다른 검색어로 만든 판단도 그대로(등락 구간 그대로)
+  x = await run({ dir: 'flat', query: '코스피 장중', ai, aiAt: now - 5 * MIN, aiSig: '-1|x', aiQuery: '코스피 장중' }, false, -0.6);
+  assert.deepEqual([x.n, x.r.ai.summary], [0, '13:45 판단'], '장 밖은 그대로');
+  // 예전 형식 급락 판단 — 검색어가 늘 같아 그대로(90분 안 재사용)
+  x = await run({ dir: 'down', query: '코스피 급락 이유', ai, aiAt: now - 5 * MIN, aiSig: '-2|x' }, true, -2.1);
+  assert.deepEqual([x.n, x.r.aiQuery], [0, '코스피 급락 이유'], '예전 급락 판단은 그대로');
+  // 장 밖에서 방향이 바뀌면(급락 → 보합) 예전 판단은 버림 — 방향 확인(장중엔 검색어도 달라 함께 걸려 따로 본다)
+  x = await run({ dir: 'down', query: '코스피 급락 이유', ai, aiAt: now - 5 * MIN, aiSig: '-2|x', aiQuery: '코스피 급락 이유' }, false, -0.5);
+  assert.equal(x.n, 1, '장 밖 방향 바뀜 → 다시');
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
