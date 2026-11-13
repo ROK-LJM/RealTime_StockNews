@@ -2862,6 +2862,27 @@ await test('이유(62차): 잡포스트식 자동 시세 기사(…원 형성·�
   assert.equal(src.tagSentiment('정부, 플랫폼 규제 강화 추진').tone, 'neg', '규제 강화');
   assert.equal(src.tagSentiment('현대차, 원화 강세·원자재 부담…목표가 하향').tone, 'neg');
 });
+await test('이유(63차): "…까"로 묻는 제목(…씻어낼까·…반전 올까·…걸릴까…·…재현할까 : 부제·…팔까 말까?…)은 낱말 목록 없이 맨 뒤 · "까지"는 물음 아님 · 봇·화면 같음', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(block + '; ({ pickReasonNews })', {});
+  const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const it = (title) => ({ title, pubMs: T('2026-11-13T10:00:00+09:00'), sentiment: src.tagSentiment(title) });
+  const pick = (titles, pct, names) => {
+    const list = titles.map(it), a = src.pickReasonNews(list, pct, '20261113', kst, names), b = f.pickReasonNews(list, pct, '20261113', kst, names);
+    assert.equal(b ? b.title : null, a ? a.title : null, '봇·화면 같은 선택: ' + titles.join(' / '));
+    return a ? a.title : null;
+  };
+  // 실제 11/05~11/13 제목
+  for (const [t, name, pct] of [["한화솔루션 박승덕 '블루웨이브'에 한시름 놔, 흔들리는 태양광 의구심 씻어낼까", '한화솔루션', 3],
+    ['씨에스윈드, 해상풍력 수주 공백에 실적 후퇴…미국발 반전 올까', '씨에스윈드', -4],
+    ['트럼프 관세 제동 걸릴까… 현대차·기아 주가 반등에도 기대·현실 엇갈려', '현대차', 3],
+    ["HD현대중공업·한화오션·삼성중공업, 부유식 데이터센터에서 ‘드릴십 천하’ 재현할까 : 조선3사 '블루웨이브' 타고 수익원 찾기 분주", 'HD현대중공업', 3],
+    ['삼성전자·하이닉스 급락에 팔까 말까?…존리가 짚은 3가지 [숫자 뒤의 진실]', '삼성전자', -4]])
+    assert.equal(pick([t, name + ' 업황 점검'], pct, [name]), name + ' 업황 점검', '맨 뒤: ' + t);
+  assert.equal(pick(['삼성전자, 3분기까지 누적 영업이익 30조…반도체 회복', '삼성전자 업황 점검'], 3, ['삼성전자']), '삼성전자, 3분기까지 누적 영업이익 30조…반도체 회복', "'까지'는 물음이 아님");
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
