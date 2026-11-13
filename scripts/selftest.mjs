@@ -2744,6 +2744,7 @@ await test('한 줄 진단 묶음(60·61차, AI 요청): 종목마다 [번호] �
   assert.ok(prompt.includes('[2] 엔비디아(미국 NVDA) · 11/12 거래일 -3.10%(장 마감)\n  뉴스: [11/12] Nvidia falls on export curbs\n') && !prompt.includes('미국 종목엔 없는 공시'), '미국 — 뉴욕 날짜·공시 없음');
   assert.ok(prompt.includes('[3] 다라(한국 000002) · 11/13 거래일 -2.50%\n  뉴스: (수집된 뉴스 없음)\n'), prompt);
   assert.ok(prompt.includes("5%를 넘을 때만 '급등·급락'") && prompt.includes('막연한 말로 채우지 말고'), '등락 폭 말 지시(57차와 같음)');
+  assert.ok(prompt.includes('외국인·기관 매매(수급)는 주어지지 않았으니 지어내지 말 것'), '수급은 주지 않았으니 지어내지 않기(64차)');
   assert.ok(prompt.includes("'뚜렷한 재료 없이 시장 흐름 따라 상승'처럼 재료가 없다고") && prompt.includes('오늘 방향과 반대인 소식') && prompt.includes("'…에 상승'·'…로 하락'처럼 짧게 끝맺어라"),
     '재료가 없으면 없다고 · 반대 방향 소식은 원인 아님 · 짧은 끝맺음(61차)');
   NET.calls = []; NET.bodies = [];
@@ -2882,6 +2883,28 @@ await test('이유(63차): "…까"로 묻는 제목(…씻어낼까·…반전 
     ['삼성전자·하이닉스 급락에 팔까 말까?…존리가 짚은 3가지 [숫자 뒤의 진실]', '삼성전자', -4]])
     assert.equal(pick([t, name + ' 업황 점검'], pct, [name]), name + ' 업황 점검', '맨 뒤: ' + t);
   assert.equal(pick(['삼성전자, 3분기까지 누적 영업이익 30조…반도체 회복', '삼성전자 업황 점검'], 3, ['삼성전자']), '삼성전자, 3분기까지 누적 영업이익 30조…반도체 회복', "'까지'는 물음이 아님");
+});
+await test('AI 지시(64차): 수급이 전날 확정치면 오늘 원인으로 쓰지 말라(쓰려면 날짜) · 수급이 없으면 지어내지 말라 · 그날 수급·미국 종목은 그 말 없음 · 막연한 말은 늘 금지(수급을 근거로 부추기지 않음)', async () => {
+  src.resetState(); src.setAiBudget(null); // 앞 파이프라인 테스트의 한도 배분(몫 0)을 끌고 오지 않게
+  const quote = { ok: true, code: '353200', market: 'KR', name: '대덕전자', price: 146200, changePct: 2.4, high: 150000, low: 142000, asOf: '2026-11-13T10:00:00+09:00' };
+  const body = async (flow, q = quote) => {
+    NET.routes = routes(); NET.calls = []; NET.bodies = []; NET.blocked = [];
+    await src.aiStockAnalysis({ quote: q, news: { ok: true, items: [] }, flow, history: null, disclosures: null, schedule: [], now: T('2026-11-13T10:01:00+09:00') });
+    const b = NET.bodies.find((x, i) => isGemini(NET.calls[i]));
+    assert.ok(b, 'AI 요청이 있어야 함');
+    return JSON.parse(b).contents[0].parts[0].text;
+  };
+  const yday = await body({ date: '20261112', foreign: -153281, institution: 197210, individual: -40034 });
+  assert.ok(yday.includes("수급은 11/12 확정치다 — 오늘 장중 매매가 아니니 오늘 움직임의 원인('기관·외국인 매수세 유입')으로 쓰지 말고"), yday);
+  const none = await body(null);
+  assert.ok(none.includes('수급 정보가 없다 — 외국인·기관 매매(매수세 유입·순매수)를 지어내지 말 것'), none);
+  const nodate = await body({ foreign: 1, institution: 2, individual: -3 });
+  assert.ok(nodate.includes('수급은 최근 거래일 값이다 — 오늘 장중 매매가 아니니'), '날짜를 모르면 최근 거래일 값');
+  const today = await body({ date: '20261113', foreign: 1, institution: 2, individual: -3 });
+  assert.ok(!today.includes('오늘 장중 매매가 아니니') && !today.includes('수급 정보가 없다'), '그날 확정치면 지시 없음');
+  const us = await body(null, { ...quote, code: 'TSM', market: 'US', name: 'TSMC', currency: 'USD', price: 300, asOf: '2026-11-12T21:00:00Z' });
+  assert.ok(!us.includes('수급 정보가 없다') && !us.includes('오늘 장중 매매가 아니니'), '미국 종목은 수급 지시 없음');
+  assert.ok(yday.includes('뉴스·공시·시장 흐름처럼 위에서 확인되는 사실을 근거로') && !yday.includes('시장 흐름·수급처럼') && !yday.includes('재료가 보이지 않으면'), '막연한 말 늘 금지 · 수급을 근거로 부추기지 않음');
 });
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
