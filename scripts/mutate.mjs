@@ -518,6 +518,8 @@ const MUTANTS = [
   ["[이름표] 시간외 있어도 그냥 마감", A, "if (exs.length) {", "if (false) {"],
   ["[이름표] 장중에도 시간외 시각", A, "!stale && status.endsWith('마감') ? ", "!stale ? "],
   ["[이름표] 미국도 시간외라 씀", A, "${g.key === 'KR' ? '시간외' : last.session === 'pre' ? '프리' : '애프터'}", "시간외"],
+  // ---------- 59차 — 지주회사 ----------
+  ["[관련도] 홀딩스·지주도 같은 회사", S, "|파트너스|홀딩스|지주)/;", "|파트너스)/;"],
   ["[공시 방향] 화면 반대 공시도", A, " && !(dir && discDir(x.title) === -dir)", ""],
   ["[공시 방향] 화면 방향 안 넘김", A, "keyDiscToday(q.code, Math.sign(q.changePct || 0))", "keyDiscToday(q.code)"],
   ["[공시 방향] 봇 반대 공시도", F, " && discDir(x.title) !== -Math.sign(q.changePct)", ""],

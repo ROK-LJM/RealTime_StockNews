@@ -2698,7 +2698,8 @@ await test('이름표(58차): 정규장 뒤 시간외 가격이 있으면 "정�
   const block = appJs.slice(appJs.indexOf('// ---------- 데이터 지연 경고'), appJs.indexOf('// ---------- 내 종목 한눈에'));
   const lt = appJs.slice(appJs.indexOf('function lastTimeOf('), appJs.indexOf('// ---------- 시장 비교'));
   const f = vm.runInNewContext(lt + block + '; ({ groupInfo })', {});
-  const now = Date.now(), asOf = new Date(now - 60 * MIN).toISOString();
+  // 시세 시각은 5분 전 — 1시간 전으로 두면 국내·미국 장중에 돌릴 때 '개장 후 갱신 없음' 경고로 빠져 시각에 따라 결과가 달랐다(59차에 고침)
+  const now = Date.now(), asOf = new Date(now - 5 * MIN).toISOString();
   const kr = (x) => ({ ok: true, market: 'KR', marketStatus: 'CLOSE', asOf, ...x });
   const a = f.groupInfo({ key: 'KR' }, [kr({ ext: { session: 'post', price: 206500, at: now - 5 * MIN } }), kr({})], null);
   assert.match(a.status, /정규장 마감$/); assert.match(a.et, /^시간외 /);
@@ -2709,6 +2710,14 @@ await test('이름표(58차): 정규장 뒤 시간외 가격이 있으면 "정�
   assert.match(f.groupInfo({ key: 'US' }, [us({ ext: { session: 'pre', price: 1, at: now - 5 * MIN } })], null).et, /^프리 /);
   const o = f.groupInfo({ key: 'KR' }, [kr({ marketStatus: 'OPEN', asOf: new Date(now).toISOString(), ext: { session: 'post', price: 1, at: now } })], null);
   assert.match(o.status, /장중/); assert.equal(o.et, '', '장중엔 시간외 시각 없음');
+});
+await test('관련도(59차): 종목 이름 바로 뒤 "홀딩스"·"지주"는 따로 상장된 지주회사 — 다른 회사 기사 · 제대로 된 언급이 있으면 관련 · 이름에 홀딩스가 든 종목은 그대로', () => {
+  const st = { code: '222800', market: 'KR', name: '심텍' };
+  assert.equal(src.isRelevantNews('심텍홀딩스 장중 13.47% 상승…반도체 기판주 강세', st), false, '지주회사 기사');
+  assert.equal(src.isRelevantNews('[잠정실적]심텍홀딩스, 올해 3Q 영업이익 1047억원', st), false);
+  assert.equal(src.isRelevantNews('심텍·심텍홀딩스 동반 강세…기판 수요 회복', st), true, '심텍도 따로 언급');
+  assert.equal(src.isRelevantNews('심텍, 메모리 3사와 장기공급계약 협의', st), true);
+  assert.equal(src.isRelevantNews('OCI홀딩스, 폴리실리콘 공급 확대', { code: '010060', market: 'KR', name: 'OCI홀딩스' }), true, '이름에 홀딩스가 든 종목');
 });
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
