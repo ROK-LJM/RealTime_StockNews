@@ -873,6 +873,7 @@ export function historyStats(history, quote = null) {
 // 차례는 평소대로: 그날 진단 없음 → 한 줄 진단 → 재분석). 2 = 64·66차(전날 수급을 오늘 원인으로 안 씀·막연한 말·장중 '마감'), 판이 없으면 그 전
 // (11/13 64차 전에 만든 '기관 매수세 유입으로 상승' 같은 진단이 입력이 그대로면 계속 쓰이고 마감 뒤엔 그대로 굳어 '지난 급등락' 기록에도 남았다)
 // 3 = 70차(배경지식 금지·그 종목 재료 없는 날·시세 안내 기사 뺌 — 11/13 '트럼프 당선 이후…'·'실적 부진 우려'가 그날 기록에 굳지 않게)
+//     74차 진단 짧은 끝맺음도 3(70차 배포 뒤 판 3 진단이 하나도 만들어지기 전에 배포 — 다시 분석할 땐 늘 그때 지시문을 쓴다)
 export const ANALYSIS_PV = 3;
 // 뉴스·수급·추세·시세를 모두 넘겨 Gemini가 "오늘 왜 이렇게 움직이는지"를 종합 분석. 키 없거나 실패 시 null.
 export async function aiStockAnalysis({ quote, news, flow, history, disclosures, schedule, market = null, now = Date.now() }) {
@@ -949,7 +950,9 @@ export async function aiStockAnalysis({ quote, news, flow, history, disclosures,
     (when === '장중' ? "아직 장중이다 — '마감'·'마감했다'로 쓰지 말 것.\n" : '') +
     (mk && Math.abs(mk.pct) >= 1 ? `시장 전체가 크게 움직인 날이다 — 시장 흐름 탓인 몫과 이 종목만의 요인을 나눠, 시장보다 더(덜) 움직인 까닭을 짚어라.\n` : '') +
     `반드시 이 JSON만 출력:\n` +
-    `{"headline":"오늘 왜 ${dir}하는지 한 문장 진단(한국어, 50자 내외)",` +
+    // 진단 끝맺음(74차) — 지난 7일 진단 384건 중 35%가 '…하락세를 보였습니다.'·'…주도했습니다.'처럼 문장으로 끝나 '왜 움직였나'·'지난 급등락'에서
+    // '…강세 마감' 같은 짧은 진단과 섞였다(한 줄 진단 묶음은 61차부터 짧게)
+    `{"headline":"오늘 왜 ${dir}하는지 한 문장 진단(한국어, 50자 내외 — '…에 ${dir}'·'…로 ${dir}'처럼 짧게 끝맺고 '~했습니다'·'~보였다' 같은 문장 끝은 쓰지 말 것)",` +
     `"summary":"종합 분석 2~3문장(한국어, ${basis.replace(/·/g, '+')}를 연결)",` +
     `"factors":["핵심 요인 2~4개, 각 25자 내외"],` +
     `"outlook":"단기 관전 포인트 한 줄(조심스럽게, 단정·투자권유 금지)"}`;
@@ -957,7 +960,7 @@ export async function aiStockAnalysis({ quote, news, flow, history, disclosures,
   const parsed = r?.json;
   if (!parsed || !parsed.headline) return null;
   return {
-    headline: String(parsed.headline).slice(0, 140),
+    headline: String(parsed.headline).trim().replace(/[.。]+$/, '').slice(0, 140), // 끝 마침표는 뗀다(74차 — '…급등.')
     summary: String(parsed.summary || ''),
     factors: Array.isArray(parsed.factors) ? parsed.factors.map((x) => String(x)).filter(Boolean).slice(0, 4) : [],
     outlook: String(parsed.outlook || ''),
@@ -1007,7 +1010,7 @@ export async function aiStockBriefs(list, now = Date.now()) {
   if (!got) return null;
   const out = {};
   for (const x of got) {
-    const row = rows[(parseInt(x && x.no, 10) || 0) - 1], h = String((x && x.headline) || '').trim();
+    const row = rows[(parseInt(x && x.no, 10) || 0) - 1], h = String((x && x.headline) || '').trim().replace(/[.。]+$/, ''); // 끝 마침표 뗌(74차)
     if (row && h && !out[row.quote.code]) out[row.quote.code] = { headline: h.slice(0, 120), model: r.model };
   }
   return out;

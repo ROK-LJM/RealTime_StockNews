@@ -621,6 +621,10 @@ const MUTANTS = [
   ["[지수 마감] 검색어 같아도 다시", S, "const closeRedo = aiQuery !== q && ", "const closeRedo = "],
   ["[지수 마감] 오늘 날짜 안 봄", S, "ymdIn(i.pubMs, 'Asia/Seoul') === kstDay && ", ""],
   ["[지수 마감] 마감 기사 안 봄", S, " && /마감/.test(i.title));", ");"],
+  // ---------- 74차 — 진단 짧은 끝맺음 ----------
+  ["[AI 지시] 진단 끝맺음 지시 없음", S, " — '…에 ${dir}'·'…로 ${dir}'처럼 짧게 끝맺고 '~했습니다'·'~보였다' 같은 문장 끝은 쓰지 말 것)", ")"],
+  ["[AI 지시] 진단 끝 마침표 그대로", S, "headline: String(parsed.headline).trim().replace(/[.。]+$/, '').slice(0, 140)", "headline: String(parsed.headline).slice(0, 140)"],
+  ["[AI 간단] 끝 마침표 그대로", S, "h = String((x && x.headline) || '').trim().replace(/[.。]+$/, '');", "h = String((x && x.headline) || '').trim();"],
   ["[공시 방향] 화면 반대 공시도", A, " && !(dir && discDir(x.title) === -dir)", ""],
   ["[공시 방향] 화면 방향 안 넘김", A, "keyDiscToday(q.code, Math.sign(q.changePct || 0))", "keyDiscToday(q.code)"],
   ["[공시 방향] 봇 반대 공시도", F, " && discDir(x.title) !== -Math.sign(q.changePct)", ""],

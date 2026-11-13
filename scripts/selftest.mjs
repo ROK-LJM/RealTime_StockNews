@@ -3097,6 +3097,20 @@ await test('지수 핵심 이유(73차): 장이 끝나면 장중 기사로 만�
   x = await run({ ...intraday, dir: 'down', query: '코스피 급락 이유', aiQuery: '코스피 급락 이유', aiSig: '-2|x' }, [todayClose], -2.1);
   assert.equal(x.n, 0, '급락 판단은 장 안팎 검색어가 같아 그대로');
 });
+await test('AI 지시(74차): 종합분석 진단도 짧게 끝맺기("…에 하락"·"…로 하락", "~했습니다" 금지) · 진단 끝 마침표는 뗌(종합분석·한 줄 진단)', async () => {
+  src.resetState(); src.setAiBudget(null);
+  const reply = (o) => () => json({ candidates: [{ content: { parts: [{ text: JSON.stringify(o) }] } }] });
+  NET.routes = routes({ gemini: reply({ headline: '수출 규제 우려에 하락. ', summary: 's', factors: ['f'], outlook: 'o' }) }); NET.calls = []; NET.bodies = []; NET.blocked = [];
+  const quote = { ok: true, code: '005930', market: 'KR', name: '삼성전자', price: 100000, changePct: -3.2, high: 103000, low: 99000, marketStatus: 'CLOSE', asOf: '2026-11-13T15:30:00+09:00' };
+  const a = await src.aiStockAnalysis({ quote, news: { ok: true, items: [] }, flow: null, history: null, disclosures: null, schedule: [], now: T('2026-11-13T16:00:00+09:00') });
+  const body = NET.bodies.find((b, i) => isGemini(NET.calls[i])) || '';
+  assert.ok(body.includes("'…에 하락'·'…로 하락'처럼 짧게 끝맺고 '~했습니다'·'~보였다' 같은 문장 끝은 쓰지 말 것"), '짧게 끝맺기 지시: ' + body.slice(-500));
+  assert.equal(a && a.headline, '수출 규제 우려에 하락', '끝 마침표 뗌');
+  NET.routes = routes({ gemini: reply({ items: [{ no: 1, headline: '공급 계약에 상승.' }, { no: 2, headline: '시장 흐름 따라 하락。' }] }) }); NET.calls = []; NET.bodies = []; NET.blocked = [];
+  const row = (code, pct) => ({ quote: { code, name: code, market: 'KR', changePct: pct, asOf: '2026-11-13T09:58:00+09:00' } });
+  const got = await src.aiStockBriefs([row('000001', 3), row('000002', -3)], T('2026-11-13T10:00:00+09:00'));
+  assert.deepEqual(Object.values(got || {}).map((v) => v.headline), ['공급 계약에 상승', '시장 흐름 따라 하락'], '한 줄 진단도 끝 마침표 뗌');
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
