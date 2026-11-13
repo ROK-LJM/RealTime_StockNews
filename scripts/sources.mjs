@@ -835,7 +835,10 @@ export const STOCK_ANALYSIS_THRESHOLD = 2;
 // 종합분석과 한 줄 진단 묶음(60차)이 같이 쓴다
 // 64차 — '재료가 보이지 않으면' 조건을 빼 늘 금지('시장 반등에 따른 저가 매수세 유입'처럼 시장 흐름을 붙여 쓰던 것), 근거 예시에서 수급을 뺌
 // (장중 수급은 전날 확정치인데 '시장 흐름·수급처럼'이 수급을 오늘 원인으로 쓰게 부추겼다)
-const TONE_RULE = "등락 폭에 맞는 말을 써라 — ±5% 안쪽은 '상승·하락'(또는 강세·약세), 5%를 넘을 때만 '급등·급락'. '저가 매수세 유입'·'투자 심리 개선' 같은 막연한 말로 채우지 말고, 뉴스·공시·시장 흐름처럼 위에서 확인되는 사실을 근거로 써라.";
+// 66차 — '차익 실현 매물 출회'(내린 날의 '저가 매수세')도 같은 상투어(64차 뒤 새 진단 5건 중 2건)
+const TONE_RULE = "등락 폭에 맞는 말을 써라 — ±5% 안쪽은 '상승·하락'(또는 강세·약세), 5%를 넘을 때만 '급등·급락'. '저가 매수세 유입'·'차익 실현 매물 출회'·'투자 심리 개선' 같은 막연한 말로 채우지 말고, 뉴스·공시·시장 흐름처럼 위에서 확인되는 사실을 근거로 써라.";
+// 시세의 장 상태 → AI 입력의 말(61차 한 줄 진단·66차 종합분석) — 장중 종목에 '마감했다'고 쓰지 않게
+const STATE_KO = { OPEN: '장중', CLOSE: '장 마감', PREOPEN: '개장 전' };
 
 // 과거 일봉에서 기간별 등락·고점대비 위치를 뽑아 분석 입력으로 쓴다.
 // 6개월 종가에 지금 가격을 끝값으로(44차, docs/app.js liveSeries와 같은 규칙) — 그날 봉이 있으면 바꾸고 없으면 덧붙임. 개장 전·첫 체결 전·날짜를 모르면 그대로
@@ -894,7 +897,9 @@ export async function aiStockAnalysis({ quote, news, flow, history, disclosures,
   // 수급 지시(64차) — 11/13 10시 무렵 진단 16건 중 심텍·대덕전자·삼성SDI '기관 매수세 유입으로 상승', HD현대중공업 '외국인 중심의 수급 개선'(모두 11/12 확정치),
   // 휴림로봇 '외국인 순매수 유입'(수급 데이터 없음)처럼 전날 수급을 오늘 원인으로 쓰거나 지어냈다. 그날 확정치(저녁 이후)면 지시 없음
   const flowRule = us ? '' : !flow ? '수급 정보가 없다 — 외국인·기관 매매(매수세 유입·순매수)를 지어내지 말 것.\n'
-    : fd === today ? '' : `수급은 ${fd ? `${+fd.slice(4, 6)}/${+fd.slice(6, 8)} 확정치` : '최근 거래일 값이'}다 — 오늘 장중 매매가 아니니 오늘 움직임의 원인('기관·외국인 매수세 유입')으로 쓰지 말고, 쓰려면 '전날 기관 순매수'처럼 날짜를 밝혀라.\n`;
+    : fd === today ? '' : `수급은 ${fd ? `${+fd.slice(4, 6)}/${+fd.slice(6, 8)} 확정치` : '최근 거래일 값이'}다 — 오늘 장중 매매가 아니니 오늘 움직임의 원인('기관·외국인 매수세 유입'·'외국인 매도 우위')으로 쓰지 말 것. 한 줄 진단(headline)에는 쓰지 말고, 종합 분석에 쓸 때는 '전날 외국인 순매도'처럼 날짜를 밝혀라.\n`;
+  // 66차 — 13:15 삼성전기 '…하락 마감했습니다'(장중) · 그날 종합분석에도 장 상태를 넘긴다
+  const when = STATE_KO[quote.marketStatus] || '';
   const histLine = st
     ? `1주 ${p(st.w1)} · 1개월 ${p(st.m1)} · 3개월 ${p(st.m3)} · 6개월 고점대비 ${p(st.fromHigh)}`
     : '(과거 시세 없음)';
@@ -914,7 +919,7 @@ export async function aiStockAnalysis({ quote, news, flow, history, disclosures,
   const basis = `${mk ? '시장·' : ''}${us ? '뉴스·추세' : discs.length ? '뉴스·공시·수급·추세' : '뉴스·수급·추세'}`;
   const prompt =
     `너는 ${us ? '미국' : '한국'} 증시 애널리스트다(답은 한국어로). 아래 정보를 종합해 '${name}'이(가) 오늘 왜 ${dir}하는지 핵심 원인을 분석하라.\n` +
-    `오늘 등락(${mdOf(tradeDay)} 거래일): ${pct.toFixed(2)}% · 현재가 ${money(quote.price)} (고가 ${money(quote.high)} / 저가 ${money(quote.low)})\n` +
+    `오늘 등락(${mdOf(tradeDay)} 거래일${when ? ` · ${when}` : ''}): ${pct.toFixed(2)}% · 현재가 ${money(quote.price)} (고가 ${money(quote.high)} / 저가 ${money(quote.low)})\n` +
     (mk ? `시장: ${mkLine}\n` : '') +
     `과거 흐름: ${histLine}\n` +
     (us ? '' : `수급(순매수): ${flowLine}\n`) +
@@ -923,6 +928,7 @@ export async function aiStockAnalysis({ quote, news, flow, history, disclosures,
     `최근 뉴스 제목(앞의 [월/일]은 기사 날짜 — 거래일 전 기사는 그날까지 이어진 재료일 때만 원인으로):\n${heads}\n\n` +
     `단순 시황 중계가 아니라 '원인'에 집중하라. ${basis}를 서로 연결해 설명하고, 근거가 약하면 단정하지 말 것.\n` +
     `${TONE_RULE}\n` + flowRule + // 등락 폭에 맞는 말·막연한 말 금지(57·64차) · 수급 날짜(64차)
+    (when === '장중' ? "아직 장중이다 — '마감'·'마감했다'로 쓰지 말 것.\n" : '') +
     (mk && Math.abs(mk.pct) >= 1 ? `시장 전체가 크게 움직인 날이다 — 시장 흐름 탓인 몫과 이 종목만의 요인을 나눠, 시장보다 더(덜) 움직인 까닭을 짚어라.\n` : '') +
     `반드시 이 JSON만 출력:\n` +
     `{"headline":"오늘 왜 ${dir}하는지 한 문장 진단(한국어, 50자 내외)",` +
@@ -962,7 +968,7 @@ export async function aiStockBriefs(list, now = Date.now()) {
     const pub = (it) => (Number.isFinite(it.pubMs) ? it.pubMs : 0);
     const heads = (news?.items || []).filter((it) => it && it.title && !CSR_RE.test(it.title) && !priceOnly(it.title)).sort((a, b) => pub(b) - pub(a)).slice(0, 3).map((it) => datedTitle(it, tz));
     const discs = us ? [] : (disclosures?.items || []).filter((d) => d && d.title && String(d.date) === today).slice(0, 2).map((d) => `[${d.tag || '기타'}] ${d.title}`);
-    const when = { OPEN: '장중', CLOSE: '장 마감', PREOPEN: '개장 전' }[q.marketStatus] || ''; // 장중 종목에 '마감했다'고 쓰지 않게(61차)
+    const when = STATE_KO[q.marketStatus] || ''; // 장중 종목에 '마감했다'고 쓰지 않게(61차)
     return `[${i + 1}] ${q.name || q.code}(${us ? '미국' : '한국'} ${q.code}) · ${mdOf(ymdIn(Number.isFinite(qt) ? qt : now, tz))} 거래일 ${sgn(q.changePct ?? 0)}%${when ? `(${when})` : ''}`
       + (mk ? ` · 시장 ${mk.name} ${sgn(mk.pct)}%${Array.isArray(mk.events) && mk.events.length ? `(오늘 ${mk.events.join('·')})` : ''}` : '')
       + (discs.length ? `\n  오늘 공시: ${discs.join(' / ')}` : '')

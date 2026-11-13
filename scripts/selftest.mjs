@@ -1741,7 +1741,7 @@ await test('AI 입력(30차): 종목 분석에 시장 흐름(같은 시장 지�
   writeData(root, 'quotes.json', { quotes: [], measures: { day: '2026-10-15', v: src.MEASURES_V, items: [{ kind: 'cb', mk: 'KOSPI', at: '2026-10-15T00:05:00.000Z' }] } });
   await pipeline(root, { krAt: NOW_KR, usPct: { AAPL: 3 } });
   const kr = bodyOf('삼성전자'), us = bodyOf('애플');
-  assert.ok(kr.includes('오늘 등락(10/15 거래일): 4.20%'), kr.slice(0, 700));
+  assert.ok(kr.includes('오늘 등락(10/15 거래일 · 장중): 4.20%'), kr.slice(0, 700)); // 장 상태(66차)
   assert.ok(kr.includes('\n시장: 코스피 -1.20% (오늘 서킷브레이커 09:05) — 이 종목은 시장 대비 +5.40%p\n'), kr.slice(0, 700));
   assert.ok(kr.includes('시장 전체가 크게 움직인 날이다') && kr.includes('시장·뉴스·수급·추세를 서로 연결'), kr.slice(0, 1600));
   assert.ok(kr.includes('\n1. [' + kstMd(Date.now() - 3600e3) + '] '), '기사 앞에 한국 날짜 — ' + kr.slice(0, 900));
@@ -2896,7 +2896,7 @@ await test('AI 지시(64차): 수급이 전날 확정치면 오늘 원인으로 
     return JSON.parse(b).contents[0].parts[0].text;
   };
   const yday = await body({ date: '20261112', foreign: -153281, institution: 197210, individual: -40034 });
-  assert.ok(yday.includes("수급은 11/12 확정치다 — 오늘 장중 매매가 아니니 오늘 움직임의 원인('기관·외국인 매수세 유입')으로 쓰지 말고"), yday);
+  assert.ok(yday.includes("수급은 11/12 확정치다 — 오늘 장중 매매가 아니니 오늘 움직임의 원인('기관·외국인 매수세 유입'·'외국인 매도 우위')으로 쓰지 말 것. 한 줄 진단(headline)에는 쓰지 말고"), yday);
   const none = await body(null);
   assert.ok(none.includes('수급 정보가 없다 — 외국인·기관 매매(매수세 유입·순매수)를 지어내지 말 것'), none);
   const nodate = await body({ foreign: 1, institution: 2, individual: -3 });
@@ -2906,6 +2906,13 @@ await test('AI 지시(64차): 수급이 전날 확정치면 오늘 원인으로 
   const us = await body(null, { ...quote, code: 'TSM', market: 'US', name: 'TSMC', currency: 'USD', price: 300, asOf: '2026-11-12T21:00:00Z' });
   assert.ok(!us.includes('수급 정보가 없다') && !us.includes('오늘 장중 매매가 아니니'), '미국 종목은 수급 지시 없음');
   assert.ok(yday.includes('뉴스·공시·시장 흐름처럼 위에서 확인되는 사실을 근거로') && !yday.includes('시장 흐름·수급처럼') && !yday.includes('재료가 보이지 않으면'), '막연한 말 늘 금지 · 수급을 근거로 부추기지 않음');
+  // 66차 — '차익 실현 매물 출회'도 상투어 · 장중이면 장 상태와 '마감' 금지, 장 마감이면 그 말 없음
+  assert.ok(yday.includes("'차익 실현 매물 출회'"), '차익 실현 매물도 상투어');
+  const open = await body(null, { ...quote, marketStatus: 'OPEN' });
+  assert.ok(open.includes('오늘 등락(11/13 거래일 · 장중): 2.40%') && open.includes("아직 장중이다 — '마감'·'마감했다'로 쓰지 말 것"), open);
+  const closed = await body(null, { ...quote, marketStatus: 'CLOSE' });
+  assert.ok(closed.includes('오늘 등락(11/13 거래일 · 장 마감): 2.40%') && !closed.includes('아직 장중이다'), '장 마감이면 그 말 없음');
+  assert.ok(yday.includes('오늘 등락(11/13 거래일): 2.40%'), '장 상태를 모르면 예전 그대로');
 });
 await test('이유(65차): 미국 투자 의견·해설 글(Seeking Alpha "X: … (NASDAQ:XXX)"·"(Rating Upgrade/Downgrade)"·"X: Buy/Sell/Hold …"·"Looks Fully Priced"·"May Be Undervalued"·"Prediction: …"·"… - Here\'s Why")은 맨 뒤 · 뉴스(Benzinga "… - Tesla (NASDAQ:TSLA)"·SA 뉴스 "… (SMCI:NASDAQ)")는 그대로 · 봇·화면 같음', async () => {
   const vm = await import('node:vm');

@@ -580,6 +580,11 @@ const MUTANTS = [
   ["[이유] 저평가 글 맨 뒤 안 함(봇)", S, "|\\b(?:May\\sBe|Looks)\\s(?:Undervalued|Overvalued)\\b", ""],
   ["[이유] Prediction 맨 뒤 안 함(봇)", S, "|^Prediction:", ""],
   ["[이유] Here's Why 맨 뒤 안 함(봇)", S, "|\\s-\\s*Here'?s\\sWhy$", ""],
+  // ---------- 66차 — 매도 쪽 수급·한 줄 진단·차익 실현·장중 마감 ----------
+  ["[AI 지시] 한 줄 진단에 전날 수급 허용", S, "한 줄 진단(headline)에는 쓰지 말고, ", ""],
+  ["[AI 지시] 차익 실현 상투어 허용", S, "·'차익 실현 매물 출회'", ""],
+  ["[AI 지시] 장중인데 마감 허용", S, "(when === '장중' ? \"아직 장중이다", "(false ? \"아직 장중이다"],
+  ["[AI 지시] 종합분석에 장 상태 안 넘김", S, "거래일${when ? ` · ${when}` : ''}): ", "거래일): "],
   ["[공시 방향] 화면 반대 공시도", A, " && !(dir && discDir(x.title) === -dir)", ""],
   ["[공시 방향] 화면 방향 안 넘김", A, "keyDiscToday(q.code, Math.sign(q.changePct || 0))", "keyDiscToday(q.code)"],
   ["[공시 방향] 봇 반대 공시도", F, " && discDir(x.title) !== -Math.sign(q.changePct)", ""],
