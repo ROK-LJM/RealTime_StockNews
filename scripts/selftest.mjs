@@ -3136,6 +3136,20 @@ await test('미국 실적 일정(75차): 나스닥이 다음 분기 날짜를 �
   assert.deepEqual(c.events.filter((x) => x.c === 'AAPL' && x.k === 'earn').map((x) => x.d), ['20261001', '20270128']);
   assert.deepEqual(c.usDiag, [{ c: 'TSLA', st: 'HTTP 404' }], '날짜를 읽은 종목은 진단에 없음');
 });
+await test('정규장 종가 표시(76차): 시간외 줄이 있으면 큰 등락 옆에 "정규장 종가"(미국 애프터·프리, 국내 시간외) · 장중이거나 시간외 가격이 없으면 안 붙음 · 카드 큰 등락 옆', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const mo = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('\n', appJs.indexOf('function marketOf(')));
+  const ct = appJs.slice(appJs.indexOf('function closeTag('), appJs.indexOf('function renderBoard('));
+  const g = vm.runInNewContext(`${mo}\n${appJs.slice(appJs.indexOf('function extOf('), appJs.indexOf('function extRow('))}\n${ct}; ({ closeTag })`, {});
+  const ext = { session: 'post', price: 25.52, change: 1.38, changePct: 5.71, at: 1 };
+  assert.ok(g.closeTag({ ok: true, market: 'US', marketStatus: 'CLOSE', ext }).includes('>정규장 종가<'), '애프터가 있으면 붙음');
+  assert.ok(g.closeTag({ ok: true, market: 'US', marketStatus: 'CLOSE', ext: { ...ext, session: 'pre' } }).includes('>정규장 종가<'), '프리도');
+  assert.ok(g.closeTag({ ok: true, market: 'KR', marketStatus: 'CLOSE', ext }).includes('>정규장 종가<'), '국내 시간외도');
+  assert.equal(g.closeTag({ ok: true, market: 'US', marketStatus: 'OPEN', ext }), '', '장중엔 안 붙음');
+  assert.equal(g.closeTag({ ok: true, market: 'US', marketStatus: 'CLOSE' }), '', '시간외 가격이 없으면 안 붙음');
+  assert.ok(appJs.includes('(${fmtPct(q.changePct)})</span>${closeTag(q)}\n    </div>\n    ${extRow(q)}') || appJs.includes('(${fmtPct(q.changePct)})</span>${closeTag(q)}\r\n    </div>\r\n    ${extRow(q)}'), '카드 큰 등락 바로 옆');
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');

@@ -340,6 +340,7 @@ input::placeholder { color: var(--muted); }
 .price-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; margin-top: 6px; }
 .price { font-size: 26px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .chg { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.close-tag { font-size: 12px; font-weight: 600; color: var(--muted); } /* 시간외 줄이 있을 때 큰 등락이 정규장 종가 기준임을(76차) */
 /* 미국 시간외(프리·애프터마켓) 가격 줄 — 정규장 가격 바로 아래 */
 .ext-row { margin-top: 2px; font-size: 13px; font-variant-numeric: tabular-nums; }
 .ext-row .ext-label { margin-right: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }

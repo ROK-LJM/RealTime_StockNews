@@ -962,6 +962,11 @@ function extRow(q) {
       <span class="ext-label">${x.label}</span> <b>${fmtPrice({ price: x.price, currency: q.currency })}</b>
       <span class="${dirClass(x.changePct)}-c">${arrow} ${fmtChange({ change: x.change, currency: q.currency })} (${fmtPct(x.changePct)})</span>${at ? ` <span class="muted">· ${esc(at)}</span>` : ''}</div>`;
 }
+// 큰 등락 옆 '정규장 종가'(76차) — 시간외 줄이 있을 때만. 11/18 제보: 슈퍼 마이크로 컴퓨터 애프터 +5.71%인데 큰 숫자 -3.54%·파란 칸이 최종처럼
+// 보여 헷갈림 — 공식 종가는 정규장 종가이고 칸 색·'왜 움직였나'도 그 기준, 아래 시간외 줄은 정규장 종가 대비라는 걸 카드에서 바로 알게
+function closeTag(q) {
+  return extOf(q) ? '<span class="close-tag" title="공식 종가 — 등락률·칸 색은 이 기준이고, 아래 시간외 줄의 등락은 이 종가 대비">정규장 종가</span>' : '';
+}
 function renderBoard(groups, closed, measures) {
   const el = $('#board');
   if (!el) return;
@@ -1242,7 +1247,7 @@ function renderCard(q, hist, inv) {
     </div>
     <div class="price-row">
       <span class="price">${fmtPrice(q)}</span>
-      <span class="chg ${c}-c">${arrow} ${fmtChange({ change: q.change, currency: q.currency })} (${fmtPct(q.changePct)})</span>
+      <span class="chg ${c}-c">${arrow} ${fmtChange({ change: q.change, currency: q.currency })} (${fmtPct(q.changePct)})</span>${closeTag(q)}
     </div>
     ${extRow(q)}
     ${vsRow(q)}

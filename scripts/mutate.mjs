@@ -632,6 +632,9 @@ const MUTANTS = [
   ["[미국 실적] 합치기 안 씀", C, "events.push(...mergeEarn(earn.filter((e) => inRange(e.d)).map((e) => ({ ...e, ...base(it) })), prevOf('earn'), today));", "events.push(...earn.filter((e) => inRange(e.d)).map((e) => ({ ...e, ...base(it) })));"],
   ["[미국 실적] 진단 안 남김", C, "...(usDiag.length ? { usDiag: ", "...(false ? { usDiag: "],
   ["[미국 실적] 없는 종목 진단 안 남김", C, "if (path.startsWith('analyst/')) usDiag.push({ c: it.code, st: e.message }); ", ""],
+  // ---------- 76차 — 정규장 종가 표시 ----------
+  ["[정규장 종가] 안 붙임", A, "return extOf(q) ? '<span class=\"close-tag\"", "return false ? '<span class=\"close-tag\""],
+  ["[정규장 종가] 카드에 안 씀", A, "</span>${closeTag(q)}", "</span>"],
   ["[공시 방향] 화면 반대 공시도", A, " && !(dir && discDir(x.title) === -dir)", ""],
   ["[공시 방향] 화면 방향 안 넘김", A, "keyDiscToday(q.code, Math.sign(q.changePct || 0))", "keyDiscToday(q.code)"],
   ["[공시 방향] 봇 반대 공시도", F, " && discDir(x.title) !== -Math.sign(q.changePct)", ""],
