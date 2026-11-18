@@ -733,12 +733,13 @@ const nextModel = () => pickModel({ used: budget ? budget.used : {}, out: outNow
 // 사용 불가·일일 한도 소진은 그날 하루 뺀다(예산 기록에 남아 다음 회차도 건너뜀). 예산이 없으면 이번 회차만.
 const markOut = (model, why) => { if (budget) budget.out[model] = why; else runOut[model] = why; };
 // 지금 AI를 부를 수 있나 — 'go' | 'off'(키 없음·이번 회차 중지·쓸 모델 없음) | 'wait'(시간 배분상 보류). 예산이 없으면 제한 없음.
-export function aiGate() {
+// ahead: 시간 배분보다 앞당겨 쓸 수 있는 횟수(85차 — 애프터마켓 이유만 2, 나머지는 0)
+export function aiGate(ahead = 0) {
   if (!GEMINI_KEY || ai.disabled || !nextModel()) return 'off';
-  return !budget || allowance(budget, GEMINI_MODELS) > 0 ? 'go' : 'wait';
+  return !budget || allowance(budget, GEMINI_MODELS, ahead) > 0 ? 'go' : 'wait';
 }
 // 지금 더 부를 수 있는 횟수(시간 배분 몫) — 한 줄 진단을 묶을지 정할 때(60차). 부를 수 없으면 0, 예산이 없으면 제한 없음
-export function aiRoom() { return aiGate() !== 'go' ? 0 : budget ? allowance(budget, GEMINI_MODELS) : Infinity; }
+export function aiRoom(ahead = 0) { return aiGate(ahead) !== 'go' ? 0 : budget ? allowance(budget, GEMINI_MODELS, ahead) : Infinity; }
 // 시간 배분상 이번엔 부르지 않았음을 기록(호출부가 aiGate로 직접 판단해 건너뛸 때 — 화면에 '순서 대기'로 보인다)
 export function noteAiSkipped() { ai.skipped++; }
 export function aiStatus() {
@@ -791,7 +792,7 @@ async function geminiCall(model, prompt, retries) {
 //  · 사용 불가·일일 한도 소진 → 그 모델은 그날 빼고, 같은 요청을 다른 모델로 다시 시도
 //  · 분당 한도(재시도로도 안 풀린 429) → 그 모델은 이번 회차만 빼고 다른 모델로 다시 시도
 //  · 시간 배분상 지금은 아껴 둘 차례 → 호출하지 않음 · 키 오류 → 이번 회차 AI 중지 · 일시 오류 → 이 요청만 실패
-async function geminiJSON(prompt, { retries = 2 } = {}) {
+async function geminiJSON(prompt, { retries = 2, ahead = 0 } = {}) {
   if (!GEMINI_KEY || ai.disabled) return null;
   for (;;) {
     const model = nextModel();
@@ -801,7 +802,7 @@ async function geminiJSON(prompt, { retries = 2 } = {}) {
       console.error(`    사용 가능한 Gemini 모델 없음(${ai.disabled}) — 이번 회차 AI 중지, 기존 분석 유지`);
       return null;
     }
-    if (aiGate() === 'wait') { ai.skipped++; return null; }
+    if (aiGate(ahead) === 'wait') { ai.skipped++; return null; }
     const r = await geminiCall(model, prompt, retries);
     if (r.kind === 'ok') {
       ai.ok++;
@@ -1098,6 +1099,81 @@ export function themeOut(x, heads) {
   const codes = [...new Set(hs.flatMap((h) => h.codes))];
   const refs = [...hs].sort((a, b) => b.ms - a.ms).slice(0, 3).map((h) => ({ t: h.t, link: h.link, src: h.src, ms: h.ms }));
   return { title: x.title, summary: x.summary, codes, refs };
+}
+
+// ---------- 애프터마켓 이유(85차, 화면 '왜 움직였나'의 애프터 줄·카드 시간외 줄 아래) ----------
+// 종합분석은 정규장 등락의 이유라, 정규장이 끝난 뒤 실적 발표처럼 새 소식에 크게 움직이면 화면엔 정규장 이유만 남았다(11/18 아침 — 엔비디아 실적 발표 뒤
+// 엔비디아 정규장 -0.44%·애프터 +4.57%, TSMC -3.68%·+4.98%, 슈퍼 마이크로 -3.54%·+5.31%: '왜 움직였나'엔 TSMC·슈퍼 마이크로의 '…우려로 하락'만 있고 엔비디아는
+// 없었다). 미국 종목이 애프터마켓에서 ±2% 넘게 움직이면 정규장 마감 뒤 기사로 AI가 한 번에 묶어 진단한다 — 묶어야 TSMC·슈퍼 마이크로처럼 자기 기사 없이
+// 다른 종목 소식(엔비디아 실적)에 따라 움직인 것도 설명된다(그날 마감 뒤 기사는 엔비디아에만 8건, TSMC·슈퍼 마이크로엔 원인 기사가 없었다)
+export const EXT_MIN = 2, EXT_ROWS = 6, EXT_HEADS = 24, EXT_MAX_CALLS = 3, EXT_GAP_MS = 15 * 60e3, EXT_REDO_MS = 60 * 60e3;
+// 시간 배분보다 2번까지 앞당겨 부른다 — 미국 장 몫은 새벽(한국) 정규장 분석에 다 쓰여 애프터마켓 시간(한국 06:00~10:00)엔 몫이 없다(11/18 06:00~09:00 '순서 대기').
+// 애프터마켓이 있는 날 한두 번이라 국내 장 몫이 그만큼 줄 뿐이다
+export const EXT_AHEAD = 2;
+// 진단할 종목 — 미국 종목(AI를 꺼 둔 종목 빼고)이 장중이 아니고 애프터마켓 가격이 정규장 종가보다 ±2% 넘게 움직였을 때, 많이 움직인 순 6개까지.
+// 6시간 넘은 시간외 가격은 뺀다(애프터마켓이 끝나도 다음 프리마켓까지 남는 값 — 그 사이엔 새로 부르지 않음)
+export function extMovers(items, quotes, now) {
+  return (Array.isArray(items) ? items : []).map((it) => ({ it, q: quotes && quotes[it.code] }))
+    .filter(({ it, q }) => it.ai !== false && q && q.ok && q.market === 'US' && q.marketStatus !== 'OPEN' && q.ext && q.ext.session === 'post'
+      && Number.isFinite(q.ext.changePct) && Math.abs(q.ext.changePct) >= EXT_MIN && Number.isFinite(q.ext.at) && now - q.ext.at < 6 * 3600e3)
+    .sort((a, b) => Math.abs(b.q.ext.changePct) - Math.abs(a.q.ext.changePct)).slice(0, EXT_ROWS);
+}
+// 마감 뒤 기사 — 내 미국 종목들 기사 중 정규장 마감(closeMs) 뒤에 나온 것. 원인 아닌 기사·시세 안내는 빼고 같은 제목은 하나로(걸린 종목을 모음), 최신순 24건까지
+export function extHeads(items, news, closeMs, now) {
+  const by = new Map();
+  for (const it of Array.isArray(items) ? items : []) {
+    if (it.market !== 'US') continue; // 미국 종목 기사만
+    for (const n of (news && news[it.code] && Array.isArray(news[it.code].items) ? news[it.code].items : [])) {
+      if (!n || !n.title || !Number.isFinite(n.pubMs) || n.pubMs < closeMs || n.pubMs > now + 3600e3) continue;
+      if (priceOnly(n.title) || CSR_RE.test(n.title)) continue; // 원인 아닌 기사·시세 안내
+      const k = String(n.title).replace(/\s+/g, ' ').trim();
+      const h = by.get(k) || { t: k, codes: [], names: [], ms: n.pubMs };
+      if (h.codes.indexOf(it.code) < 0) { h.codes.push(it.code); h.names.push(it.name || it.code); }
+      by.set(k, h);
+    }
+  }
+  return [...by.values()].sort((a, b) => b.ms - a.ms).slice(0, EXT_HEADS);
+}
+// 진단할 종목에 걸린 마감 뒤 기사 수
+export const extRel = (movers, heads) => { const codes = new Set(movers.map((m) => m.it.code)); return heads.filter((h) => h.codes.some((c) => codes.has(c))).length; };
+// 직전 진단(extwhy.json)이 같은 애프터마켓(정규장 날짜 day — 뉴욕) 것인가 · 시계가 거꾸로 갔으면 아님
+export const extSame = (prev, day, now) => !!prev && prev.day === day && prev.sess === 'post' && Number.isFinite(prev.at) && prev.at <= now && !!prev.items && typeof prev.items === 'object';
+// 부를 때인가 — 진단할 종목에 걸린 마감 뒤 기사가 있어야 부른다(기사 없이 부르면 '재료 없이'뿐 — 11/18 엔비디아 실적 기사는 발표 약 1시간 뒤에 들어왔다).
+// 그 애프터마켓의 첫 진단 · 진단이 없는(방향이 바뀐) 종목이 생기면 직전 뒤 15분 · 걸린 기사가 늘었으면 직전 뒤 1시간 — 한 애프터마켓에 3번까지
+export function extDue(prev, movers, heads, day, now) {
+  if (!movers.length) return false;
+  const rel = extRel(movers, heads);
+  if (!rel) return false;
+  if (!extSame(prev, day, now)) return true;
+  if ((prev.n || 0) >= EXT_MAX_CALLS) return false;
+  const miss = movers.some((m) => { const x = prev.items[m.it.code]; return !x || Math.sign(Number(x.pct) || 0) !== Math.sign(m.q.ext.changePct); });
+  return (miss && now - prev.at >= EXT_GAP_MS) || (rel > (prev.hn || 0) && now - prev.at >= EXT_REDO_MS);
+}
+// AI 진단 — 진단할 종목 전부를 한 번에, 마감 뒤 기사 전부를 함께 준다(다른 종목 소식이 원인일 수 있게). → { 코드: { headline, model } }(받은 종목만), 실패하면 null
+export async function aiExtBriefs(movers, heads, now = Date.now()) {
+  const rows = (Array.isArray(movers) ? movers : []).filter((m) => m && m.q && m.q.ext && Number.isFinite(m.q.ext.changePct));
+  if (!GEMINI_KEY || !rows.length || !Array.isArray(heads) || !heads.length) return null;
+  const sgn = (v) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`;
+  const lines = rows.map(({ q }, i) => `[${i + 1}] ${q.name || q.code}(${q.code}) · 정규장 ${sgn(q.changePct ?? 0)}% → 애프터마켓 ${sgn(q.ext.changePct)}%(정규장 종가 대비)`).join('\n');
+  const list = heads.map((h, i) => `${i + 1}. (${h.names.join('·')}) ${h.t}`).join('\n');
+  const prompt =
+    `너는 미국 증시 애널리스트다(답은 한국어로). 아래 내 종목들이 오늘 미국 정규장이 끝난 뒤 애프터마켓(시간외 거래)에서 크게 움직였다.\n` +
+    `종목마다 애프터마켓에서 왜 움직였는지 핵심 원인을 한 문장으로 진단하라 — 정규장 등락의 이유가 아니라 마감 뒤 움직임의 이유다.\n` +
+    `아래 기사는 정규장 마감 뒤에 나온 내 종목들의 기사다(앞 괄호는 그 기사가 걸린 종목). 다른 종목의 소식(같은 업종 대형주의 실적 발표·거래처·경쟁사 소식)이 이 종목 움직임과 이어지면 그 소식을 원인으로 써도 된다.\n` +
+    `애프터마켓 방향과 반대인 소식과 정규장 등락만 다룬 기사는 원인으로 쓰지 말 것. 이어지는 소식이 없으면 지어내지 말고 '뚜렷한 재료 없이 상승'처럼 재료가 없다고 써라.\n` +
+    `${TONE_RULE}\n${outsideRule(now)}\n` +
+    `'…에 상승'·'…로 하락'처럼 짧은 진단으로 끝맺을 것('마감했다'·'보였다' 같은 문장 끝은 쓰지 말 것). '애프터마켓'이라는 말은 빼도 된다(화면에 따로 붙는다).\n\n` +
+    `종목:\n${lines}\n\n마감 뒤 기사:\n${list}\n\n` +
+    `반드시 이 JSON만 출력(종목 번호마다 하나): {"items":[{"no":번호,"headline":"애프터마켓에서 왜 움직였는지 한 문장 진단(한국어, 40자 내외)"}]}`;
+  const r = await geminiJSON(prompt, { ahead: EXT_AHEAD });
+  const got = r && r.json && Array.isArray(r.json.items) ? r.json.items : null;
+  if (!got) return null;
+  const out = {};
+  for (const x of got) {
+    const no = parseInt(x && x.no, 10) || 0, row = rows[no - 1], h = String(x && x.headline || '').trim().replace(/[.。]+$/, ''); // 끝 마침표 뗌(74차와 같음)
+    if (row && h && !out[row.q.code]) out[row.q.code] = { headline: h.slice(0, 120), model: r.model };
+  }
+  return out;
 }
 
 // 지수 급등락 "핵심 이유" — 구글뉴스 헤드라인 + (키 있으면) AI 핵심 판단. (전 세계 접근 가능)

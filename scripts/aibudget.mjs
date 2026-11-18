@@ -112,11 +112,14 @@ export function capacity(b, models) {
   return models.reduce((a, m) => a + (b.out[m] ? (b.used[m] || 0) : DAILY_PER_MODEL), 0);
 }
 
-// 지금 더 쓸 수 있는 호출 수 — 리셋 1시간 전부터는 제한 없음(쓸 수 있는 모델이 남아 있는 한)
-export function allowance(b, models) {
+// 지금 더 쓸 수 있는 호출 수 — 리셋 1시간 전부터는 제한 없음(쓸 수 있는 모델이 남아 있는 한).
+// ahead: 시간 배분보다 앞당겨 쓸 수 있는 횟수(85차 애프터마켓 이유 — 11/18 미국 장 몫 14회를 새벽 6시까지 다 써 한국 06:00~09:00엔 몫이 없었다).
+// 하루 총량은 넘지 않고, 앞당긴 만큼은 뒤에 풀리는 몫에서 갚는다(쓴 횟수로 계산하므로 따로 기록하지 않음)
+export function allowance(b, models, ahead = 0) {
   if (!models.some((m) => !b.out[m])) return 0;
   if (b.lastHour) return Infinity;
-  return Math.max(0, Math.floor(capacity(b, models) * b.fraction) - totalUsed(b, models));
+  const cap = capacity(b, models), used = totalUsed(b, models);
+  return Math.max(0, Math.min(cap - used, Math.floor(cap * b.fraction) + ahead - used));
 }
 
 // 지금은 몫이 없을 때, 다음에 1회 이상 쓸 수 있게 되는 시각(ms, 분 단위) — 화면의 '다음 분석 ○○:○○부터' 표시용.

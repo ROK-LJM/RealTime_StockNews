@@ -373,6 +373,8 @@ input::placeholder { color: var(--muted); }
 .ext-row { margin-top: 2px; font-size: 13px; font-variant-numeric: tabular-nums; }
 .ext-row .ext-label { margin-right: 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .ext-row b { font-weight: 700; }
+.ext-why { margin-top: 2px; font-size: 13px; color: var(--text-2); }
+.ext-why .src { margin-right: 6px; }
 /* 같은 시장 지수 대비 — 시세 아래 한 줄('코스피 -1.97% 대비 +0.85%p') */
 .vs-row { margin-top: 2px; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; cursor: help; }
 .vs-row b { font-weight: 700; }

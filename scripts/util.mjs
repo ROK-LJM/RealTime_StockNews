@@ -59,7 +59,7 @@ export function writeJsonAtomic(file, obj) {
 
 // 화면이 1분마다 받는 파일 — 파일별 내용 지문(sha1 앞 10자리)을 manifest.json에 남기면 화면은 지문만 먼저 받고 바뀐 파일만 다시 받는다
 // (평소 1분 갱신 약 220KB → 수 KB, 휴대폰 데이터 절약). fetch.mjs(회차 끝)와 burst.mjs(개장 직후 집중 갱신)가 함께 쓴다.
-export const MANIFEST_FILES = ['quotes.json', 'market.json', 'news.json', 'history.json', 'investors.json', 'analysis.json', 'disclosures.json', 'moves.json', 'status.json', 'themes.json', 'calendar.json'];
+export const MANIFEST_FILES = ['quotes.json', 'market.json', 'news.json', 'history.json', 'investors.json', 'analysis.json', 'disclosures.json', 'moves.json', 'extwhy.json', 'status.json', 'themes.json', 'calendar.json'];
 export function manifestOf(dataDir, files = MANIFEST_FILES) {
   const out = {};
   for (const f of files) {

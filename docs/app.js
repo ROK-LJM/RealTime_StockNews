@@ -11,7 +11,7 @@ const $ = (s) => document.querySelector(s);
 // loadedOnce: 한 번이라도 시세를 그렸는지. 이후의 일시적 로드 실패로 화면을 비우지 않기 위한 표시.
 // sort: 카드 순서('mine' 내 순서 | 'move' 등락 큰 순, 이 기기에 기억). whyAll: '왜 움직였나' 전체 펼침. data: 마지막으로 받은 quotes.json
 const state = { timer: null, intervalSec: 60, hist: {}, news: {}, inv: {}, analysis: {}, disc: {}, openAnalysis: new Set(), loadedOnce: false,
-  sort: 'mine', view: 'full', whyAll: false, data: null, market: null, moves: {}, status: null, briefOpen: new Map(), cal: null };
+  sort: 'mine', view: 'full', whyAll: false, data: null, market: null, moves: {}, status: null, briefOpen: new Map(), cal: null, extwhy: null };
 
 // ---------- 포맷 ----------
 function fmtPrice(q) {
@@ -105,8 +105,11 @@ async function sha1Hex(buf) {
   const d = await crypto.subtle.digest('SHA-1', buf);
   return Array.from(new Uint8Array(d), (b) => b.toString(16).padStart(2, '0')).join('');
 }
-async function loadData(name) {
+// optional(85차) — 봇이 만들 때가 따로 있는 파일(큰 소식·애프터마켓 이유): 지문 파일을 받았는데 그 파일 지문이 없으면 아직 없는 파일이라 요청하지 않는다
+// (그 전엔 만들어지기 전까지 매분 404 두 건). 지문 파일을 못 받았으면 예전처럼 받아 본다
+async function loadData(name, optional = false) {
   const v = _manifest && _manifest[name];
+  if (optional && _manifest && v == null) return null;
   if (typeof v !== 'string' || !/^[0-9a-f]{8,40}$/.test(v) || _mismatch.has(`${name}@${v}`)) return loadJson(name);
   const hit = _files.get(name);
   if (hit && hit.v === v) return hit.data;
@@ -393,9 +396,9 @@ const isNarrow = () => window.matchMedia('(max-width: 720px)').matches;
 
 // ---------- 보유 종목 ----------
 async function loadQuotes() {
-  let data, news, hist, inv, analysis, disc, moves, cal, themes;
+  let data, news, hist, inv, analysis, disc, moves, cal, themes, extwhy;
   try {
-    [data, news, hist, inv, analysis, disc, moves, cal, themes] = await Promise.all([
+    [data, news, hist, inv, analysis, disc, moves, cal, themes, extwhy] = await Promise.all([
       loadData('quotes.json'),
       loadData('news.json').catch(() => ({})),
       loadData('history.json').catch(() => ({})),
@@ -404,7 +407,8 @@ async function loadQuotes() {
       loadData('disclosures.json').catch(() => ({})),
       loadData('moves.json').catch(() => ({})),
       loadData('calendar.json').catch(() => null),
-      loadData('themes.json').catch(() => null), // 큰 소식(78차) — 못 받으면 직전 값
+      loadData('themes.json', true).catch(() => null), // 큰 소식(78차) — 못 받으면 직전 값(아직 없으면 요청 안 함)
+      loadData('extwhy.json', true).catch(() => null), // 애프터마켓 이유(85차) — 못 받으면 직전 값(아직 없으면 요청 안 함)
     ]);
   } catch (e) {
     // 자동 새로고침 중 일시적 실패(5xx·오프라인 등)로 이미 그려진 화면을 지우지 않는다.
@@ -422,6 +426,7 @@ async function loadQuotes() {
   state.moves = moves || {};
   if (cal && Array.isArray(cal.events)) state.cal = cal; // 공시 일정 달력 — 못 받으면 직전 값
   if (themes && Array.isArray(themes.items)) state.themes = themes;
+  if (extwhy && extwhy.items && typeof extwhy.items === 'object') state.extwhy = extwhy;
   state.data = data;
   const clock = $('#clock');
   if (clock) { // 좁은 화면에선 '확인' 글자를 숨겨 상단바를 한 줄로
@@ -941,6 +946,22 @@ function whyCell(q, vs) {
   if (w) return `${tag}<span class="src" title="${esc(w.label)}${w.day ? ` — ${esc(w.day)} 기사` : ''}">${w.src}</span>${w.day ? `<span class="muted">${esc(w.day)}</span> ` : ''}${esc(w.text)}`;
   return tag + (vs && (vs.follows || vs.within) ? `<span class="muted">${esc(vs.name)} ${fmtPct(vs.pct)} 흐름 — 종목만의 이유 기사 없음</span>` : '<span class="muted">아직 이유 정보가 없어요(뉴스·공시·AI 대기)</span>');
 }
+// 애프터·프리마켓 줄의 이유 칸(85차) — '애프터'·'프리' 표시 + 이유(AI 애프터마켓 진단 → 마감 뒤 같은 방향 기사, extReason) · 없으면 '아직 이유 정보가 없어요'
+function extWhyCell(q, x) {
+  const w = extReason(q);
+  const tag = `<span class="src mkt" title="${esc(x.label)} — 정규장 종가 대비 ${fmtPct(x.changePct)}">${x.short}</span>`;
+  if (w) return `${tag}<span class="src" title="${esc(w.label)}">${w.src}</span>${esc(w.text)}`;
+  return tag + '<span class="muted">아직 이유 정보가 없어요(마감 뒤 기사·AI 대기)</span>';
+}
+// '왜 움직였나' 줄 — 시장 순서(국내 → 해외)대로, 그 안에서 많이 움직인 종목부터. 미국 종목은 애프터·프리마켓에서 ±2% 넘게 움직였으면 시간외 줄도(85차 —
+// 정규장 줄 바로 뒤 · 정규장이 ±2% 안쪽이면 시간외 줄만). 순서는 정규장·시간외 중 더 크게 움직인 쪽 → [{ q }](정규장 줄) · [{ q, x }](시간외 줄)
+function whyMovers(groups) {
+  const extBig = (q) => { const x = marketOf(q) === 'US' ? extOf(q) : null; return x && Math.abs(x.changePct) >= WHY_MIN ? x : null; };
+  const reg = (q) => Math.abs(q.changePct ?? 0) >= WHY_MIN;
+  const size = (q) => Math.max(reg(q) ? Math.abs(q.changePct) : 0, extBig(q) ? Math.abs(extBig(q).changePct) : 0);
+  return groups.flatMap(({ list }) => list.filter((q) => q && q.ok && size(q) > 0).sort((a, b) => size(b) - size(a))
+    .flatMap((q) => [...(reg(q) ? [{ q }] : []), ...(extBig(q) ? [{ q, x: extBig(q) }] : [])]));
+}
 function tileHtml(q) {
   if (!q || !q.ok) {
     return `<button type="button" class="tile err" data-code="${esc(q?.code)}" title="시세를 받지 못함 — 눌러서 이유 보기"><span class="t-nm">${esc(q?.name || q?.code)}</span><span class="t-pct">시세 없음</span></button>`;
@@ -975,14 +996,36 @@ function extRow(q) {
   if (!x) return '';
   const arrow = x.changePct > 0 ? '▲' : x.changePct < 0 ? '▼' : '–';
   const at = fmtAiTime(x.at);
+  // 시간외 움직임의 이유(85차) — AI 애프터마켓 진단은 늘, 마감 뒤 기사는 시간외 등락이 ±2% 넘을 때만(작은 움직임에 기사를 이유처럼 붙이지 않게)
+  const w = marketOf(q) === 'US' ? extReason(q) : null, wy = w && (w.src === 'AI' || Math.abs(x.changePct) >= WHY_MIN) ? w : null;
   return `<div class="ext-row" title="정규장 밖(시간외) 거래 가격 — 등락은 정규장 종가 대비">
       <span class="ext-label">${x.label}</span> <b>${fmtPrice({ price: x.price, currency: q.currency })}</b>
-      <span class="${dirClass(x.changePct)}-c">${arrow} ${fmtChange({ change: x.change, currency: q.currency })} (${fmtPct(x.changePct)})</span>${at ? ` <span class="muted">· ${esc(at)}</span>` : ''}</div>`;
+      <span class="${dirClass(x.changePct)}-c">${arrow} ${fmtChange({ change: x.change, currency: q.currency })} (${fmtPct(x.changePct)})</span>${at ? ` <span class="muted">· ${esc(at)}</span>` : ''}</div>${wy ? `
+    <div class="ext-why"><span class="src" title="${esc(wy.label)}">${wy.src}</span>${wy.item ? extLink(wy.item.link, wy.text) : esc(wy.text)}${wy.at ? ` <span class="muted">· ${esc(fmtAiTime(wy.at))}</span>` : ''}</div>` : ''}`;
 }
 // 큰 등락 옆 '정규장 종가'(76차) — 시간외 줄이 있을 때만. 11/18 제보: 슈퍼 마이크로 컴퓨터 애프터 +5.71%인데 큰 숫자 -3.54%·파란 칸이 최종처럼
 // 보여 헷갈림 — 공식 종가는 정규장 종가이고 칸 색·'왜 움직였나'도 그 기준, 아래 시간외 줄은 정규장 종가 대비라는 걸 카드에서 바로 알게
 function closeTag(q) {
   return extOf(q) ? '<span class="close-tag" title="공식 종가 — 등락률·칸 색은 이 기준이고, 아래 시간외 줄의 등락은 이 종가 대비">정규장 종가</span>' : '';
+}
+// 애프터마켓 이유(85차) — 봇이 미국 종목의 애프터마켓 큰 움직임(±2%)을 정규장 마감 뒤 기사로 AI가 묶어 진단한 것(extwhy.json). 지금 시세의
+// 그 애프터마켓(정규장 날짜·시간외 구분)이고 지금 시간외 방향과 같을 때만 — 다음 날 프리마켓·새 정규장에선 안 보임
+function extWhyOf(q) {
+  const x = extOf(q), w = state.extwhy, qt = Date.parse(q && q.asOf);
+  if (!x || marketOf(q) !== 'US' || !w || !w.items || w.sess !== x.session || !Number.isFinite(qt) || w.day !== marketYmd(qt, 'US')) return null;
+  const it = w.items[q.code];
+  return it && it.h && Math.sign(Number(it.pct) || 0) === Math.sign(x.changePct || 0) ? { text: String(it.h), at: Number(it.at) } : null;
+}
+// 시간외 움직임의 이유 — AI 애프터마켓 진단 → 정규장 마감 뒤 기사 중 시간외 방향과 같은 방향 기사(시세 안내·원인 아닌 기사 빼고, pickReasonNews) → 없음. 미국 종목만
+function extReason(q) {
+  const a = extWhyOf(q);
+  if (a) return { src: 'AI', label: 'AI 애프터마켓 진단(정규장 마감 뒤 기사로)', text: a.text, at: a.at };
+  const x = marketOf(q) === 'US' ? extOf(q) : null, qt = Date.parse(q && q.asOf), s = Math.sign((x && x.changePct) || 0);
+  if (!x || !s || !Number.isFinite(qt)) return null;
+  const names = reasonNames(q);
+  const after = (state.news[q.code]?.items || []).filter((it) => it && it.title && Number.isFinite(it.pubMs) && it.pubMs >= qt && newsDir(it, names) === s);
+  const n = pickReasonNews(after, x.changePct, '', (ms) => marketYmd(ms, 'US'), names);
+  return n ? { src: '뉴스', label: '정규장 마감 뒤 기사', text: n.title, item: n } : null;
 }
 // 큰 소식(78차) — 봇이 약 3시간마다 AI로 묶은 내 종목들의 큰 이슈(themes.json). 소식 이름·한 줄 요약·관련 종목(누르면 그 카드로 — '한눈에'의 누르기와 같음)·
 // 기사 링크. 36시간 넘었거나 비었으면 안 보임
@@ -1018,19 +1061,18 @@ function renderBoard(groups, closed, measures) {
       ${meas.length ? `<p class="bm-meas"><span>오늘 시장 조치</span>${meas.map((x) => `<b class="mc-${x.cls}" title="${esc(x.tip)}">${esc(x.text)}</b>`).join('')}</p>` : ''}${note ? `<p class="bm-note">${esc(note)}</p>` : ''}${sched.length ? `<p class="bm-sched"><span>시장 일정</span>${sched.map((x) => `<a href="./calendar.html?d=${esc(x.d)}">${esc(x.text)}</a>`).join('')}</p>` : ''}<div class="tiles">${[...list].sort(byPct).map(tileHtml).join('')}</div>
     </div>`;
   }).join('');
-  // 왜 움직였나 — 시장 순서(국내 → 해외)대로, 그 안에서 많이 움직인 종목부터
-  const movers = groups.flatMap(({ list }) => list.filter((q) => q && q.ok && Math.abs(q.changePct ?? 0) >= WHY_MIN)
-    .sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct)));
+  // 왜 움직였나 — 시장 순서(국내 → 해외)대로, 그 안에서 많이 움직인 종목부터 · 미국은 애프터·프리마켓 줄도(85차, whyMovers)
+  const movers = whyMovers(groups);
   const show = isNarrow() ? 4 : WHY_SHOW; // 휴대폰은 처음에 4줄
-  const rows = movers.map((q, i) => {
-    const p = q.changePct, vs = vsMarket(q, state.market?.indices);
+  const rows = movers.map(({ q, x }, i) => {
+    const p = x ? x.changePct : q.changePct;
     return `<button type="button" class="why-row${i >= show && !state.whyAll ? ' more' : ''}" data-code="${esc(q.code)}">
       <span class="w-pct ${dirClass(p)}-c">${p > 0 ? '▲' : '▼'} ${Math.abs(p).toFixed(2)}%</span>
       <span class="w-nm">${esc(q.name)}</span>
-      <span class="w-txt">${whyCell(q, vs)}</span>
+      <span class="w-txt">${x ? extWhyCell(q, x) : whyCell(q, vsMarket(q, state.market?.indices))}</span>
     </button>`;
   }).join('');
-  const more = movers.length > show && !state.whyAll ? `<button type="button" class="why-more" data-why="all">${movers.length - show}종목 더 보기<svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></button>` : '';
+  const more = movers.length > show && !state.whyAll ? `<button type="button" class="why-more" data-why="all">${movers.length - show}줄 더 보기<svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></button>` : '';
   el.innerHTML = `<div class="board-head"><h2 id="boardTitle">오늘 내 종목 한눈에</h2>
       <span class="board-hint">진한 색일수록 크게 움직임 · 누르면 그 종목 카드로</span></div>
     <div class="board-mkts">${mkts}</div>
