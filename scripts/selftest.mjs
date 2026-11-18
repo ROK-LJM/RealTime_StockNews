@@ -3257,6 +3257,37 @@ await test('큰 소식(78차, 화면): 소식 이름·한 줄 요약·관련 종
   assert.equal(g.themesHtml(null), '');
   assert.ok(appJs.includes('</div>${themesHtml(state.themes)}`;'), '"왜 움직였나" 아래');
 });
+await test('한눈에 칸(79차): 시간외 가격이 있으면 큰 숫자 앞에 "정규장"·칸 아래 띠에 애프터·프리·시간외 등락(방향 색) · 국내 개장 전은 "+0.00%" 대신 "개장 전"(평균·오른/내린 수에서도 뺌) · 장중·체결 전·정지는 그대로', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const top = appJs.slice(appJs.indexOf('function fmtPrice('), appJs.indexOf('\n', appJs.indexOf('function esc(')) + 1);
+  const a = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const b = appJs.slice(appJs.indexOf('// ---------- 데이터 지연 경고'), appJs.indexOf('// ---------- 내 종목 한눈에'));
+  const c = appJs.slice(appJs.indexOf('function keyDiscToday('), appJs.indexOf('function extRow('));
+  const kstYmd = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const f = vm.runInNewContext(`${top}${a}${b}${c}; ({ tileHtml, preOf, avgPct })`, { state: { disc: {}, hist: {}, market: {}, analysis: {}, moves: {}, cal: null }, lastTimeOf: () => '', kstYmd });
+  const us = (x) => ({ ok: true, code: 'SMCI', name: '슈퍼 마이크로 컴퓨터', market: 'US', currency: 'USD', marketStatus: 'CLOSE', changePct: -3.54, asOf: '2026-11-17T21:00:00Z', ...x });
+  const ext = { session: 'post', price: 25.17, change: 1.03, changePct: 4.27, at: 1 };
+  const t1 = f.tileHtml(us({ ext }));
+  assert.ok(t1.includes('<span class="t-pct"><span class="t-lab">정규장</span>-3.54%</span>'), '큰 숫자 앞에 정규장: ' + t1);
+  assert.ok(t1.includes('<span class="t-ext up">애프터 +4.27%</span>') && /class="tile down h3/.test(t1), '칸 색은 정규장(파랑) · 아래 띠는 애프터 방향색(빨강)');
+  assert.ok(f.tileHtml(us({ ext: { ...ext, session: 'pre', changePct: -1.2 } })).includes('<span class="t-ext down">프리 -1.20%</span>'), '프리 · 내리면 파랑');
+  const t2 = f.tileHtml(us({ marketStatus: 'OPEN', ext }));
+  assert.ok(t2.includes('<span class="t-pct">-3.54%</span>') && !t2.includes('t-ext') && !t2.includes('정규장'), '장중엔 시간외 띠·정규장 표시 없음');
+  const kr = (x) => ({ ok: true, code: '005930', name: '삼성전자', market: 'KR', currency: 'KRW', exch: 'KOSPI', marketStatus: 'PREOPEN', changePct: 0, volume: null, asOf: '2026-11-18T08:55:00+09:00', ...x });
+  const t3 = f.tileHtml(kr({}));
+  assert.ok(t3.includes('<span class="t-pct">개장 전</span>') && !t3.includes('+0.00%') && /class="tile flat h0 pend"/.test(t3), '개장 전: ' + t3);
+  assert.ok(f.tileHtml(kr({ marketStatus: 'OPEN' })).includes('<span class="t-pct">체결 전</span>'), '장중 첫 체결 전은 그대로');
+  assert.ok(f.tileHtml(kr({ marketStatus: 'OPEN', volume: 10, changePct: 1.5, halt: 'stock' })).includes('<span class="t-ext halt">매매 정지</span>'), '정지');
+  assert.equal(f.preOf(kr({})), true);
+  assert.equal(f.preOf(kr({ marketStatus: 'OPEN' })), false);
+  assert.equal(f.preOf(us({ marketStatus: 'PREOPEN' })), false, '해외는 해당 없음');
+  assert.equal(f.avgPct([kr({}), kr({ code: '000660' })]), null, '모두 개장 전이면 평균 없음');
+  assert.equal(f.avgPct([kr({}), kr({ marketStatus: 'OPEN', volume: 5, changePct: 2 })]), 2, '개장 전은 평균에서 뺌');
+  // 머리 — 모두 개장 전이면 오른/내린 수 안 보임, 평균이 없어도 예상 지수는 보임(한눈에·카드 묶음 둘 다)
+  assert.equal(appJs.split('${valid.length && !valid.every(preOf) ? `<span class="mgroup-updown">').length - 1, 2, '오른/내린 수 — 한눈에·카드 묶음');
+  assert.ok(appJs.includes('const cmp = avg == null && !bench.length ? \'\' :') && appJs.includes('${avg == null ? \'\' : `평균 <b class="${dirClass(avg)}-c">${fmtPct(avg)}</b>`}'), '평균 없어도 예상 지수');
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');

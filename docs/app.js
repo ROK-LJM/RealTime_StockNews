@@ -527,13 +527,16 @@ function marketYmd(ms, market) {
 // 시가가 10% 넘게 벌어지면 거래소가 시가 결정을 2분 미룬다(정적 변동성 완화장치). 0%로 세지 않는다 — 평균·시장 대비에서 빼고 칸은 '체결 전'·맨 뒤.
 // 매매 정지 종목은 멈추기 직전 값이 있으니 해당 없음
 function pendingOf(q) { return !!(q && q.ok && marketOf(q) === 'KR' && q.marketStatus === 'OPEN' && !(q.volume > 0) && !q.halt); }
+// 개장 전(국내 동시호가 — 네이버 시세가 어제 종가·0%) — 칸은 '+0.00%' 대신 '개장 전'(79차, 11/18 08:55 화면 — 31칸이 모두 '+0.00%'라 오늘 보합처럼 보였다),
+// 평균·오른/내린 수에서도 뺀다
+function preOf(q) { return !!(q && q.ok && marketOf(q) === 'KR' && q.marketStatus === 'PREOPEN'); }
 // 매매 정지 — 봇이 붙인 halt('market' 시장 전체 · 'stock' 그 종목만), 장중일 때만
 const haltOf = (q) => (q && q.ok && q.halt && q.marketStatus === 'OPEN' ? q.halt : '');
 // '한눈에' 칸 순서 — 많이 오른 종목부터, 첫 체결 전은 체결된 종목 뒤, 시세 실패는 맨 뒤
 const tileRank = (q) => (q && q.ok ? (pendingOf(q) ? -1e9 : q.changePct ?? 0) : -Infinity);
 // 내 종목 등락률의 단순 평균(보유 비중을 모르므로 종목마다 같은 무게) — 수집 실패·값 없는·첫 체결 전 종목은 뺀다
 function avgPct(list) {
-  const v = list.filter((q) => q && q.ok && Number.isFinite(q.changePct) && !pendingOf(q)).map((q) => q.changePct);
+  const v = list.filter((q) => q && q.ok && Number.isFinite(q.changePct) && !pendingOf(q) && !preOf(q)).map((q) => q.changePct);
   return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
 }
 // 예상 지수 — 개장 직전(국내 8시 40~50분쯤부터)과 9시 몇 초 동안 네이버 지수는 '개장 전'인 채로 동시호가 주문으로 계산한 예상값을 준다.
@@ -859,7 +862,7 @@ function renderGroup(g, list, closed) {
       ${g.hint ? `<span class="mgroup-hint">${esc(g.hint)}</span>` : ''}
       <span class="mgroup-count">${list.length}종목</span>
       ${failed && valid.length ? `<span class="mgroup-fail">${failed}개 수집 실패</span>` : ''}
-      ${valid.length ? `<span class="mgroup-updown"><b class="up-c">▲ ${up}</b> <b class="down-c">▼ ${down}</b></span>` : ''}
+      ${valid.length && !valid.every(preOf) ? `<span class="mgroup-updown"><b class="up-c">▲ ${up}</b> <b class="down-c">▼ ${down}</b></span>` : ''}
       <span class="mgroup-status${stale ? ' stale' : ''}"${stale ? ` title="${STALE_TIP}"` : ''}>${status}${t ? ` · ${t}` : ''}${et ? ` · ${et}` : ''}</span>
     </div>
     <div class="grid">${cards}</div>
@@ -932,17 +935,19 @@ function tileHtml(q) {
   if (!q || !q.ok) {
     return `<button type="button" class="tile err" data-code="${esc(q?.code)}" title="시세를 받지 못함 — 눌러서 이유 보기"><span class="t-nm">${esc(q?.name || q?.code)}</span><span class="t-pct">시세 없음</span></button>`;
   }
-  const pend = pendingOf(q), halt = haltOf(q), since = halt && hmKst(q.haltAt);
-  const p = pend ? 0 : q.changePct ?? 0;
+  const pend = pendingOf(q), pre = preOf(q), halt = haltOf(q), since = halt && hmKst(q.haltAt);
+  const p = pend || pre ? 0 : q.changePct ?? 0;
   const ap = Math.abs(p), lv = ap < 0.5 ? 0 : ap < 1.5 ? 1 : ap < 3 ? 2 : ap < 5 ? 3 : 4; // 색 진하기 5단계(0.5·1.5·3·5%) — 3% 이상은 진한 색에 흰 글자
   const disc = keyDiscToday(q.code);
   const x = extOf(q);
   const mk = sixMonthMark(q, state.hist[q.code]);
   const vs = vsMarket(q, state.market?.indices);
-  const tip = pend ? `${q.name} — ${PENDING_TIP}${disc ? ` · 오늘 주요 공시: ${disc.title}` : ''}`
+  const tip = pre ? `${q.name} — 개장 전이라 어제 종가 그대로예요(첫 체결 뒤 바뀜)${disc ? ` · 오늘 주요 공시: ${disc.title}` : ''}` : pend ? `${q.name} — ${PENDING_TIP}${disc ? ` · 오늘 주요 공시: ${disc.title}` : ''}`
     : `${q.name} ${fmtPct(p)}${halt ? ` · 매매 정지${since ? `(${since}부터)` : ''} — 값은 멈추기 직전 가격` : ''}${vs ? ` · ${vs.name} 대비 ${fmtPctP(vs.diff)}${vs.follows ? '(시장 따라)' : ''}` : ''}${x ? ` · ${x.label} ${fmtPct(x.changePct)}` : ''}${mk ? ` · 6개월 ${mk === 'high' ? '신고가' : '신저가'}` : ''}${disc ? ` · 오늘 주요 공시: ${disc.title}` : ''}`;
-  return `<button type="button" class="tile ${dirClass(p)} h${lv}${pend ? ' pend' : ''}${halt ? ' halt' : ''}" data-code="${esc(q.code)}" title="${esc(tip)}">
-    <span class="t-nm">${esc(q.name)}</span><span class="t-pct">${pend ? '체결 전' : fmtPct(p)}</span>${halt ? '<span class="t-ext">매매 정지</span>' : x ? `<span class="t-ext">${x.short} ${fmtPct(x.changePct)}</span>` : ''}${disc ? '<span class="t-dot" role="img" aria-label="오늘 주요 공시"></span>' : ''}</button>`;
+  // 시간외 가격이 있으면 큰 숫자 앞에 '정규장'(칸 색도 정규장 기준), 칸 아래 띠에 애프터·프리·시간외 등락 — 띠는 카드색 바탕에 방향색 글자라 칸 색과 상관없이 읽힌다(79차,
+  // 11/18 제보 — 슈퍼 마이크로 컴퓨터 '-3.54% / 애프터 +4.27%'에서 큰 숫자·파란 칸이 무엇인지, 애프터가 어느 쪽인지 칸만 봐서는 분명하지 않았다)
+  return `<button type="button" class="tile ${dirClass(p)} h${lv}${pend || pre ? ' pend' : ''}${halt ? ' halt' : ''}" data-code="${esc(q.code)}" title="${esc(tip)}">
+    <span class="t-nm">${esc(q.name)}</span><span class="t-pct">${pend ? '체결 전' : pre ? '개장 전' : `${x && !halt ? '<span class="t-lab">정규장</span>' : ''}${fmtPct(p)}`}</span>${halt ? '<span class="t-ext halt">매매 정지</span>' : x ? `<span class="t-ext ${dirClass(x.changePct)}">${x.short} ${fmtPct(x.changePct)}</span>` : ''}${disc ? '<span class="t-dot" role="img" aria-label="오늘 주요 공시"></span>' : ''}</button>`;
 }
 
 // ---------- 미국 시간외(프리·애프터마켓) 가격 ----------
@@ -992,11 +997,12 @@ function renderBoard(groups, closed, measures) {
     const { valid, up, down, t, stale, status, et } = groupInfo(g, list, closed);
     const avg = avgPct(valid), bench = benchOf(g.key, state.market?.indices), note = boardNote(g.key, valid);
     const meas = g.key === 'KR' ? measuresOf(measures, valid) : [];
-    const cmp = avg == null ? '' : `<span class="bm-avg" title="내 종목 등락률의 단순 평균(종목마다 같은 무게) — 같은 시장 지수와 비교">평균 <b class="${dirClass(avg)}-c">${fmtPct(avg)}</b>`
+    // 개장 전엔 평균이 없어도(모두 개장 전) 예상 지수는 보인다(79차)
+    const cmp = avg == null && !bench.length ? '' : `<span class="bm-avg" title="내 종목 등락률의 단순 평균(종목마다 같은 무게) — 같은 시장 지수와 비교">${avg == null ? '' : `평균 <b class="${dirClass(avg)}-c">${fmtPct(avg)}</b>`}`
       + `${bench.map((b) => `<span class="bm-idx"${b.exp ? ` title="${EST_TIP}"` : ''}>${esc(b.name)}${b.exp ? ' <span class="est">예상</span>' : ''} <b class="${dirClass(b.pct)}-c">${fmtPct(b.pct)}</b></span>`).join('')}</span>`;
     return `<div class="bm" style="--n:${list.length}">
       <div class="bm-head"><span class="bm-title">${esc(g.label)}</span>
-        ${valid.length ? `<span class="mgroup-updown"><b class="up-c">▲ ${up}</b> <b class="down-c">▼ ${down}</b></span>` : ''}${cmp}
+        ${valid.length && !valid.every(preOf) ? `<span class="mgroup-updown"><b class="up-c">▲ ${up}</b> <b class="down-c">▼ ${down}</b></span>` : ''}${cmp}
         <span class="bm-status${stale ? ' stale' : ''}"${stale ? ` title="${STALE_TIP}"` : ''}>${status}${t ? ` · ${t}` : ''}${et ? ` · ${et}` : ''}</span></div>
       ${meas.length ? `<p class="bm-meas"><span>오늘 시장 조치</span>${meas.map((x) => `<b class="mc-${x.cls}" title="${esc(x.tip)}">${esc(x.text)}</b>`).join('')}</p>` : ''}${note ? `<p class="bm-note">${esc(note)}</p>` : ''}<div class="tiles">${[...list].sort(byPct).map(tileHtml).join('')}</div>
     </div>`;
