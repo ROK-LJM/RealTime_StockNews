@@ -1054,10 +1054,17 @@ export async function aiStockBriefs(list, now = Date.now()) {
 // 11/18 사용자 요청 — '앤트로픽 상장 같은, 내 종목에 도움 되는 큰 정보'. 그 기사는 삼성전자·SK하이닉스·SK텔레콤·아마존·마이크로소프트 카드 뉴스에
 // 흩어져 다른 기사에 묻혔다. 내 종목들의 최근 이틀 기사 제목을 AI가 사건별로 묶고(최대 4개), 관련 종목은 AI가 아니라 고른 기사가 걸린 종목으로 정한다
 export const THEME_MAX = 4, THEME_HEADS = 70, THEME_REFRESH_MS = 3 * 3600e3;
-// 새로 묶을 때인가 — 직전 것이 없거나 3시간 지났고(시계가 거꾸로 가도 다시), 무료 한도 배분 몫이 2번 넘게 남을 때(1번은 종목 분석에 남긴다)
-export function themeDue(prev, now, room) {
+// 아침 큰 소식(88차) — 몫이 2번 넘게 남는 때는 사실상 리셋 전 1시간(한국 16시)뿐이라 하루 한 번, 밤사이 미국 소식(실적 발표 등)은 다음 날 16시에야 묶였다
+// (11/18 첫 큰 소식 16:00). 평일 한국 07:00~08:59(국내 장 열기 전)에 마지막 큰 소식이 12시간 넘었으면 시간 배분보다 1번 앞당겨 부른다 — 하루 한 번
+export const THEME_EARLY_AHEAD = 1, THEME_MORNING_GAP_MS = 12 * 3600e3;
+export function themeMorning(now) { const d = new Date(now + 9 * 3600e3), h = d.getUTCHours(), w = d.getUTCDay(); return w >= 1 && w <= 5 && h >= 7 && h < 9; }
+// 새로 묶을 때인가 — 직전 것이 없거나 3시간 지났고(시계가 거꾸로 가도 다시), 무료 한도 배분 몫이 2번 넘게 남을 때(1번은 종목 분석에 남긴다).
+// 또는 아침(themeMorning)에 12시간 넘었고 1번 앞당긴 몫(early — 호출부가 aiRoom(THEME_EARLY_AHEAD))이 있을 때(88차)
+export function themeDue(prev, now, room, early = 0) {
   const stale = !prev || !Number.isFinite(prev.at) || now - prev.at >= THEME_REFRESH_MS || now < prev.at;
-  return stale && room >= 2;
+  if (stale && room >= 2) return true;
+  const old = !prev || !Number.isFinite(prev.at) || now < prev.at || now - prev.at >= THEME_MORNING_GAP_MS;
+  return old && early >= 1 && themeMorning(now);
 }
 // 입력 기사 — 종목마다 최근 48시간 기사에서 원인 아닌 기사(CSR)·시세 안내(priceOnly)를 빼고, 같은 제목은 하나로(걸린 종목을 모음).
 // 여러 종목에 걸린 것 먼저, 그다음 최신순으로 THEME_HEADS개까지
@@ -1077,7 +1084,8 @@ export function themeHeads(items, news, now) {
   return [...by.values()].sort((a, b) => b.codes.length - a.codes.length || b.ms - a.ms).slice(0, THEME_HEADS);
 }
 // AI가 사건별로 묶는다 — 기사가 3건 미만이면 부르지 않음. 반환 { items: [{ title, summary, refs: [기사 번호] }], model } 또는 null
-export async function aiThemes(heads, now = Date.now()) {
+// ahead: 시간 배분보다 앞당겨 쓸 수 있는 횟수(88차 — 아침 큰 소식만 1, 평소 0)
+export async function aiThemes(heads, now = Date.now(), ahead = 0) {
   if (!GEMINI_KEY || !Array.isArray(heads) || heads.length < 3) return null;
   const list = heads.map((h, i) => `[${i + 1}] (${h.names.join('·')}) ${h.t}${Number.isFinite(h.ms) ? ` [${mdOf(ymdIn(h.ms, 'Asia/Seoul'))}]` : ''}`).join('\n');
   const prompt =
@@ -1089,7 +1097,7 @@ export async function aiThemes(heads, now = Date.now()) {
     `주가 등락만 알리는 시세 기사·주가 전망·목표주가·종목 추천 글로만 된 것은 빼라. 큰 소식이 없으면 빈 목록. 여러 내 종목에 걸친 소식부터, 그다음 중요한 것.\n` +
     `반드시 이 JSON만 출력: {"items":[{"title":"큰 소식 이름(20자 내외, 예: '앤트로픽 상장 추진')","summary":"무슨 일이고 내 종목에 어떤 의미인지 한 문장(70자 내외, 기사에 있는 내용만)","refs":[기사 번호]}]}\n\n` +
     `기사 목록:\n${list}`;
-  const r = await geminiJSON(prompt);
+  const r = await geminiJSON(prompt, { ahead });
   const got = r && r.json && Array.isArray(r.json.items) ? r.json.items : null;
   if (!got) return null;
   const items = [];

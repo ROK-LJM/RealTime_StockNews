@@ -3207,6 +3207,18 @@ await test('큰 소식(78차, 봇): 내 종목들의 최근 48시간 기사(원�
   assert.equal(src.themeDue({ at: now - 180 * MIN }, now, 10), true, '3시간 지남');
   assert.equal(src.themeDue({ at: now + 60 * MIN }, now, 10), true, '시계가 거꾸로');
   assert.equal(src.themeDue({ seed: 1 }, now, Infinity), true, '형식이 다른 직전 파일 · 리셋 전 1시간(몫 무한)');
+  // 아침 큰 소식(88차) — 평일 07:00~08:59 · 12시간 넘음 · 1번 앞당긴 몫
+  const kst = (s) => T(s + '+09:00');
+  assert.deepEqual(['2026-11-13T06:59:00', '2026-11-13T07:00:00', '2026-11-13T08:59:00', '2026-11-13T09:00:00', '2026-11-14T07:30:00', '2026-11-16T07:30:00'].map((s) => src.themeMorning(kst(s))),
+    [false, true, true, false, false, true], '평일 아침 7·8시만(토요일 아님 · 월요일)');
+  const m = kst('2026-11-13T07:30:00');
+  assert.equal(src.themeDue({ at: m - 15 * 3600e3 }, m, 0, 1), true, '아침 · 15시간 지남 · 앞당긴 몫 1번');
+  assert.equal(src.themeDue({ at: m - 15 * 3600e3 }, m, 0, 0), false, '앞당긴 몫도 없음');
+  assert.equal(src.themeDue({ at: m - 11 * 3600e3 }, m, 0, 1), false, '12시간 안');
+  assert.equal(src.themeDue(null, m, 0, 1), true, '직전 것 없음');
+  assert.equal(src.themeDue({ at: m + 60 * MIN }, m, 0, 1), true, '시계가 거꾸로');
+  assert.equal(src.themeDue({ at: kst('2026-11-13T10:00:00') - 15 * 3600e3 }, kst('2026-11-13T10:00:00'), 0, 1), false, '아침이 아님');
+  assert.equal(src.THEME_EARLY_AHEAD, 1);
   // 봇 — 뉴스 갱신이 아닌 회차(7분)라 넣어 둔 뉴스로, 3시간마다
   const themeCalls = () => NET.bodies.filter((b, i) => isGemini(NET.calls[i]) && b.includes("'큰 소식'")).length;
   const route = () => json(NET.bodies.at(-1).includes("'큰 소식'") ? { candidates: [{ content: { parts: [{ text: JSON.stringify(ok) }] } }] } : geminiOk);
@@ -3237,6 +3249,25 @@ await test('큰 소식(78차, 봇): 내 종목들의 최근 48시간 기사(원�
   await pipeline(r3, { gemini: route }, t0, { refreshAll: false });
   assert.equal(themeCalls(), 0, '꺼 두면 안 부름');
   assert.equal(fs.existsSync(path.join(r3, 'docs', 'data', 'themes.json')), false);
+  // 아침 큰 소식(88차) — 평일 07:05, 몫이 없어도 1번 앞당겨(마지막 큰 소식 15시간 전) · 이미 1번 앞당겼으면 안 부름
+  const tm = T('2026-11-13T07:05:00+09:00');
+  const nm = (title, h) => ({ title, pubMs: tm - h * 3600e3, link: 'https://news.example.com/' + encodeURIComponent(title), source: '테스트일보' });
+  const seedMorning = (root, used) => {
+    writeData(root, 'news.json', { '005930': { ok: true, items: [nm('앤트로픽 IPO 기대감에 삼성전자·SK하이닉스 상승', 2), nm('삼성전자 새 공장 착공', 1)] }, '000660': { ok: true, items: [nm('앤트로픽 IPO 기대감에 삼성전자·SK하이닉스 상승', 2)] },
+      AAPL: { ok: true, items: [nm('Apple AAPL supplier deal expands', 1)] } });
+    writeData(root, 'themes.json', { at: tm - 15 * 3600e3, model: 'model-primary', items: [{ title: '어제 소식', summary: '', codes: ['005930'], refs: [] }] });
+    const bm = bud.startBudget(null, tm), capM = Math.floor(bud.capacity(bm, ['model-primary', 'model-fallback']) * bm.fraction) + used;
+    writeData(root, 'status.json', { ai: { state: 'wait', model: 'model-primary', used: capM, cap: 40 }, budget: { day: bm.day, used: { 'model-primary': Math.ceil(capM / 2), 'model-fallback': Math.floor(capM / 2) }, out: {} } });
+  };
+  const r5 = workspace();
+  seedMorning(r5, 0);
+  await pipeline(r5, { gemini: route }, tm, { refreshAll: false, themes: true });
+  assert.equal(themeCalls(), 1, '아침 — 몫이 없어도 1번 앞당겨 묶음');
+  assert.equal(read(r5, 'themes.json').at, tm);
+  const r6 = workspace();
+  seedMorning(r6, 1);
+  await pipeline(r6, { gemini: route }, tm, { refreshAll: false, themes: true });
+  assert.equal(themeCalls(), 0, '이미 1번 앞당겼으면 안 부름');
 });
 await test('큰 소식(87차): 지시문 — 같은 사건이면 다른 내 종목 기사도 모두 refs에(관련 종목은 고른 기사로 정해짐)·여러 종목 소식부터 · 저장은 관련 종목이 많은 소식부터(같으면 AI 순서)', async () => {
   src.resetState(); src.setAiBudget(null);

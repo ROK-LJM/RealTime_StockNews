@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis, aiStockBriefs, BRIEF_MAX, ANALYSIS_PV, aiThemes, themeHeads, themeOut, themeDue, calmExpected, aiExtBriefs, extMovers, extHeads, extDue, extRel, extSame, EXT_AHEAD, toneTail,
+  getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis, aiStockBriefs, BRIEF_MAX, ANALYSIS_PV, aiThemes, themeHeads, themeOut, themeDue, themeMorning, THEME_EARLY_AHEAD, calmExpected, aiExtBriefs, extMovers, extHeads, extDue, extRel, extSame, EXT_AHEAD, toneTail,
   getSidecarNews, sidecarEvents, mergeMeasures,
   aiStatus, aiGate, aiRoom, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, pickReasonNews, strongNews, tagSentiment, krBaseName,
 } from './sources.mjs';
@@ -469,10 +469,12 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
   // 6-2) 큰 소식(themes.json, 78차 — 화면 '큰 소식'): 약 3시간마다 내 종목들의 최근 이틀 기사 제목을 AI가 사건별로 묶는다(sources.mjs aiThemes).
   //      종목 분석이 먼저 — 무료 한도 배분 몫이 2번 넘게 남을 때만(리셋 전 1시간은 늘). 관련 종목은 AI가 아니라 고른 기사가 걸린 종목(themeOut).
   //      실패하면 직전 것 그대로(화면은 36시간 넘은 것을 숨김) · 자체 테스트는 기본으로 끔(themes: false — 종목 분석 호출 수 검사가 흔들리지 않게)
+  //      평일 아침 07:00~08:59엔 12시간 넘었으면 시간 배분보다 1번 앞당겨(88차 — 밤사이 미국 소식을 국내 장 열기 전에)
   if (themes) try {
-    if (themeDue(readJson('themes.json'), now, aiRoom())) {
+    const early = themeMorning(now) ? aiRoom(THEME_EARLY_AHEAD) : 0;
+    if (themeDue(readJson('themes.json'), now, aiRoom(), early)) {
       const heads = themeHeads(items, news, now);
-      const got = await aiThemes(heads, now);
+      const got = await aiThemes(heads, now, aiRoom() >= 2 ? 0 : THEME_EARLY_AHEAD);
       if (got) {
         // 관련 종목이 많은 소식부터(87차 — 같으면 AI가 고른 순서): 11/18 첫 큰 소식은 한 종목 소식(삼성전기 공급 계약)이 맨 앞이었다
         write('themes.json', { at: now, model: got.model, items: got.items.map((x) => themeOut(x, heads)).sort((a, b) => b.codes.length - a.codes.length) });
