@@ -19,7 +19,7 @@ import {
   aiStatus, aiGate, aiRoom, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, pickReasonNews, strongNews, tagSentiment, krBaseName,
 } from './sources.mjs';
 import { startBudget, toStored, totalUsed, capacity, inSession, isKrSession, nextAllowanceAt, closedCheckDay, usExtWindow, usAfterPostSameDay, krHours } from './aibudget.mjs';
-import { validateWatchlist, writeJsonAtomic, analysisSig, sigMove, nearSig, manifestOf } from './util.mjs';
+import { validateWatchlist, writeJsonAtomic, analysisSig, sigMove, nearSig, newsOnlySig, manifestOf } from './util.mjs';
 import { dartEnabled, resetDart, dartHalted, ensureCorpTable, getDisclosures, MINOR_DISC_RE, discDir } from './dart.mjs';
 import { calendarDue, buildCalendar } from './calendar.mjs';
 
@@ -28,6 +28,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // 한 회차에 새로 호출할 AI 종합분석 최대 건수 — 한 번에 몰아 쓰지 않게 하는 상한. 초과분은 이전 분석을
 // 유지한 채 다음 회차로 미룬다. 하루 총량은 aibudget.mjs가 장 시간에 맞춰 나눠 준다(무료 한도가 하루 수십 회뿐).
 const AI_CALLS_PER_RUN = 4;
+// 장중 기사만 바뀐 재분석 간격(81차, util newsOnlySig) — 새 공시·수급·큰 등락 변화·방향 바뀜·장 마감 뒤는 지금처럼 바로
+const NEWS_REDO_MS = 60 * 60 * 1000;
 
 // 자주 안 바뀌는 데이터는 매 회차(5분) 받지 않는다 — 비공식 API 과호출(차단 위험)·뉴스 변동에 따른 AI 재분석·커밋을 줄인다.
 // 시각 기준(정시부터 N분마다 첫 5분 안에 도는 회차)이라 '언제 받았는지'를 파일에 따로 적지 않아도 된다(불필요한 커밋 방지).
@@ -388,8 +390,9 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
       .sort((a, b) => (a.d - b.d) || (a.f - b.f) || Math.abs(b.q.changePct ?? 0) - Math.abs(a.q.changePct ?? 0));
     // 직전 분석을 그대로 쓸지 — 입력이 같거나, 장 밖(장 시간이어도 시세가 '마감'이면 휴장일)인데 등락 구간이 그대로면 재사용.
     // 장중엔 등락만 조금 바뀐 것도 재사용(71차, nearSig) — 장이 끝나면 마감 등락과 구간이 다를 때 한 번 다시(그날 기록엔 마감 등락에 맞는 말이 남게)
+    // 장중엔 기사만 바뀐 것도 직전 분석 1시간 안이면 재사용(81차, newsOnlySig·NEWS_REDO_MS)
     // 한 줄 진단('AI 간단', 60차)은 그대로 쓰지 않는다 — 종합분석 차례가 오면 바꾼다(차례 d: 진단 없음 0 → 한 줄 진단만 0.5 → 종합분석 재분석 1)
-    const reusable = ({ it, q, sig }) => { const p = prev[it.code], open = inSession(it.market, now) && q.marketStatus !== 'CLOSE'; return !!p && !p.lite && p.pv === ANALYSIS_PV && (p.sig === sig || (!open && sigMove(p.sig) === sigMove(sig)) || (open && nearSig(p.sig, sig))); }; // 지시문 판이 다르면 다시(69차)
+    const reusable = ({ it, q, sig }) => { const p = prev[it.code], open = inSession(it.market, now) && q.marketStatus !== 'CLOSE'; return !!p && !p.lite && p.pv === ANALYSIS_PV && (p.sig === sig || (!open && sigMove(p.sig) === sigMove(sig)) || (open && nearSig(p.sig, sig)) || (open && newsOnlySig(p.sig, sig) && now - p.at < NEWS_REDO_MS)); }; // 지시문 판이 다르면 다시(69차)
     let calls = 0, deferred = 0, waited = 0, briefed = 0;
     // 한 줄 진단 묶음(60차) — 그날 진단이 없는 종목이 이번 회차에 부를 수 있는 수(회차 상한·시간 배분 몫)보다 2개 넘게 많으면 한 번을 아껴,
     // 종합분석 차례가 못 가는 그 다음 종목들(최대 BRIEF_MAX개)을 AI 한 번에 묶어 한 줄 진단만 받는다. 앞쪽 종목은 예전처럼 종합분석

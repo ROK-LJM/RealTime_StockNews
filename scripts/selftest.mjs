@@ -476,7 +476,7 @@ await test('AI 모델 사용 불가(404): 대체 모델로 분석 · 그날은 �
     ai: { state: 'ok', model: 'model-fallback', used: 3, cap: 20 },
     budget: { day: QDAY, used: { 'model-fallback': 3 }, out: { 'model-primary': 'unavailable' } },
   });
-  await pipeline(root, { gemini, newsTag: 'b' }, NOW_KR + 10 * MIN); // 같은 날, 입력 바뀜 → 새 분석 필요
+  await pipeline(root, { gemini, newsTag: 'b', krPct: { '005930': 7.2, '000660': 0.3 } }, NOW_KR + 10 * MIN); // 같은 날, 입력 바뀜(등락 4→7%) → 새 분석 필요(81차 — 기사만 바뀐 건 1시간 안엔 그대로라 등락으로)
   assert.ok(geminiCalls('model-fallback') > 0);
   assert.equal(geminiCalls('model-primary'), 0, '같은 한도일엔 주 모델을 다시 부르지 않음');
   await pipeline(root, { gemini, newsTag: 'c' }, NEXT_DAY);
@@ -3300,6 +3300,29 @@ await test('시간외 시장 칸(80차): 국내 시세에 네이버 overMarketPr
   const q = read(root, 'quotes.json').quotes;
   assert.deepEqual(q.find((x) => x.code === '005930').over, src.overOf(over), '시세 파일에 남김');
   assert.equal('over' in q.find((x) => x.code === '000660'), false, '칸이 없는 종목은 안 붙음');
+});
+await test('AI 재분석(81차): 장중 기사만 바뀌면(등락 조금·수급·공시 그대로) 직전 분석 1시간 안엔 그대로 · 1시간 지나면 다시 · 새 공시는 바로 · 장이 끝나면 지금처럼', async () => {
+  assert.equal(util.newsOnlySig('4|f|기사A', '4|f|기사B'), true, '기사만 바뀜');
+  assert.equal(util.newsOnlySig('4|f|기사A|d:1', '5|f|기사B|d:1'), true, '등락 조금 · 공시 그대로');
+  assert.equal(util.newsOnlySig('4|f|기사A', '4|f|기사A'), false, '기사도 같음 — 같은 입력');
+  assert.equal(util.newsOnlySig('4|f|기사A', '4|g|기사B'), false, '수급이 바뀌면 아님');
+  assert.equal(util.newsOnlySig('4|f|기사A|d:1', '4|f|기사B|d:2'), false, '새 공시면 아님');
+  assert.equal(util.newsOnlySig('4|f|기사A', '4|f|기사B|d:2'), false, '공시가 생기면 아님');
+  assert.equal(util.newsOnlySig('3|f|기사A', '5|f|기사B'), false, '등락 크게');
+  assert.equal(util.newsOnlySig('3|f|기사A', '-3|f|기사B'), false, '방향 바뀜');
+  assert.equal(util.newsOnlySig('5|f|기사A', '6|f|기사B'), false, '5% 선');
+  assert.equal(util.newsOnlySig(null, '4|f|기사B'), false);
+  // 봇 — 장중 분석 → 20분 뒤 새 기사만 그대로 → 70분 뒤 새 기사 다시 → 마감 뒤 등락 구간·기사 바뀜은 바로
+  const stockCalls = () => NET.bodies.filter((b, i) => isGemini(NET.calls[i]) && b.includes("'삼성전자'이(가)")).length;
+  const r = workspace();
+  await pipeline(r, { krPct: { '005930': 4.2, '000660': 0.3 }, krAt: NOW_KR, newsTag: 'a' });
+  assert.equal(stockCalls(), 1);
+  await pipeline(r, { krPct: { '005930': 4.2, '000660': 0.3 }, krAt: NOW_KR + 20 * MIN, newsTag: 'b' }, NOW_KR + 20 * MIN);
+  assert.equal(stockCalls(), 0, '20분 — 기사만 바뀜 · 그대로');
+  await pipeline(r, { krPct: { '005930': 4.2, '000660': 0.3 }, krAt: NOW_KR + 70 * MIN, newsTag: 'c' }, NOW_KR + 70 * MIN);
+  assert.equal(stockCalls(), 1, '70분 — 직전 분석 1시간 넘음 · 다시');
+  await pipeline(r, { krPct: { '005930': 5.4, '000660': 0.3 }, krAt: NOW_KR + 80 * MIN, newsTag: 'd', krStatus: 'CLOSE' }, NOW_KR + 80 * MIN);
+  assert.equal(stockCalls(), 1, '마감 뒤 — 등락 구간(4→5)·기사 바뀜이면 1시간 안이어도 한 번 다시');
 });
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
