@@ -200,6 +200,11 @@ input::placeholder { color: var(--muted); }
 .bm-meas { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; margin: -2px 0 6px; font-size: 12.5px; color: var(--muted); }
 .bm-meas b { font-weight: 700; cursor: help; }
 .bm-meas b + b::before { content: '·'; margin-right: 8px; color: var(--muted); font-weight: 400; }
+/* 오늘·내일 시장 일정(84차) — 누르면 일정 달력 그날 */
+.bm-sched { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; margin: -2px 0 6px; font-size: 12.5px; color: var(--muted); }
+.bm-sched a { color: var(--text-2); font-weight: 600; text-decoration: none; }
+.bm-sched a:hover { color: var(--text); text-decoration: underline; }
+.bm-sched a + a::before { content: '·'; display: inline-block; margin-right: 8px; color: var(--muted); font-weight: 400; text-decoration: none; }
 .mc-cb { color: var(--warn); }
 .mc-sell { color: var(--down-deep); }
 .mc-buy { color: var(--up-deep); }

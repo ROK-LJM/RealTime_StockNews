@@ -257,7 +257,7 @@ export function parseNasdaqDividends(j) {
 // 날짜는 공식 발표로 확인(2026-11-18): FOMC 연준 2026-11-12 발표(결정은 회의 둘째 날 14:00 ET — 2027-10-26~27은 전략 회의라 결정 없음) ·
 // CPI·고용보고서 미국 노동통계국 일정표(08:30 ET) · 금통위 한국은행 2027년 일정(2026-10-29 의결 보도) · 미국 휴장·조기 폐장 NYSE 2026~2028 공지(공휴일 규칙과 맞춤) ·
 // 국내 휴장은 법정 공휴일·연말 휴장 중 확실한 것만(거래소 2027년 휴장일 공지 — 보통 12월 — 가 나오면 KR_CLOSED·KR_CAL_UNTIL을 늘린다)
-export const MKT_V = 1; // 시장 일정 판 — 표를 고치면 올린다(3시간을 기다리지 않고 달력을 다시 만듦, 본문 기억은 그대로)
+export const MKT_V = 2; // 시장 일정 판 — 표를 고치면 올린다(3시간을 기다리지 않고 달력을 다시 만듦, 본문 기억은 그대로). 2: 한눈에 한 줄용 kd·b(84차)
 const FOMC = ['20261209', '20270127', '20270317', '20270428', '20270609', '20270728', '20270915', '20271117'];
 const US_CPI = ['20261210', '20270113', '20270211', '20270310', '20270413', '20270512', '20270610', '20270714', '20270811', '20270914', '20271014', '20271110', '20271210'];
 const US_JOBS = ['20261204', '20270108', '20270205', '20270305', '20270402', '20270507', '20270604', '20270702', '20270806', '20270903', '20271008', '20271105', '20271203'];
@@ -290,23 +290,27 @@ const prevBiz = (s, closed) => {
   return d;
 };
 const hhmm = (min) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
-// from~until(YYYYMMDD) 사이 시장 일정 — { d, k: 'mkt', c: '', n(누가), m, w(칸에 쓰는 짧은 말), t, s? }. 미국은 뉴욕 날짜
+// from~until(YYYYMMDD) 사이 시장 일정 — { d, k: 'mkt', c: '', n(누가), m, w(칸에 쓰는 짧은 말), t, s?, kd?, b? }. 미국은 뉴욕 날짜.
+// kd·b(84차) — 대시보드 '한눈에' 시장 묶음의 한 줄용: kd = 그 일이 있는 한국 날짜, b = 날짜 말('오늘'·'내일') 뒤에 붙일 말. 달 옵션 만기는 없음(한눈에엔 큰 것만)
 export function marketEvents(from, until) {
   const out = [];
-  const add = (d, m, n, w, t, s = '') => { if (d >= from && d <= until) out.push({ d, k: 'mkt', c: '', n, m, w, t, ...(s ? { s } : {}) }); };
-  for (const d of FOMC) { const k = nyToKst(d, 14); add(d, 'US', '미국 연준', 'FOMC', 'FOMC 금리 결정', k ? `한국 ${mdK(k.d)} 새벽 ${k.h}시 발표` : ''); }
-  for (const d of US_CPI) { const k = nyToKst(d, 8, 30); add(d, 'US', '미국 노동부', '미국 CPI', '소비자물가(CPI) 발표', k ? `한국 ${mdK(k.d)} 밤 ${k.h - 12}시 30분` : ''); }
-  for (const d of US_JOBS) { const k = nyToKst(d, 8, 30); add(d, 'US', '미국 노동부', '미국 고용', '고용보고서(비농업 고용) 발표', k ? `한국 ${mdK(k.d)} 밤 ${k.h - 12}시 30분` : ''); }
-  for (const d of BOK) add(d, 'KR', '한국은행', '금통위', '기준금리 결정(금통위)', '오전 10시쯤 발표');
-  for (const [d, why] of Object.entries(US_CLOSED)) add(d, 'US', '미국 증시', '미국 휴장', `휴장 — ${why}`);
-  for (const [d, why] of Object.entries(US_EARLY)) { const k = nyToKst(d, 13); add(d, 'US', '미국 증시', '미국 조기 폐장', `오후 1시 조기 폐장 — ${why}`, k ? `한국 ${mdK(k.d)} 새벽 ${k.h}시` : ''); }
-  for (const [d, why] of Object.entries(KR_CLOSED)) add(d, 'KR', '국내 증시', '국내 휴장', `휴장 — ${why}`);
-  for (const [key, [o, c]] of Object.entries(KRX_LATE)) { const d = key.replace(/-/g, ''); add(d, 'KR', '국내 증시', '국내 늦은 개장', `${hhmm(o)} 개장 · ${hhmm(c)} 마감`, LATE_WHY[d] || ''); }
+  const add = (d, m, n, w, t, s = '', kd = '', b = '') => { if (d >= from && d <= until) out.push({ d, k: 'mkt', c: '', n, m, w, t, ...(s ? { s } : {}), ...(b ? { kd: kd || d, b } : {}) }); };
+  for (const d of FOMC) { const k = nyToKst(d, 14); add(d, 'US', '미국 연준', 'FOMC', 'FOMC 금리 결정', k ? `한국 ${mdK(k.d)} 새벽 ${k.h}시 발표` : '', k?.d, k ? `새벽 ${k.h}시 FOMC 금리 결정` : ''); }
+  for (const d of US_CPI) { const k = nyToKst(d, 8, 30); add(d, 'US', '미국 노동부', '미국 CPI', '소비자물가(CPI) 발표', k ? `한국 ${mdK(k.d)} 밤 ${k.h - 12}시 30분` : '', k?.d, k ? `밤 ${k.h - 12}시 30분 미국 CPI 발표` : ''); }
+  for (const d of US_JOBS) { const k = nyToKst(d, 8, 30); add(d, 'US', '미국 노동부', '미국 고용', '고용보고서(비농업 고용) 발표', k ? `한국 ${mdK(k.d)} 밤 ${k.h - 12}시 30분` : '', k?.d, k ? `밤 ${k.h - 12}시 30분 미국 고용보고서` : ''); }
+  for (const d of BOK) add(d, 'KR', '한국은행', '금통위', '기준금리 결정(금통위)', '오전 10시쯤 발표', d, '오전 10시쯤 금통위 기준금리 결정');
+  for (const [d, why] of Object.entries(US_CLOSED)) add(d, 'US', '미국 증시', '미국 휴장', `휴장 — ${why}`, '', d, `밤 미국 휴장(${why})`);
+  for (const [d, why] of Object.entries(US_EARLY)) { const k = nyToKst(d, 13); add(d, 'US', '미국 증시', '미국 조기 폐장', `오후 1시 조기 폐장 — ${why}`, k ? `한국 ${mdK(k.d)} 새벽 ${k.h}시` : '', k?.d, k ? `새벽 ${k.h}시 미국 조기 폐장(${why})` : ''); }
+  for (const [d, why] of Object.entries(KR_CLOSED)) add(d, 'KR', '국내 증시', '국내 휴장', `휴장 — ${why}`, '', d, `국내 휴장(${why})`);
+  for (const [key, [o, c]] of Object.entries(KRX_LATE)) {
+    const d = key.replace(/-/g, '');
+    add(d, 'KR', '국내 증시', '국내 늦은 개장', `${hhmm(o)} 개장 · ${hhmm(c)} 마감`, LATE_WHY[d] || '', d, `국내 ${hhmm(o)} 개장·${hhmm(c)} 마감${LATE_WHY[d] ? `(${LATE_WHY[d]})` : ''}`);
+  }
   for (let y = +from.slice(0, 4); y <= +until.slice(0, 4); y++) for (let m = 1; m <= 12; m++) {
     const q = m % 3 === 0;
     const kr0 = nthDow(y, m, 4, 2), us0 = nthDow(y, m, 5, 3);
-    if (kr0 >= MKT_FROM && kr0 <= KR_CAL_UNTIL) add(prevBiz(kr0, KR_CLOSED), 'KR', '국내 증시', q ? '국내 동시 만기' : '국내 옵션 만기', q ? '선물·옵션 동시 만기일' : '옵션 만기일');
-    if (us0 >= MKT_FROM && us0 <= US_CAL_UNTIL) add(prevBiz(us0, US_CLOSED), 'US', '미국 증시', q ? '미국 동시 만기' : '미국 옵션 만기', q ? '선물·옵션 동시 만기(쿼드러플 위칭)' : '월간 옵션 만기일');
+    if (kr0 >= MKT_FROM && kr0 <= KR_CAL_UNTIL) { const d = prevBiz(kr0, KR_CLOSED); add(d, 'KR', '국내 증시', q ? '국내 동시 만기' : '국내 옵션 만기', q ? '선물·옵션 동시 만기일' : '옵션 만기일', '', d, q ? '국내 선물·옵션 동시 만기' : ''); }
+    if (us0 >= MKT_FROM && us0 <= US_CAL_UNTIL) { const d = prevBiz(us0, US_CLOSED); add(d, 'US', '미국 증시', q ? '미국 동시 만기' : '미국 옵션 만기', q ? '선물·옵션 동시 만기(쿼드러플 위칭)' : '월간 옵션 만기일', '', d, q ? '밤 미국 선물·옵션 동시 만기' : ''); }
   }
   return out;
 }
@@ -340,7 +344,7 @@ export function finalizeEvents(events) {
   const seen = new Set();
   return list.filter((e) => {
     if (e.k === 'earn' && /예정/.test(e.t) && filed.has(`${e.c}|${e.d}`)) return false;
-    const key = `${e.c}|${e.d}|${e.k}|${e.t}|${e.tm || ''}`;
+    const key = `${e.c}|${e.m}|${e.d}|${e.k}|${e.t}|${e.tm || ''}`; // 시장(m)까지 — 종목 없는 시장 일정의 국내·미국 '휴장 — 성탄절'이 하나로 합쳐지지 않게(84차)
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

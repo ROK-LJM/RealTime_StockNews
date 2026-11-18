@@ -767,6 +767,16 @@ function nextSchedule(events, code, today, days = SCHED_DAYS) {
   return { d, dd: Math.round((ymdUtc(d) - ymdUtc(today)) / 864e5), items: day.slice(0, 2).map(label), more: list.length - Math.min(2, day.length) };
 }
 
+// 시장 일정 한 줄(84차) — 일정 달력(calendar.json)의 시장 일정 중 그 시장(key)의 오늘·내일(한국 날짜 kd) 큰 일정. 봇이 붙인 말(b) 앞에 '오늘'·'내일'
+// 예: 국내 '내일 국내 10:00 개장·16:30 마감(수능일)' · 해외 '오늘 밤 10시 30분 미국 CPI 발표 · 내일 새벽 4시 FOMC 금리 결정'. 달 옵션 만기는 봇이 b를 안 붙임
+const kstDay = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+function mktSched(events, key, ms = Date.now()) {
+  const today = kstDay(ms), tomorrow = kstDay(ms + 864e5);
+  return (Array.isArray(events) ? events : []).filter((e) => e && e.k === 'mkt' && e.m === key && e.b && (e.kd === today || e.kd === tomorrow))
+    .sort((a, b) => (a.kd < b.kd ? -1 : a.kd > b.kd ? 1 : 0))
+    .map((e) => ({ d: String(e.d), text: `${e.kd === today ? '오늘' : '내일'} ${e.b}` }));
+}
+
 // ---------- 데이터 지연 경고 ----------
 // 수집 봇(5분 간격)이 멈추거나 시세 출처가 막혀도 화면은 마지막 값을 그대로 보여준다 — 장중인데 오래 그대로면 알린다.
 //  ① 시세가 '장중'인데 마지막 시각이 45분 넘게 지남. 국내는 15:30~16:00 체결이 없어 정상이어도 26분까지 벌어진다(실측).
@@ -997,6 +1007,7 @@ function renderBoard(groups, closed, measures) {
     const { valid, up, down, t, stale, status, et } = groupInfo(g, list, closed);
     const avg = avgPct(valid), bench = benchOf(g.key, state.market?.indices), note = boardNote(g.key, valid);
     const meas = g.key === 'KR' ? measuresOf(measures, valid) : [];
+    const sched = mktSched(state.cal && state.cal.events, g.key); // 오늘·내일 시장 일정(84차)
     // 개장 전엔 평균이 없어도(모두 개장 전) 예상 지수는 보인다(79차)
     const cmp = avg == null && !bench.length ? '' : `<span class="bm-avg" title="내 종목 등락률의 단순 평균(종목마다 같은 무게) — 같은 시장 지수와 비교">${avg == null ? '' : `평균 <b class="${dirClass(avg)}-c">${fmtPct(avg)}</b>`}`
       + `${bench.map((b) => `<span class="bm-idx"${b.exp ? ` title="${EST_TIP}"` : ''}>${esc(b.name)}${b.exp ? ' <span class="est">예상</span>' : ''} <b class="${dirClass(b.pct)}-c">${fmtPct(b.pct)}</b></span>`).join('')}</span>`;
@@ -1004,7 +1015,7 @@ function renderBoard(groups, closed, measures) {
       <div class="bm-head"><span class="bm-title">${esc(g.label)}</span>
         ${valid.length && !valid.every(preOf) ? `<span class="mgroup-updown"><b class="up-c">▲ ${up}</b> <b class="down-c">▼ ${down}</b></span>` : ''}${cmp}
         <span class="bm-status${stale ? ' stale' : ''}"${stale ? ` title="${STALE_TIP}"` : ''}>${status}${t ? ` · ${t}` : ''}${et ? ` · ${et}` : ''}</span></div>
-      ${meas.length ? `<p class="bm-meas"><span>오늘 시장 조치</span>${meas.map((x) => `<b class="mc-${x.cls}" title="${esc(x.tip)}">${esc(x.text)}</b>`).join('')}</p>` : ''}${note ? `<p class="bm-note">${esc(note)}</p>` : ''}<div class="tiles">${[...list].sort(byPct).map(tileHtml).join('')}</div>
+      ${meas.length ? `<p class="bm-meas"><span>오늘 시장 조치</span>${meas.map((x) => `<b class="mc-${x.cls}" title="${esc(x.tip)}">${esc(x.text)}</b>`).join('')}</p>` : ''}${note ? `<p class="bm-note">${esc(note)}</p>` : ''}${sched.length ? `<p class="bm-sched"><span>시장 일정</span>${sched.map((x) => `<a href="./calendar.html?d=${esc(x.d)}">${esc(x.text)}</a>`).join('')}</p>` : ''}<div class="tiles">${[...list].sort(byPct).map(tileHtml).join('')}</div>
     </div>`;
   }).join('');
   // 왜 움직였나 — 시장 순서(국내 → 해외)대로, 그 안에서 많이 움직인 종목부터

@@ -3350,7 +3350,7 @@ await test('시장 일정(83차): FOMC·미국 CPI·금통위·휴장·조기 �
   const cal = await import('./calendar.mjs');
   const ev = cal.marketEvents('20261101', '20271231');
   const one = (d, w) => ev.find((e) => e.d === d && e.w === w);
-  assert.deepEqual(JSON.parse(JSON.stringify(one('20261209', 'FOMC'))), { d: '20261209', k: 'mkt', c: '', n: '미국 연준', m: 'US', w: 'FOMC', t: 'FOMC 금리 결정', s: '한국 12/10 새벽 4시 발표' });
+  assert.deepEqual(JSON.parse(JSON.stringify(one('20261209', 'FOMC'))), { d: '20261209', k: 'mkt', c: '', n: '미국 연준', m: 'US', w: 'FOMC', t: 'FOMC 금리 결정', s: '한국 12/10 새벽 4시 발표', kd: '20261210', b: '새벽 4시 FOMC 금리 결정' });
   assert.equal(one('20270317', 'FOMC').s, '한국 3/18 새벽 3시 발표', '서머타임(3/14~)이면 한 시간 앞');
   assert.equal(ev.some((e) => e.w === 'FOMC' && e.d === '20271027'), false, '10/26~27 전략 회의는 결정 없음');
   assert.equal(one('20261210', '미국 CPI').s, '한국 12/10 밤 10시 30분');
@@ -3379,6 +3379,7 @@ await test('시장 일정(83차): FOMC·미국 CPI·금통위·휴장·조기 �
   assert.equal(c.mv, cal.MKT_V);
   assert.ok(c.events.some((e) => e.k === 'mkt' && e.w === 'FOMC' && e.d === '20261209'), '달력에 FOMC');
   assert.equal(c.events.find((e) => e.c === 'AAPL' && e.k === 'earn').s, '미국 장 마감 뒤(한국 11/3 새벽)');
+  assert.deepEqual(c.events.filter((e) => e.d === '20261225' && e.k === 'mkt').map((e) => e.w).sort(), ['국내 휴장', '미국 휴장'], '국내·미국 같은 이름의 휴장도 둘 다(84차 — 11/18 실제 달력에서 국내 성탄절·새해 휴장이 빠졌다)');
   assert.deepEqual(cal.finalizeEvents([{ d: '20261210', k: 'earn', c: 'AAPL', n: '애플', m: 'US', t: '실적 발표' }, one('20261210', '미국 CPI')]).map((e) => e.k), ['mkt', 'earn'], '그날 맨 앞은 시장 일정');
   // 화면 — 짧은 말·거르기(종목을 고르면 시장 일정은 빠짐)
   const vm = await import('node:vm');
@@ -3396,6 +3397,40 @@ await test('시장 일정(83차): FOMC·미국 CPI·금통위·휴장·조기 �
   assert.equal(f.passFilter(m, { mkt: 'all', code: '', groups: new Set(['mkt']) }), true);
   assert.equal(f.passFilter(m, { mkt: 'KR', code: '', groups: new Set(['mkt']) }), false, '시장 거르기 — 미국 일정');
   assert.equal(f.passFilter(m, { mkt: 'all', code: 'AAPL', groups: new Set(['mkt']) }), false, '종목을 고르면 빠짐');
+});
+await test('한눈에 시장 일정(84차): 봇이 한국 날짜(kd)·짧은 말(b)을 붙임(달 옵션 만기는 없음) · 화면은 그 시장의 오늘·내일만 — 오늘·내일 말 · 순서 · 다른 시장·지난 날·모레는 뺌', async () => {
+  const cal = await import('./calendar.mjs');
+  const ev = cal.marketEvents('20261101', '20271231');
+  const one = (d, w) => ev.find((e) => e.d === d && e.w === w);
+  assert.deepEqual([one('20261210', '미국 CPI').kd, one('20261210', '미국 CPI').b], ['20261210', '밤 10시 30분 미국 CPI 발표']);
+  assert.deepEqual([one('20270402', '미국 고용').kd, one('20270402', '미국 고용').b], ['20270402', '밤 9시 30분 미국 고용보고서']);
+  assert.deepEqual([one('20261127', '미국 조기 폐장').kd, one('20261127', '미국 조기 폐장').b], ['20261128', '새벽 3시 미국 조기 폐장(추수감사절 다음 날)'], '한국 날짜는 다음 날 새벽');
+  assert.deepEqual([one('20261126', '미국 휴장').kd, one('20261126', '미국 휴장').b], ['20261126', '밤 미국 휴장(추수감사절)']);
+  assert.equal(one('20261126', '금통위').b, '오전 10시쯤 금통위 기준금리 결정');
+  assert.equal(one('20261231', '국내 휴장').b, '국내 휴장(연말 휴장)');
+  assert.equal(one('20261119', '국내 늦은 개장').b, '국내 10:00 개장·16:30 마감(수능일)');
+  assert.equal(one('20261210', '국내 동시 만기').b, '국내 선물·옵션 동시 만기');
+  assert.equal(one('20261218', '미국 동시 만기').b, '밤 미국 선물·옵션 동시 만기');
+  assert.ok(!one('20270114', '국내 옵션 만기').b && !one('20261120', '미국 옵션 만기').b, '달 옵션 만기는 한눈에 없음');
+  // 화면
+  const vm = await import('node:vm');
+  const js = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const f = vm.runInNewContext(`${js.slice(js.indexOf('// 시장 일정 한 줄(84차)'), js.indexOf('// ---------- 데이터 지연 경고'))}; ({ mktSched })`, {});
+  const at = (s) => Date.parse(s);
+  const run = (list, key, ms) => [...f.mktSched(list, key, ms)]; // vm 쪽 배열 → 이 쪽 배열
+  const txt = (key, ms) => run(ev, key, ms).map((x) => x.text);
+  assert.deepEqual(txt('US', at('2026-12-09T12:00:00+09:00')), ['내일 새벽 4시 FOMC 금리 결정', '내일 밤 10시 30분 미국 CPI 발표'], '뉴욕 12/9 FOMC는 한국 12/10 새벽');
+  assert.deepEqual(txt('US', at('2026-12-10T08:00:00+09:00')), ['오늘 새벽 4시 FOMC 금리 결정', '오늘 밤 10시 30분 미국 CPI 발표']);
+  assert.deepEqual(txt('KR', at('2026-12-09T12:00:00+09:00')), ['내일 국내 선물·옵션 동시 만기'], '국내 묶음엔 국내 일정만');
+  assert.deepEqual(txt('KR', at('2026-11-25T23:59:00+09:00')), ['내일 오전 10시쯤 금통위 기준금리 결정']);
+  assert.deepEqual(txt('US', at('2026-11-26T09:00:00+09:00')), ['오늘 밤 미국 휴장(추수감사절)']);
+  assert.deepEqual(txt('US', at('2026-11-27T09:00:00+09:00')), ['내일 새벽 3시 미국 조기 폐장(추수감사절 다음 날)'], '휴장 날은 지났고 조기 폐장은 내일 새벽');
+  assert.deepEqual(txt('KR', at('2026-12-07T12:00:00+09:00')), [], '모레(12/10)는 아직');
+  assert.deepEqual(txt('US', at('2026-12-11T12:00:00+09:00')), [], '지난 날은 뺌');
+  assert.deepEqual(run(ev, 'US', at('2026-12-10T08:00:00+09:00')).map((x) => x.d), ['20261209', '20261210'], '누르면 달력의 그 날(뉴욕 날짜)');
+  assert.deepEqual(run(null, 'US', at('2026-12-10T08:00:00+09:00')), []);
+  const two = [{ k: 'mkt', m: 'US', d: '20261209', kd: '20261210', b: '나중' }, { k: 'mkt', m: 'US', d: '20261209', kd: '20261209', b: '먼저' }];
+  assert.deepEqual(run(two, 'US', at('2026-12-09T12:00:00+09:00')).map((x) => x.text), ['오늘 먼저', '내일 나중'], '한국 날짜순');
 });
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
