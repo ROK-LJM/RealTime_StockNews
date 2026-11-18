@@ -3324,6 +3324,28 @@ await test('AI 재분석(81차): 장중 기사만 바뀌면(등락 조금·수�
   await pipeline(r, { krPct: { '005930': 5.4, '000660': 0.3 }, krAt: NOW_KR + 80 * MIN, newsTag: 'd', krStatus: 'CLOSE' }, NOW_KR + 80 * MIN);
   assert.equal(stockCalls(), 1, '마감 뒤 — 등락 구간(4→5)·기사 바뀜이면 1시간 안이어도 한 번 다시');
 });
+await test('AI 지시(82차): 내린 날 최근 크게 오르지 않았으면(1주 +8%·1개월 +15% 미만) "차익 실현" 금지 · 오른 날 최근 크게 내리지 않았으면 "저가 매수" 금지 — 실제 숫자와 함께 · 급등·급락 뒤엔 그 말 없음', async () => {
+  src.resetState(); src.setAiBudget(null);
+  const dates = Array.from({ length: 30 }, (_, i) => T('2026-10-01T00:00:00Z') + i * 86400e3);
+  const bodyOf = async (m1Base, w1Base, pct) => {
+    const closes = dates.map(() => 100); closes[8] = m1Base; closes[24] = w1Base;
+    NET.routes = routes(); NET.calls = []; NET.bodies = []; NET.blocked = [];
+    const quote = { ok: true, code: 'NVDA', market: 'US', name: '엔비디아', currency: 'USD', price: 100, changePct: pct, high: 101, low: 99, marketStatus: 'CLOSE', asOf: '2026-10-29T20:00:00Z' };
+    await src.aiStockAnalysis({ quote, news: { ok: true, items: [] }, flow: null, history: { closes, dates }, disclosures: null, schedule: [], now: T('2026-10-31T10:00:00+09:00') });
+    return NET.bodies.find((b, i) => isGemini(NET.calls[i])) || '';
+  };
+  let b = await bodyOf(140, 108.7, -2.1);
+  assert.ok(b.includes("최근 크게 오르지 않았다(1주 -8.0% · 1개월 -28.6%) — '차익 실현'·'차익 매물'로 쓰지 말 것"), '내린 날 · 계속 내리던 종목: ' + b.slice(0, 1600));
+  b = await bodyOf(68.5, 104, -2.1);
+  assert.ok(!b.includes('최근 크게 오르지 않았다') && !b.includes('최근 크게 내리지 않았다'), '1개월 +46% 급등 뒤엔 차익 실현 금지 안 함');
+  b = await bodyOf(95, 98, 3.2);
+  assert.ok(b.includes("최근 크게 내리지 않았다(1주 +2.0% · 1개월 +5.3%) — '저가 매수'로 쓰지 말 것"), '오른 날 · 크게 내린 적 없는 종목');
+  b = await bodyOf(125, 101, 3.2);
+  assert.ok(!b.includes('최근 크게 내리지 않았다'), '1개월 -20% 급락 뒤엔 저가 매수 금지 안 함');
+  NET.routes = routes(); NET.calls = []; NET.bodies = [];
+  await src.aiStockAnalysis({ quote: { ok: true, code: 'NVDA', market: 'US', name: '엔비디아', currency: 'USD', price: 100, changePct: -2.1, asOf: '2026-10-30T20:00:00Z' }, news: { ok: true, items: [] }, flow: null, history: null, disclosures: null, schedule: [], now: T('2026-10-31T10:00:00+09:00') });
+  assert.ok(!(NET.bodies.find((x, i) => isGemini(NET.calls[i])) || '').includes('최근 크게'), '과거 시세가 없으면 없음');
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');

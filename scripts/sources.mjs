@@ -934,6 +934,14 @@ export async function aiStockAnalysis({ quote, news, flow, history, disclosures,
   const histLine = st
     ? `1주 ${p(st.w1)} · 1개월 ${p(st.m1)} · 3개월 ${p(st.m3)} · 6개월 고점대비 ${p(st.fromHigh)}`
     : '(과거 시세 없음)';
+  // '차익 실현'·'저가 매수'는 최근 흐름이 받쳐 줄 때만(82차) — 11/18 엔비디아(1주 -8.0%·1개월 -28.4%)·SK텔레콤(1주 -1.3%·1개월 +5.6%)을 '차익 실현 매물 출회로
+  // 하락'이라 했다(삼성E&A 1개월 +46.1%는 맞음 — 막연한 말 금지(66차)만으로는 오늘 진단 20건 중 3건). 내린 날 최근 크게 오르지 않았으면(1주 +8%·1개월 +15% 미만)
+  // '차익 실현' 금지, 오른 날 최근 크게 내리지 않았으면(1주 -8%·1개월 -15% 초과) '저가 매수' 금지 — 실제 숫자를 함께 보여 준다
+  const big = (v, lim) => Number.isFinite(v) && (lim > 0 ? v >= lim : v <= lim);
+  const trendRule = !st ? ''
+    : pct < 0 && !big(st.w1, 8) && !big(st.m1, 15) ? `최근 크게 오르지 않았다(1주 ${p(st.w1)} · 1개월 ${p(st.m1)}) — '차익 실현'·'차익 매물'로 쓰지 말 것.\n`
+    : pct > 0 && !big(st.w1, -8) && !big(st.m1, -15) ? `최근 크게 내리지 않았다(1주 ${p(st.w1)} · 1개월 ${p(st.m1)}) — '저가 매수'로 쓰지 말 것.\n`
+    : '';
   // 국내 종목 최근 공시(OpenDART 키가 있을 때만) — 오늘 접수분은 '오늘'로 적어 원인 후보로 먼저 보게 한다
   const discs = us ? [] : (disclosures?.items || []).slice(0, 5);
   const discLines = discs.map((d) => {
@@ -965,6 +973,7 @@ export async function aiStockAnalysis({ quote, news, flow, history, disclosures,
     `단순 시황 중계가 아니라 '원인'에 집중하라. ${basis}를 서로 연결해 설명하고, 근거가 약하면 단정하지 말 것.\n` +
     `${TONE_RULE}\n` + flowRule + // 등락 폭에 맞는 말·막연한 말 금지(57·64차) · 수급 날짜(64차)
     `${outsideRule(now)}\n` + matRule + // 배경지식 금지·그 종목 재료 없는 날(70차)
+    trendRule + // '차익 실현'·'저가 매수'는 최근 흐름이 받쳐 줄 때만(82차)
     (when === '장중' ? "아직 장중이다 — '마감'·'마감했다'로 쓰지 말 것.\n" : '') +
     (mk && Math.abs(mk.pct) >= 1 ? `시장 전체가 크게 움직인 날이다 — 시장 흐름 탓인 몫과 이 종목만의 요인을 나눠, 시장보다 더(덜) 움직인 까닭을 짚어라.\n` : '') +
     `반드시 이 JSON만 출력:\n` +

@@ -680,6 +680,11 @@ const MUTANTS = [
   ["[AI 재분석] 기사만 — 공시 안 봄", U, "pa[1] !== pb[1] || da !== db", "pa[1] !== pb[1]"],
   ["[AI 재분석] 기사만 — 같은 기사도", U, " || pa.slice(2).join('|') === pb.slice(2).join('|')) return false;", ") return false;"],
   ["[AI 재분석] 기사만 — 등락 안 봄", U, "return nearSig(`${pa[0]}|`, `${pb[0]}|`);", "return true;"],
+  // ---------- 82차 — 차익 실현·저가 매수는 최근 흐름이 받쳐 줄 때만 ----------
+  ["[AI 지시] 최근 흐름 지시 안 넘김", S, "    trendRule + // ", "    // "],
+  ["[AI 지시] 급등 뒤에도 차익 실현 금지", S, "pct < 0 && !big(st.w1, 8) && !big(st.m1, 15) ?", "pct < 0 ?"],
+  ["[AI 지시] 급락 뒤에도 저가 매수 금지", S, "pct > 0 && !big(st.w1, -8) && !big(st.m1, -15) ?", "pct > 0 ?"],
+  ["[AI 지시] 큰 흐름 기준 뒤집힘", S, "(lim > 0 ? v >= lim : v <= lim)", "(lim > 0 ? v <= lim : v >= lim)"],
   ["[공시 방향] 화면 반대 공시도", A, " && !(dir && discDir(x.title) === -dir)", ""],
   ["[공시 방향] 화면 방향 안 넘김", A, "keyDiscToday(q.code, Math.sign(q.changePct || 0))", "keyDiscToday(q.code)"],
   ["[공시 방향] 봇 반대 공시도", F, " && discDir(x.title) !== -Math.sign(q.changePct)", ""],
