@@ -1,10 +1,10 @@
 // pages/docs/calendar.js — 공시 일정 달력. 봇이 3시간마다 만드는 data/calendar.json을 그린다(외부 통신 없음).
-// 일정 종류(k): earn 실적 · ir 기업설명회 · meet 주총 · rec 권리 기준일 · div 배당 · cap 자사주·증자·분할 · disc 지난 공시
+// 일정 종류(k): mkt 시장 일정(83차 — 종목 없음) · earn 실적 · ir 기업설명회 · meet 주총 · rec 권리 기준일 · div 배당 · cap 자사주·증자·분할 · disc 지난 공시
 
 // ---------- 계산(자체 테스트 대상 — 아래 '화면' 구획 앞까지) ----------
-const GROUP_OF = { earn: 'earn', ir: 'ir', meet: 'meet', rec: 'meet', div: 'div', cap: 'cap', disc: 'disc' };
-const GROUPS = ['earn', 'ir', 'div', 'meet', 'cap', 'disc'];
-const DEFAULT_GROUPS = ['earn', 'ir', 'div', 'meet', 'cap']; // 지난 공시는 수가 많아 기본은 숨김
+const GROUP_OF = { mkt: 'mkt', earn: 'earn', ir: 'ir', meet: 'meet', rec: 'meet', div: 'div', cap: 'cap', disc: 'disc' };
+const GROUPS = ['mkt', 'earn', 'ir', 'div', 'meet', 'cap', 'disc'];
+const DEFAULT_GROUPS = ['mkt', 'earn', 'ir', 'div', 'meet', 'cap']; // 지난 공시는 수가 많아 기본은 숨김
 const WD = ['일', '월', '화', '수', '목', '금', '토'];
 const groupOf = (e) => GROUP_OF[e && e.k] || 'disc';
 const utc = (s) => Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8));
@@ -39,6 +39,7 @@ function passFilter(e, f) {
 function cellWord(e) {
   const t = String(e.t || '');
   switch (e.k) {
+    case 'mkt': return String(e.w || e.t || '시장');
     case 'earn': return '실적';
     case 'ir': return 'IR';
     case 'meet': return /기준일/.test(t) ? '기준일' : '주총';
@@ -56,6 +57,12 @@ function byDate(events) {
   const m = new Map();
   for (const e of events) { if (!m.has(e.d)) m.set(e.d, []); m.get(e.d).push(e); }
   return m;
+}
+// 다가오는 일정(옆 칸) — 내일부터 days일 안, 최대 max건. total은 그 기간 전체 수(넘치면 수와 '목록으로 모두 보기' — 83차, 전엔 12건에서 말없이 잘렸다)
+function upcomingOf(events, td, max = 16, days = 14) {
+  const until = addDays(td, days);
+  const all = events.filter((e) => e.d > td && e.d <= until);
+  return { list: all.slice(0, max), total: all.length };
 }
 // 원문 주소 — 국내는 전자공시 원문, 미국은 나스닥 실적·배당 페이지
 function sourceUrl(e) {
@@ -78,11 +85,14 @@ function loadPrefs() {
     const p = JSON.parse(localStorage.getItem(PREF) || 'null');
     if (p && (p.view === 'month' || p.view === 'list')) state.view = p.view;
     if (p && ['all', 'KR', 'US'].includes(p.mkt)) state.mkt = p.mkt;
-    if (p && Array.isArray(p.groups)) state.groups = new Set(p.groups.filter((g) => GROUPS.includes(g)));
+    if (p && Array.isArray(p.groups)) {
+      state.groups = new Set(p.groups.filter((g) => GROUPS.includes(g)));
+      if (p.gv !== 2) state.groups.add('mkt'); // 83차 전에 저장한 종류엔 '시장'이 없다 — 한 번 켜 준다
+    }
   } catch { /* 저장 못 하는 환경 — 기본값 */ }
 }
 function savePrefs() {
-  try { localStorage.setItem(PREF, JSON.stringify({ view: state.view, mkt: state.mkt, groups: [...state.groups] })); } catch { /* 무시 */ }
+  try { localStorage.setItem(PREF, JSON.stringify({ view: state.view, mkt: state.mkt, groups: [...state.groups], gv: 2 })); } catch { /* 무시 */ }
 }
 
 // 데이터 — 봇이 남긴 파일 지문(manifest.json)이 있으면 '?v=지문'(캐시 가능), 없거나 내용이 다르면 새로 받는다(대시보드와 같은 방식)
@@ -119,7 +129,7 @@ function eventRow(e, { showDate = false } = {}) {
   const g = groupOf(e), url = sourceUrl(e);
   const past = e.d < today();
   return `<li class="ce${past ? ' past' : ''}">
-    <span class="ce-k"><i class="kdot g-${g}"></i>${esc(cellWord(e))}</span>
+    <span class="ce-k"><i class="kdot g-${g}"></i>${esc(e.k === 'mkt' ? '시장' : cellWord(e))}</span>
     <div class="ce-main">
       <div class="ce-top"><b class="ce-name">${esc(e.n)}</b><span class="ce-mkt">${e.m === 'US' ? '해외' : '국내'}</span>${showDate ? `<span class="ce-when">${esc(fmtDay(e.d, today()))}</span>` : ''}${e.tm ? `<span class="ce-when">${esc(e.tm)}</span>` : ''}</div>
       <div class="ce-t">${esc(e.t)}${e.s ? `<span class="ce-s"> · ${esc(e.s)}</span>` : ''}</div>
@@ -137,7 +147,7 @@ function renderGrid() {
   const body = cells.map((c) => {
     const evs = map.get(c.d) || [];
     const cls = ['cal-day', c.inMonth ? '' : 'out', c.d === td ? 'today' : '', c.d < td ? 'past' : '', c.dow === 0 || c.dow === 6 ? 'we' : ''].filter(Boolean).join(' ');
-    const lines = evs.slice(0, max).map((e) => `<span class="ev"><i class="kdot g-${groupOf(e)}"></i><span class="evt">${esc(e.n)} ${esc(cellWord(e))}</span></span>`).join('');
+    const lines = evs.slice(0, max).map((e) => `<span class="ev"><i class="kdot g-${groupOf(e)}"></i><span class="evt">${e.k === 'mkt' ? '' : `${esc(e.n)} `}${esc(cellWord(e))}</span></span>`).join('');
     const more = evs.length > max ? `<span class="more">+${evs.length - max}</span>` : '';
     const label = `${+c.d.slice(4, 6)}월 ${c.day}일 ${WD[c.dow]}요일${evs.length ? `, 일정 ${evs.length}건` : ''}`;
     return `<button type="button" class="${cls}" data-d="${c.d}" aria-pressed="${c.d === state.sel}" aria-label="${esc(label)}"><span class="dn">${c.day}</span><span class="evs">${lines}${more}</span></button>`;
@@ -163,7 +173,7 @@ function renderSide() {
   const all = visible();
   const sel = state.sel || td;
   const dayEvs = all.filter((e) => e.d === sel);
-  const upcoming = all.filter((e) => e.d > td && e.d <= addDays(td, 14)).slice(0, 12);
+  const up = upcomingOf(all, td), upcoming = up.list;
   const dayPart = `<div class="side-sec">
       <h2 class="side-h">${esc(fmtDay(sel, td))}<span class="dday">${esc(ddayLabel(sel, td))}</span></h2>
       ${dayEvs.length ? `<ul class="ce-list">${dayEvs.map((e) => eventRow(e)).join('')}</ul>` : '<p class="side-empty">이날은 일정이 없어요.</p>'}
@@ -171,6 +181,7 @@ function renderSide() {
   const upPart = state.view === 'month' ? `<div class="side-sec">
       <h2 class="side-h">다가오는 일정<span class="side-sub">2주</span></h2>
       ${upcoming.length ? `<ul class="ce-list">${upcoming.map((e) => eventRow(e, { showDate: true })).join('')}</ul>` : '<p class="side-empty">2주 안에 일정이 없어요.</p>'}
+      ${up.total > upcoming.length ? `<button type="button" class="btn side-more" data-act="list">2주 안 ${up.total}건 중 ${upcoming.length}건 — 목록으로 모두 보기</button>` : ''}
     </div>` : '';
   $('#calSide').innerHTML = dayPart + upPart;
 }
@@ -183,6 +194,7 @@ function renderNote() {
   if (d.kr === 'off') parts.push('국내 일정은 전자공시 키가 있어야 나와요');
   else if (d.kr && d.kr !== 'ok') parts.push(`국내: ${d.kr}`);
   if (d.us && !['ok', 'none'].includes(d.us)) parts.push(`해외: ${d.us}`);
+  parts.push('시장 일정(FOMC·미국 소비자물가·고용보고서·금통위·휴장·선물옵션 만기)은 연준·미국 노동부·한국은행·거래소가 발표한 날짜로 넣어 두고 해마다 더해요');
   parts.push('국내는 회사가 공시한 일정만(실적 발표일은 ‘결산실적공시 예고’를 낸 뒤부터) · 해외 실적 발표일은 나스닥 자료로, ‘예상일’은 회사가 아직 확정하지 않은 날짜');
   $('#calNote').textContent = parts.join(' · ');
 }
@@ -197,7 +209,7 @@ function renderHead() {
   $('#monthTitle').classList.toggle('dim', state.view !== 'month');
   // 종목 고르기 — 일정이 있는 종목만, 시장 거르기를 따름(국내 먼저 · 이름순)
   const seen = new Map();
-  for (const e of state.data?.events || []) if (!seen.has(e.c) && (state.mkt === 'all' || e.m === state.mkt)) seen.set(e.c, e);
+  for (const e of state.data?.events || []) if (e.c && !seen.has(e.c) && (state.mkt === 'all' || e.m === state.mkt)) seen.set(e.c, e); // 시장 일정(종목 없음)은 빼고
   const opts = [...seen.values()].sort((a, b) => (a.m === b.m ? String(a.n).localeCompare(String(b.n), 'ko') : a.m === 'KR' ? -1 : 1));
   if (state.data && state.code && !seen.has(state.code)) state.code = ''; // 주소로 받은 종목(?code=)은 데이터가 온 뒤에 확인
   $('#stockSel').innerHTML = `<option value="">전체 종목</option>${opts.map((e) => `<option value="${esc(e.c)}"${e.c === state.code ? ' selected' : ''}>${esc(e.n)}</option>`).join('')}`;
@@ -257,6 +269,11 @@ function bind() {
       return;
     }
     if (ev.target.closest('[data-act="past"]')) { state.showPast = !state.showPast; render(); }
+  });
+  $('#calSide').addEventListener('click', (ev) => {
+    if (!ev.target.closest('[data-act="list"]')) return;
+    state.view = 'list'; savePrefs(); render();
+    window.scrollTo({ top: 0 }); // 목록은 페이지 위(거르기 바로 아래)부터 — 고정 머리줄에 첫 줄이 가리지 않게
   });
   $('#themeBtn')?.addEventListener('click', () => { if (window.stockTheme) window.stockTheme.toggle(); });
   document.addEventListener('themechange', syncThemeBtn);

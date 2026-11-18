@@ -3346,6 +3346,57 @@ await test('AI 지시(82차): 내린 날 최근 크게 오르지 않았으면(1�
   await src.aiStockAnalysis({ quote: { ok: true, code: 'NVDA', market: 'US', name: '엔비디아', currency: 'USD', price: 100, changePct: -2.1, asOf: '2026-10-30T20:00:00Z' }, news: { ok: true, items: [] }, flow: null, history: null, disclosures: null, schedule: [], now: T('2026-10-31T10:00:00+09:00') });
   assert.ok(!(NET.bodies.find((x, i) => isGemini(NET.calls[i])) || '').includes('최근 크게'), '과거 시세가 없으면 없음');
 });
+await test('시장 일정(83차): FOMC·미국 CPI·금통위·휴장·조기 폐장·늦은 개장·선물옵션 만기 — 한국 시각(서머타임 반영) · 휴장이면 만기를 앞 영업일로 · 국내 만기는 휴장일을 아는 기간까지 · 판(mv)이 바뀌면 바로 다시 · 미국 실적은 한국 시각도 · 화면 짧은 말·거르기', async () => {
+  const cal = await import('./calendar.mjs');
+  const ev = cal.marketEvents('20261101', '20271231');
+  const one = (d, w) => ev.find((e) => e.d === d && e.w === w);
+  assert.deepEqual(JSON.parse(JSON.stringify(one('20261209', 'FOMC'))), { d: '20261209', k: 'mkt', c: '', n: '미국 연준', m: 'US', w: 'FOMC', t: 'FOMC 금리 결정', s: '한국 12/10 새벽 4시 발표' });
+  assert.equal(one('20270317', 'FOMC').s, '한국 3/18 새벽 3시 발표', '서머타임(3/14~)이면 한 시간 앞');
+  assert.equal(ev.some((e) => e.w === 'FOMC' && e.d === '20271027'), false, '10/26~27 전략 회의는 결정 없음');
+  assert.equal(one('20261210', '미국 CPI').s, '한국 12/10 밤 10시 30분');
+  assert.equal(one('20270310', '미국 CPI').s, '한국 3/10 밤 10시 30분', '서머타임 전');
+  assert.equal(one('20270413', '미국 CPI').s, '한국 4/13 밤 9시 30분', '서머타임');
+  assert.equal(one('20261204', '미국 고용').s, '한국 12/4 밤 10시 30분', '고용보고서(BLS 일정표)');
+  assert.equal(one('20270402', '미국 고용').s, '한국 4/2 밤 9시 30분', '고용보고서 — 서머타임');
+  assert.deepEqual([one('20261126', '금통위').m, one('20261126', '금통위').t], ['KR', '기준금리 결정(금통위)']);
+  assert.equal(one('20261126', '미국 휴장').t, '휴장 — 추수감사절');
+  assert.equal(one('20261127', '미국 조기 폐장').s, '한국 11/28 새벽 3시');
+  assert.equal(one('20261231', '국내 휴장').t, '휴장 — 연말 휴장');
+  assert.deepEqual([one('20261119', '국내 늦은 개장').t, one('20261119', '국내 늦은 개장').s], ['10:00 개장 · 16:30 마감', '수능일']);
+  assert.equal(one('20261210', '국내 동시 만기').t, '선물·옵션 동시 만기일', '12월 둘째 목요일 — 분기 동시 만기');
+  assert.ok(one('20270114', '국내 옵션 만기'), '1월 둘째 목요일');
+  assert.ok(!ev.some((e) => /^국내 .*만기$/.test(e.w) && e.d > '20270331'), '국내 만기는 휴장일을 아는 기간(3월)까지만');
+  assert.ok(one('20261120', '미국 옵션 만기') && one('20261218', '미국 동시 만기'), '미국 셋째 금요일 · 분기 동시 만기');
+  assert.ok(one('20270617', '미국 동시 만기') && !one('20270618', '미국 동시 만기'), '셋째 금요일이 휴장(노예 해방 기념일 대체)이면 목요일');
+  assert.equal(cal.marketEvents('20261201', '20261231').some((e) => e.d === '20261126'), false, '기간 밖은 뺌');
+  // 판(mv)이 바뀌면 3시간을 기다리지 않고 다시
+  assert.equal(cal.calendarDue({ at: NOW_KR - 3600e3, codes: ['AAPL'], pv: cal.PARSER_V, mv: cal.MKT_V }, [{ code: 'AAPL' }], NOW_KR), false);
+  assert.equal(cal.calendarDue({ at: NOW_KR - 3600e3, codes: ['AAPL'], pv: cal.PARSER_V }, [{ code: 'AAPL' }], NOW_KR), true, '시장 일정 판이 없는 예전 달력은 바로 다시');
+  // 봇 — 달력에 시장 일정·판, 미국 실적은 한국 시각
+  const r = workspace([{ code: 'AAPL', market: 'US', name: '애플' }]);
+  await pipeline(r, {}, NOW_KR, { calendar: true });
+  const c = read(r, 'calendar.json');
+  assert.equal(c.mv, cal.MKT_V);
+  assert.ok(c.events.some((e) => e.k === 'mkt' && e.w === 'FOMC' && e.d === '20261209'), '달력에 FOMC');
+  assert.equal(c.events.find((e) => e.c === 'AAPL' && e.k === 'earn').s, '미국 장 마감 뒤(한국 11/3 새벽)');
+  assert.deepEqual(cal.finalizeEvents([{ d: '20261210', k: 'earn', c: 'AAPL', n: '애플', m: 'US', t: '실적 발표' }, one('20261210', '미국 CPI')]).map((e) => e.k), ['mkt', 'earn'], '그날 맨 앞은 시장 일정');
+  // 화면 — 짧은 말·거르기(종목을 고르면 시장 일정은 빠짐)
+  const vm = await import('node:vm');
+  const js = fs.readFileSync(new URL('../docs/calendar.js', import.meta.url), 'utf8');
+  const f = vm.runInNewContext(`${js.slice(js.indexOf('// ---------- 계산'), js.indexOf('// ---------- 화면'))}; ({ passFilter, cellWord, groupOf, DEFAULT_GROUPS, upcomingOf })`, {});
+  // 옆 칸 다가오는 일정 — 내일부터 2주 안 16건까지, 전체 수는 따로(넘치면 '목록으로 모두 보기')
+  const evs = Array.from({ length: 20 }, (_, i) => ({ d: `202611${String(19 + (i % 10)).padStart(2, '0')}`, k: 'earn' })).concat([{ d: '20261118', k: 'earn' }, { d: '20261203', k: 'earn' }]);
+  const up = f.upcomingOf(evs, '20261118');
+  assert.deepEqual([up.list.length, up.total], [16, 20], '오늘·2주 뒤(12/3)는 빼고 20건 중 16건');
+  assert.deepEqual([f.upcomingOf(evs.slice(0, 5), '20261118').list.length, f.upcomingOf(evs.slice(0, 5), '20261118').total], [5, 5]);
+  const m = one('20261209', 'FOMC');
+  assert.equal(f.cellWord(m), 'FOMC');
+  assert.equal(f.groupOf(m), 'mkt');
+  assert.ok(f.DEFAULT_GROUPS.includes('mkt'), '기본으로 보임');
+  assert.equal(f.passFilter(m, { mkt: 'all', code: '', groups: new Set(['mkt']) }), true);
+  assert.equal(f.passFilter(m, { mkt: 'KR', code: '', groups: new Set(['mkt']) }), false, '시장 거르기 — 미국 일정');
+  assert.equal(f.passFilter(m, { mkt: 'all', code: 'AAPL', groups: new Set(['mkt']) }), false, '종목을 고르면 빠짐');
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
@@ -3480,12 +3531,12 @@ await test('공시 일정(본문): 실적 발표 예정일·IR 일시·기준일
   // 다시 만들 때
   const items = [{ code: '005930' }, { code: 'AAPL' }];
   assert.equal(cal.calendarDue(null, items, NOW_KR), true);
-  const pv = cal.PARSER_V;
-  assert.equal(cal.calendarDue({ at: NOW_KR - 2 * 3600e3, codes: ['005930', 'AAPL'], pv }, items, NOW_KR), false, '3시간 안');
-  assert.equal(cal.calendarDue({ at: NOW_KR - 3 * 3600e3, codes: ['005930', 'AAPL'], pv }, items, NOW_KR), true, '3시간 지남');
-  assert.equal(cal.calendarDue({ at: NOW_KR - 600e3, codes: ['005930'], pv }, items, NOW_KR), true, '종목이 바뀌면 바로');
-  assert.equal(cal.calendarDue({ at: NOW_KR - 600e3, codes: ['005930', 'AAPL'], pv: pv - 1 }, items, NOW_KR), true, '본문 읽는 방식이 바뀌면 바로');
-  assert.equal(cal.calendarDue({ at: NOW_KR - 600e3, codes: ['005930', 'AAPL'] }, items, NOW_KR), true, '판이 없는 옛 파일도 바로');
+  const pv = cal.PARSER_V, mv = cal.MKT_V; // mv: 시장 일정 판(83차)
+  assert.equal(cal.calendarDue({ at: NOW_KR - 2 * 3600e3, codes: ['005930', 'AAPL'], pv, mv }, items, NOW_KR), false, '3시간 안');
+  assert.equal(cal.calendarDue({ at: NOW_KR - 3 * 3600e3, codes: ['005930', 'AAPL'], pv, mv }, items, NOW_KR), true, '3시간 지남');
+  assert.equal(cal.calendarDue({ at: NOW_KR - 600e3, codes: ['005930'], pv, mv }, items, NOW_KR), true, '종목이 바뀌면 바로');
+  assert.equal(cal.calendarDue({ at: NOW_KR - 600e3, codes: ['005930', 'AAPL'], pv: pv - 1, mv }, items, NOW_KR), true, '본문 읽는 방식이 바뀌면 바로');
+  assert.equal(cal.calendarDue({ at: NOW_KR - 600e3, codes: ['005930', 'AAPL'], mv }, items, NOW_KR), true, '판이 없는 옛 파일도 바로');
 });
 await test('공시 일정(파이프라인): 국내 지난 공시·공시에 적힌 일정 + 미국 실적·배당 → calendar.json · 본문은 한 번만 · 3시간 안엔 다시 안 받음 · 실패하면 직전 일정 · 키 없으면 미국만', async () => {
   const cal = await import('./calendar.mjs');
@@ -3514,7 +3565,7 @@ await test('공시 일정(파이프라인): 국내 지난 공시·공시에 적�
     assert.equal(find({ d: '20261029', c: '005930', k: 'ir' }).length, 1, '같은 IR을 두 번 공시해도 한 번');
     assert.equal(find({ d: '20261015', c: '005930', k: 'disc', t: '단일판매ㆍ공급계약체결', tag: '계약' }).length, 1, '지난 공시는 공시한 날');
     assert.equal(find({ no: '20261014000400' }).length, 0, '철회된 공시 제외');
-    assert.equal(find({ d: '20261102', c: 'AAPL', k: 'earn', t: '실적 발표(예상일)', s: '미국 장 마감 뒤', est: true, m: 'US' }).length, 1);
+    assert.equal(find({ d: '20261102', c: 'AAPL', k: 'earn', t: '실적 발표(예상일)', s: '미국 장 마감 뒤(한국 11/3 새벽)', est: true, m: 'US' }).length, 1);
     assert.equal(find({ d: '20260810', c: 'AAPL', k: 'div', t: '배당락', s: '주당 $0.27' }).length, 1);
     assert.equal(find({ c: 'AAPL', d: '20260511' }).length, 0, '90일보다 오래된 배당락은 뺌');
     assert.deepEqual(c.events.map((e) => e.d), [...c.events.map((e) => e.d)].sort(), '날짜순');
@@ -3564,7 +3615,7 @@ await test('공시 일정(파이프라인): 국내 지난 공시·공시에 적�
   await pipeline(r2, {}, NOW_KR, { calendar: true });
   const c2 = read(r2, 'calendar.json');
   assert.equal(c2.kr, 'off');
-  assert.ok(c2.events.length > 0 && c2.events.every((e) => e.m === 'US'));
+  assert.ok(c2.events.length > 0 && c2.events.filter((e) => e.k !== 'mkt').every((e) => e.m === 'US'), '종목 일정은 미국만(시장 일정은 국내·미국 둘 다 — 83차)');
   assert.equal(NET.calls.filter((u) => /opendart/.test(u)).length, 0);
 });
 await test('공시 일정 화면(calendar.js): 달 칸(일요일 시작·5~6주) · D-day · 올해가 아니면 연도 · 시장·종목·종류 거르기 · 칸 문구 · 원문 주소', async () => {

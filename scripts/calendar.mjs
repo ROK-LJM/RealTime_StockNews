@@ -17,9 +17,12 @@
 //   일정을 못 찾은 본문은 생김새(파일·인코딩·태그·앞부분 줄)를 diag에 몇 건 남긴다 — 원본 형식이 예상과 다를 때 고칠 단서.
 //   자회사(종속회사) 공시는 그 회사의 일정이라 본문을 받지 않는다(공시한 날만 둔다).
 // · 미국(나스닥 공개 자료 — 키 없음): 다음 실적 발표일(장 시작 전·마감 후, '*'가 붙으면 예상일)과 배당(배당락·지급일)
+// · 시장 일정(83차 — 종목 없음, k 'mkt'): 미국 FOMC 금리 결정·소비자물가(CPI)·고용보고서·증시 휴장·조기 폐장, 한국은행 금통위·국내 휴장·늦은 개장,
+//   선물옵션 만기(국내 매월 둘째 목요일·미국 셋째 금요일, 3·6·9·12월은 동시 만기 — 휴장이면 앞 영업일). 날짜는 공식 발표로 확인해 넣고 해마다 더한다
 // · 3시간마다(종목이 바뀌거나 본문 읽는 방식의 판이 바뀌면 바로) 다시 만든다. 받기에 실패한 종목은 직전 일정을 그대로 쓴다.
 import { dartEnabled, dartHalted, corpOf, tagOf, kstYmd, listFilings, getDocument } from './dart.mjs';
 import { mapLimit } from './util.mjs';
+import { KRX_LATE } from './aibudget.mjs';
 
 export const CAL_REFRESH_MS = 3 * 3600e3;
 export const PARSER_V = 5;  // 본문 읽는 방식의 판 — 바꾸면 기억한 본문 결과(docs)를 버리고 다시 받는다
@@ -32,7 +35,7 @@ export const SCHEDULE_RE = /결산실적공시\s*예고|기업설명회|\(IR\)|�
 const SUB_RE = /종속회사|자회사/; // 자회사의 증자 등 — 내 종목의 일정이 아님
 const EARN_FILED_RE = /영업\(잠정\)실적|매출액또는손익구조/; // 실적 공시 — 그날이 곧 발표일
 const DIAG_MAX = 4;         // 진단으로 남기는 본문 수
-const KIND_ORDER = { earn: 0, ir: 1, meet: 2, div: 3, rec: 4, cap: 5, disc: 6 };
+const KIND_ORDER = { mkt: -1, earn: 0, ir: 1, meet: 2, div: 3, rec: 4, cap: 5, disc: 6 }; // 시장 일정(83차)은 그날 맨 앞
 const cut = (s, n = 80) => { const t = String(s ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
 const ymd = (y, m, d) => (y >= 2000 && m >= 1 && m <= 12 && d >= 1 && d <= 31 ? `${y}${String(m).padStart(2, '0')}${String(d).padStart(2, '0')}` : null);
 const dot = (d) => `${d.slice(0, 4)}.${d.slice(4, 6)}.${d.slice(6, 8)}`;
@@ -249,6 +252,65 @@ export function parseNasdaqDividends(j) {
   return out;
 }
 
+// ---------- 시장 일정(83차) ----------
+// 11/18 사용자 '일정 쪽도 있어야 할 정보가 없는지' — 달력에 종목 일정만 있고 FOMC·물가·금통위·휴장·만기 같은 시장 일정이 없었다.
+// 날짜는 공식 발표로 확인(2026-11-18): FOMC 연준 2026-11-12 발표(결정은 회의 둘째 날 14:00 ET — 2027-10-26~27은 전략 회의라 결정 없음) ·
+// CPI·고용보고서 미국 노동통계국 일정표(08:30 ET) · 금통위 한국은행 2027년 일정(2026-10-29 의결 보도) · 미국 휴장·조기 폐장 NYSE 2026~2028 공지(공휴일 규칙과 맞춤) ·
+// 국내 휴장은 법정 공휴일·연말 휴장 중 확실한 것만(거래소 2027년 휴장일 공지 — 보통 12월 — 가 나오면 KR_CLOSED·KR_CAL_UNTIL을 늘린다)
+export const MKT_V = 1; // 시장 일정 판 — 표를 고치면 올린다(3시간을 기다리지 않고 달력을 다시 만듦, 본문 기억은 그대로)
+const FOMC = ['20261209', '20270127', '20270317', '20270428', '20270609', '20270728', '20270915', '20271117'];
+const US_CPI = ['20261210', '20270113', '20270211', '20270310', '20270413', '20270512', '20270610', '20270714', '20270811', '20270914', '20271014', '20271110', '20271210'];
+const US_JOBS = ['20261204', '20270108', '20270205', '20270305', '20270402', '20270507', '20270604', '20270702', '20270806', '20270903', '20271008', '20271105', '20271203'];
+const BOK = ['20261126', '20270114', '20270225', '20270409', '20270527', '20270715', '20270826', '20271015', '20271125'];
+const US_CLOSED = { 20261126: '추수감사절', 20261225: '성탄절', 20270101: '새해', 20270118: '마틴 루서 킹 데이', 20270215: '대통령의 날', 20270326: '성금요일',
+  20270531: '현충일', 20270618: '노예 해방 기념일(대체)', 20270705: '독립기념일(대체)', 20270906: '노동절', 20271125: '추수감사절', 20271224: '성탄절(대체)' };
+const US_EARLY = { 20261127: '추수감사절 다음 날', 20261224: '성탄 전날', 20271126: '추수감사절 다음 날' }; // 13:00 ET
+const KR_CLOSED = { 20261225: '성탄절', 20261231: '연말 휴장', 20270101: '새해', 20270208: '설날', 20270209: '설날 대체공휴일', 20270301: '삼일절' };
+const LATE_WHY = { 20261119: '수능일', 20270104: '새해 첫 거래일' };
+const MKT_FROM = '20261101', KR_CAL_UNTIL = '20270331', US_CAL_UNTIL = '20271231'; // 만기일을 휴장일을 아는 기간에만(국내 3월·미국 연말까지)
+const dU = (s) => Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8));
+const sOf = (ms) => new Date(ms).toISOString().slice(0, 10).replace(/-/g, '');
+const plus = (s, n) => sOf(dU(s) + n * 864e5);
+const mdK = (s) => `${+s.slice(4, 6)}/${+s.slice(6, 8)}`;
+// 뉴욕 그날 h:mi → 한국 날짜·시(서머타임은 뉴욕 시각으로 판단 — EDT UTC-4 · EST UTC-5)
+function nyToKst(s, h, mi = 0) {
+  for (const off of [4, 5]) {
+    const ms = dU(s) + ((h + off) * 60 + mi) * 60e3;
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit', hour: 'numeric', hourCycle: 'h23' })
+      .formatToParts(ms).map((x) => [x.type, x.value]));
+    if (+p.hour === h && `${p.year}${p.month}${p.day}` === s) return { d: sOf(ms + 9 * 3600e3), h: new Date(ms + 9 * 3600e3).getUTCHours() };
+  }
+  return null;
+}
+// 그 달 n번째 요일(dow: 0 일 … 6 토) · 휴장·주말이면 앞 영업일
+const nthDow = (y, m, dow, n) => { const fd = new Date(Date.UTC(y, m - 1, 1)).getUTCDay(); return sOf(Date.UTC(y, m - 1, 1 + ((dow - fd + 7) % 7) + (n - 1) * 7)); };
+const prevBiz = (s, closed) => {
+  let d = s;
+  while (closed[d] || [0, 6].includes(new Date(dU(d)).getUTCDay())) d = plus(d, -1);
+  return d;
+};
+const hhmm = (min) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+// from~until(YYYYMMDD) 사이 시장 일정 — { d, k: 'mkt', c: '', n(누가), m, w(칸에 쓰는 짧은 말), t, s? }. 미국은 뉴욕 날짜
+export function marketEvents(from, until) {
+  const out = [];
+  const add = (d, m, n, w, t, s = '') => { if (d >= from && d <= until) out.push({ d, k: 'mkt', c: '', n, m, w, t, ...(s ? { s } : {}) }); };
+  for (const d of FOMC) { const k = nyToKst(d, 14); add(d, 'US', '미국 연준', 'FOMC', 'FOMC 금리 결정', k ? `한국 ${mdK(k.d)} 새벽 ${k.h}시 발표` : ''); }
+  for (const d of US_CPI) { const k = nyToKst(d, 8, 30); add(d, 'US', '미국 노동부', '미국 CPI', '소비자물가(CPI) 발표', k ? `한국 ${mdK(k.d)} 밤 ${k.h - 12}시 30분` : ''); }
+  for (const d of US_JOBS) { const k = nyToKst(d, 8, 30); add(d, 'US', '미국 노동부', '미국 고용', '고용보고서(비농업 고용) 발표', k ? `한국 ${mdK(k.d)} 밤 ${k.h - 12}시 30분` : ''); }
+  for (const d of BOK) add(d, 'KR', '한국은행', '금통위', '기준금리 결정(금통위)', '오전 10시쯤 발표');
+  for (const [d, why] of Object.entries(US_CLOSED)) add(d, 'US', '미국 증시', '미국 휴장', `휴장 — ${why}`);
+  for (const [d, why] of Object.entries(US_EARLY)) { const k = nyToKst(d, 13); add(d, 'US', '미국 증시', '미국 조기 폐장', `오후 1시 조기 폐장 — ${why}`, k ? `한국 ${mdK(k.d)} 새벽 ${k.h}시` : ''); }
+  for (const [d, why] of Object.entries(KR_CLOSED)) add(d, 'KR', '국내 증시', '국내 휴장', `휴장 — ${why}`);
+  for (const [key, [o, c]] of Object.entries(KRX_LATE)) { const d = key.replace(/-/g, ''); add(d, 'KR', '국내 증시', '국내 늦은 개장', `${hhmm(o)} 개장 · ${hhmm(c)} 마감`, LATE_WHY[d] || ''); }
+  for (let y = +from.slice(0, 4); y <= +until.slice(0, 4); y++) for (let m = 1; m <= 12; m++) {
+    const q = m % 3 === 0;
+    const kr0 = nthDow(y, m, 4, 2), us0 = nthDow(y, m, 5, 3);
+    if (kr0 >= MKT_FROM && kr0 <= KR_CAL_UNTIL) add(prevBiz(kr0, KR_CLOSED), 'KR', '국내 증시', q ? '국내 동시 만기' : '국내 옵션 만기', q ? '선물·옵션 동시 만기일' : '옵션 만기일');
+    if (us0 >= MKT_FROM && us0 <= US_CAL_UNTIL) add(prevBiz(us0, US_CLOSED), 'US', '미국 증시', q ? '미국 동시 만기' : '미국 옵션 만기', q ? '선물·옵션 동시 만기(쿼드러플 위칭)' : '월간 옵션 만기일');
+  }
+  return out;
+}
+
 // 미국 실적 발표일 합치기(75차) — 나스닥은 발표가 끝나면(때로는 발표 당일부터) 다음 분기 날짜를 주거나 날짜를 안 줘, 지난·당일 실적 일정이
 // 통째로 사라졌다(11/17 16:30 엔비디아 '실적 발표(미국 장 마감 뒤)'가 실제 발표 14시간 전에 빠짐 · MSFT·AMZN·AAPL·SMCI·PLUG도 날이 지나며 사라짐).
 // 받은 날짜는 그대로, 직전 일정 중 오늘(한국 날짜)까지의 것은 남기고(받은 날짜와 같은 날은 받은 것으로), 받은 날짜가 없으면 앞으로의 것도 남긴다
@@ -261,7 +323,7 @@ export function mergeEarn(got, prevEarn, today) {
 const sameCodes = (prev, items) => Array.isArray(prev?.codes) && prev.codes.join(',') === items.map((it) => it.code).sort().join(',');
 // 다시 만들 때인가 — 없거나 3시간 지났거나 종목이 바뀜, 또는 본문 읽는 방식의 판이 바뀜(고친 것을 바로 반영)
 export function calendarDue(prev, items, now) {
-  return !prev || !Number.isFinite(prev.at) || now - prev.at >= CAL_REFRESH_MS || now < prev.at || !sameCodes(prev, items) || prev.pv !== PARSER_V;
+  return !prev || !Number.isFinite(prev.at) || now - prev.at >= CAL_REFRESH_MS || now < prev.at || !sameCodes(prev, items) || prev.pv !== PARSER_V || prev.mv !== MKT_V;
 }
 
 // items: 추적 종목, corpMap: 종목코드→고유번호(없으면 국내 생략), prev: 직전 calendar.json
@@ -374,7 +436,7 @@ export async function buildCalendar({ items, corpMap = null, prev = null, now })
       const x = parseNasdaqEarnings(j);
       if (!x) usDiag.push({ c: it.code, a: String(j?.data?.announcement ?? '').slice(0, 90), r: String(j?.data?.reportText ?? '').replace(/\s+/g, ' ').trim().slice(0, 140) });
       return x ? [{ d: x.d, k: 'earn', t: x.est ? '실적 발표(예상일)' : '실적 발표',
-        ...(x.when ? { s: x.when === 'amc' ? '미국 장 마감 뒤' : '미국 장 시작 전' } : {}), ...(x.est ? { est: true } : {}) }] : [];
+        ...(x.when ? { s: x.when === 'amc' ? `미국 장 마감 뒤(한국 ${mdK(plus(x.d, 1))} 새벽)` : `미국 장 시작 전(한국 ${mdK(x.d)} 밤)` } : {}), ...(x.est ? { est: true } : {}) }] : [];
     });
     const div = await get(`quote/${sym}/dividends?assetclass=stocks`, parseNasdaqDividends);
     if (!earn || !div) usFail++;
@@ -385,11 +447,12 @@ export async function buildCalendar({ items, corpMap = null, prev = null, now })
     else events.push(...prevOf('div'));
   });
 
+  events.push(...marketEvents(from, until)); // 시장 일정(83차)
   const out = finalizeEvents(events);
   const usState = !us.length ? 'none' : usFail === us.length ? '받기 실패 — 직전 일정 유지' : usFail ? `일부 실패(${usFail}종목 — 직전 일정 유지)` : 'ok';
   // 진단 — 이번에 못 찾은 것 + 직전 진단 중 아직 기억에 있는 것
   const keptDiag = sameV && Array.isArray(prev?.diag) ? prev.diag.filter((d) => d && Array.isArray(docs[d.no]) && !diag.some((x) => x.no === d.no)) : [];
   console.log(`  · 공시 일정: ${out.length}건(국내 ${krState}${newDocs ? ` · 본문 ${newDocs}건 새로(일정 나온 것 ${gotDocs}건)` : ''} · 미국 ${usState})`);
-  return { v: 1, pv: PARSER_V, at: now, codes: items.map((it) => it.code).sort(), kr: krState, us: usState, events: out, docs, diag: pickDiag([...diag, ...keptDiag]),
+  return { v: 1, pv: PARSER_V, mv: MKT_V, at: now, codes: items.map((it) => it.code).sort(), kr: krState, us: usState, events: out, docs, diag: pickDiag([...diag, ...keptDiag]),
     ...(usDiag.length ? { usDiag: usDiag.sort((a, b) => a.c.localeCompare(b.c)) } : {}) };
 }
