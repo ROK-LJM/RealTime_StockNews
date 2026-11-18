@@ -262,7 +262,8 @@ input::placeholder { color: var(--muted); }
   text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 2px; }
 .th-code:hover { text-decoration-color: currentColor; }
 .th-refs { margin: 4px 0 0; padding-left: 16px; font-size: 12px; line-height: 1.6; }
-.th-refs a { color: inherit; }
+.th-refs a { color: var(--text); text-decoration: none; } /* 카드 뉴스 링크와 같게(78차) */
+.th-refs a:hover { text-decoration: underline; }
 
 /* 코스피·코스닥 오늘의 이유 */
 .briefs { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
