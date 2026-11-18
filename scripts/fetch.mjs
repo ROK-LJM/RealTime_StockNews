@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis, aiStockBriefs, BRIEF_MAX, ANALYSIS_PV, aiThemes, themeHeads, themeOut, themeDue, calmExpected, aiExtBriefs, extMovers, extHeads, extDue, extRel, extSame, EXT_AHEAD,
+  getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis, aiStockBriefs, BRIEF_MAX, ANALYSIS_PV, aiThemes, themeHeads, themeOut, themeDue, calmExpected, aiExtBriefs, extMovers, extHeads, extDue, extRel, extSame, EXT_AHEAD, toneTail,
   getSidecarNews, sidecarEvents, mergeMeasures,
   aiStatus, aiGate, aiRoom, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, pickReasonNews, strongNews, tagSentiment, krBaseName,
 } from './sources.mjs';
@@ -407,7 +407,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
         const got = await aiStockBriefs(pack.map((m) => ({ quote: m.q, news: news[m.it.code], disclosures: disclosures[m.it.code], market: benchOfQuote(m.q) })), now);
         for (const m of pack) {
           const g = got && got[m.it.code];
-          if (g) { analysis[m.it.code] = { headline: g.headline, lite: true, model: g.model, sig: m.sig, at: now, pv: ANALYSIS_PV }; briefed++; }
+          if (g) { analysis[m.it.code] = { headline: toneTail(g.headline, m.q.changePct), lite: true, model: g.model, sig: m.sig, at: now, pv: ANALYSIS_PV }; briefed++; }
         }
       } catch (e) { console.error('    한 줄 진단 묶음 실패:', e.message); }
     }
@@ -424,6 +424,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
       calls++;
       try {
         const a = await aiStockAnalysis({ quote: q, news: news[it.code], flow: investors[it.code], history: history[it.code], disclosures: disclosures[it.code], schedule: scheduleOf(it), market: benchOfQuote(q), now });
+        if (a) a.headline = toneTail(a.headline, q.changePct); // 끝말을 등락 폭에 맞춤(86차 — 5% 안쪽의 끝 '급등'은 '상승')
         if (a) analysis[it.code] = { ...a, sig, at: now, pv: ANALYSIS_PV };
         else if (prev[it.code]) analysis[it.code] = prev[it.code]; // 일시적 실패 시 기존 분석 유지
       } catch (e) { console.error(`    종합분석 실패(${it.code}):`, e.message); if (prev[it.code]) analysis[it.code] = prev[it.code]; }
@@ -457,7 +458,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
         if (done.length) {
           const same = extSame(prevX, day, now);
           const out = { day, sess: 'post', at: now, model: got[done[0].it.code].model, n: (same ? prevX.n || 0 : 0) + 1, hn: extRel(xm, heads), items: same ? { ...prevX.items } : {} };
-          for (const m of done) out.items[m.it.code] = { h: got[m.it.code].headline, pct: m.q.ext.changePct, at: now };
+          for (const m of done) out.items[m.it.code] = { h: toneTail(got[m.it.code].headline, m.q.ext.changePct), pct: m.q.ext.changePct, at: now };
           write('extwhy.json', out);
           console.log(`  · 애프터마켓 이유 ${done.length}종목(마감 뒤 기사 ${heads.length}건)`);
         }
