@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis, aiStockBriefs, BRIEF_MAX, ANALYSIS_PV, calmExpected,
+  getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis, aiStockBriefs, BRIEF_MAX, ANALYSIS_PV, aiThemes, themeHeads, themeOut, themeDue, calmExpected,
   getSidecarNews, sidecarEvents, mergeMeasures,
   aiStatus, aiGate, aiRoom, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, pickReasonNews, strongNews, tagSentiment, krBaseName,
 } from './sources.mjs';
@@ -80,7 +80,7 @@ async function marketMeasures(prev, quotes, indices, now) {
 // now: 이번 회차 기준 시각 — AI 예산 배분·분석 시각 기록에 쓴다(테스트는 고정 시각을 넘긴다).
 // refreshAll: 과거 시세·수급·뉴스를 간격과 상관없이 모두 새로 받는다(자체 테스트용, 아래 REFRESH_MIN 참고).
 // calendar: 공시 일정 달력 단계(3시간마다) — 자체 테스트는 그 단계를 보는 테스트에서만 켠다
-export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data'), now = Date.now(), refreshAll = false, calendar = true } = {}) {
+export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data'), now = Date.now(), refreshAll = false, calendar = true, themes = true } = {}) {
   resetState(); // 회차마다 캐시·AI 상태를 새로 시작
   fs.mkdirSync(dataDir, { recursive: true });
   const written = [];
@@ -438,6 +438,20 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
     console.log(`  · 종합분석 대상 ${movers.length}건 — 신규 호출 ${calls}건${briefed ? `(한 줄 진단 묶음 1번 — ${briefed}종목)` : ''}, 다음 회차로 미룸 ${deferred + waited}건${waited ? `(한도 배분 대기 ${waited})` : ''}${kept ? ` · 2% 아래로 내려간 그날 진단 ${kept}건 유지` : ''}`);
     write('analysis.json', analysis);
   } catch (e) { console.error('  ✗ 종합분석 실패 — analysis.json 유지:', e.message); }
+
+  // 6-2) 큰 소식(themes.json, 78차 — 화면 '큰 소식'): 약 3시간마다 내 종목들의 최근 이틀 기사 제목을 AI가 사건별로 묶는다(sources.mjs aiThemes).
+  //      종목 분석이 먼저 — 무료 한도 배분 몫이 2번 넘게 남을 때만(리셋 전 1시간은 늘). 관련 종목은 AI가 아니라 고른 기사가 걸린 종목(themeOut).
+  //      실패하면 직전 것 그대로(화면은 36시간 넘은 것을 숨김) · 자체 테스트는 기본으로 끔(themes: false — 종목 분석 호출 수 검사가 흔들리지 않게)
+  if (themes) try {
+    if (themeDue(readJson('themes.json'), now, aiRoom())) {
+      const heads = themeHeads(items, news, now);
+      const got = await aiThemes(heads, now);
+      if (got) {
+        write('themes.json', { at: now, model: got.model, items: got.items.map((x) => themeOut(x, heads)) });
+        console.log(`  · 큰 소식 ${got.items.length}건(기사 ${heads.length}건에서)`);
+      }
+    }
+  } catch (e) { console.error('  ✗ 큰 소식 실패 — themes.json 유지:', e.message); }
 
   // 7) 급등락 기록(moves.json) — '지난번엔 왜 움직였나'. 종목이 ±2%(AI 분석 기준) 넘게 움직인 날마다 그날 등락과 이유 한 줄을 남긴다.
   //    날짜는 시세 시각(asOf)의 그 시장 현지 날짜 — 장중엔 회차마다 그날 기록을 고치고, 2% 아래로 돌아오면 지운다(마감 값이 기준).

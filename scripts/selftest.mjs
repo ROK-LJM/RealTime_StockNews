@@ -251,9 +251,9 @@ async function quiet(fn) {
   try { return { value: await fn(), lines }; } finally { Object.assign(console, orig); }
 }
 // 기본은 과거 시세·수급·뉴스를 매번 새로 받는다(refreshAll) — 간격 재사용 자체는 전용 테스트에서 검증
-async function pipeline(root, routeOpts, now = NOW_KR, { refreshAll = true, calendar = false } = {}) {
+async function pipeline(root, routeOpts, now = NOW_KR, { refreshAll = true, calendar = false, themes = false } = {}) {
   NET.routes = routes(routeOpts); NET.calls = []; NET.bodies = []; NET.blocked = [];
-  return quiet(() => run({ root, now, refreshAll, calendar }));
+  return quiet(() => run({ root, now, refreshAll, calendar, themes }));
 }
 
 // ---------- 테스트 러너 ----------
@@ -3170,6 +3170,92 @@ await test('뉴스(77차): 미국 내부자 거래 보고(Form 4) 자동 기사(
     : text(rss('', queryName(u)))) });
   const titles = (read(root, 'news.json').AAPL?.items || []).map((x) => x.title);
   assert.deepEqual(titles.sort(), ['AAPL shares rise on iPhone demand', 'Apple (AAPL) wins EU approval for new chip plant'], titles.join(' / '));
+});
+await test('큰 소식(78차, 봇): 내 종목들의 최근 48시간 기사(원인 아닌 기사·시세 안내 빼고 같은 제목은 하나로 — 여러 종목에 걸린 것 먼저)를 AI가 묶음 · 엉뚱한 번호·빈 이름은 버리고 4개까지 · 관련 종목은 고른 기사가 걸린 종목 · 3시간 안엔 다시 안 함 · 한도 배분 몫이 없으면 안 부름', async () => {
+  src.resetState(); src.setAiBudget(null);
+  const now = T('2026-11-13T10:00:00+09:00');
+  const n = (title, h) => ({ title, pubMs: now - h * 3600e3, link: 'https://news.example.com/' + encodeURIComponent(title), source: '테스트일보' });
+  const items = [{ code: '005930', name: '삼성전자', market: 'KR' }, { code: '000660', name: 'SK하이닉스', market: 'KR' }, { code: 'AMZN', name: '아마존닷컴', market: 'US' }];
+  const news = {
+    '005930': { items: [n('앤트로픽 IPO 기대감에 삼성전자·SK하이닉스 상승', 2), n('삼성전자 새 공장 착공', 1), n('삼성전자 주가, 11월 13일 장중 100,000원 1.00% 상승', 1), n('삼성전자, 하반기 신입 공채', 3), n('삼성전자 오래된 기사', 60)] },
+    '000660': { items: [n('앤트로픽 IPO 기대감에 삼성전자·SK하이닉스 상승', 2), n('SK하이닉스 HBM4 양산', 5)] },
+    AMZN: { items: [n('Anthropic IPO: What It Means For Amazon', 4)] },
+  };
+  const heads = src.themeHeads(items, news, now);
+  assert.deepEqual(heads.map((h) => [h.t, h.codes.join(',')]), [['앤트로픽 IPO 기대감에 삼성전자·SK하이닉스 상승', '005930,000660'], ['삼성전자 새 공장 착공', '005930'], ['Anthropic IPO: What It Means For Amazon', 'AMZN'], ['SK하이닉스 HBM4 양산', '000660']],
+    '같은 제목은 하나로(걸린 종목 모음) · 여러 종목에 걸린 것 먼저, 그다음 최신순 · 시세 안내·원인 아닌 기사·48시간 넘은 기사 뺌');
+  // AI 요청·받기
+  const reply = (o) => () => json({ candidates: [{ content: { parts: [{ text: JSON.stringify(o) }] } }] });
+  const ok = { items: [{ title: '앤트로픽 상장 추진', summary: '앤트로픽 IPO 기대에 메모리·클라우드 수혜 기대.', refs: [1, 3, 9] }, { title: '', refs: [2] }, { title: '근거 없음', refs: [] }] };
+  NET.routes = routes({ gemini: reply(ok) }); NET.calls = []; NET.bodies = []; NET.blocked = [];
+  const got = await src.aiThemes(heads, now);
+  const prompt = JSON.parse(NET.bodies.find((b, i) => isGemini(NET.calls[i]))).contents[0].parts[0].text;
+  assert.ok(prompt.includes('[1] (삼성전자·SK하이닉스) 앤트로픽 IPO 기대감에 삼성전자·SK하이닉스 상승 [11/13]\n') && prompt.includes('[3] (아마존닷컴) Anthropic IPO: What It Means For Amazon [11/13]'), prompt);
+  assert.ok(prompt.includes('기사 제목에 있는 사실만으로 써라') && prompt.includes('배경지식으로 끌어와') && prompt.includes('지금(2026년 11월)'), '기사에 있는 사실만 · 배경지식 금지');
+  assert.deepEqual(JSON.parse(JSON.stringify(got.items)), [{ title: '앤트로픽 상장 추진', summary: '앤트로픽 IPO 기대에 메모리·클라우드 수혜 기대', refs: [1, 3] }], '엉뚱한 번호·빈 이름·근거 없는 것은 버림 · 끝 마침표 뗌');
+  assert.deepEqual(JSON.parse(JSON.stringify(src.themeOut(got.items[0], heads))), { title: '앤트로픽 상장 추진', summary: '앤트로픽 IPO 기대에 메모리·클라우드 수혜 기대', codes: ['005930', '000660', 'AMZN'],
+    refs: [{ t: '앤트로픽 IPO 기대감에 삼성전자·SK하이닉스 상승', link: heads[0].link, src: '테스트일보', ms: now - 2 * 3600e3 }, { t: 'Anthropic IPO: What It Means For Amazon', link: heads[2].link, src: '테스트일보', ms: now - 4 * 3600e3 }] }, '관련 종목은 고른 기사가 걸린 종목 · 기사는 최신순');
+  NET.routes = routes({ gemini: reply({ items: [1, 2, 3, 4, 1].map((r, i) => ({ title: `소식 ${i + 1}`, refs: [r] })) }) }); NET.calls = []; NET.bodies = [];
+  assert.equal((await src.aiThemes(heads, now)).items.length, 4, '4개까지');
+  NET.calls = []; NET.bodies = [];
+  assert.equal(await src.aiThemes(heads.slice(0, 2), now), null, '기사 3건 미만이면 안 부름');
+  assert.equal(NET.calls.filter((u) => isGemini(u)).length, 0);
+  // 새로 묶을 때 — 직전 것이 없거나 3시간 지났고(시계가 거꾸로 가도), 한도 배분 몫이 2번 넘게 남을 때(1번은 종목 분석에 남김)
+  assert.equal(src.themeDue(null, now, 2), true);
+  assert.equal(src.themeDue(null, now, 1), false, '몫 1번 — 종목 분석에 남김');
+  assert.equal(src.themeDue({ at: now - 60 * MIN }, now, 10), false, '3시간 안');
+  assert.equal(src.themeDue({ at: now - 180 * MIN }, now, 10), true, '3시간 지남');
+  assert.equal(src.themeDue({ at: now + 60 * MIN }, now, 10), true, '시계가 거꾸로');
+  assert.equal(src.themeDue({ seed: 1 }, now, Infinity), true, '형식이 다른 직전 파일 · 리셋 전 1시간(몫 무한)');
+  // 봇 — 뉴스 갱신이 아닌 회차(7분)라 넣어 둔 뉴스로, 3시간마다
+  const themeCalls = () => NET.bodies.filter((b, i) => isGemini(NET.calls[i]) && b.includes("'큰 소식'")).length;
+  const route = () => json(NET.bodies.at(-1).includes("'큰 소식'") ? { candidates: [{ content: { parts: [{ text: JSON.stringify(ok) }] } }] } : geminiOk);
+  const seedNews = (root) => writeData(root, 'news.json', { '005930': { ok: true, items: news['005930'].items }, '000660': { ok: true, items: news['000660'].items }, AAPL: { ok: true, items: [n('Apple AAPL supplier deal expands', 1)] } });
+  const t0 = T('2026-11-13T10:07:00+09:00');
+  const r = workspace();
+  seedNews(r);
+  await pipeline(r, { gemini: route }, t0, { refreshAll: false, themes: true });
+  assert.equal(themeCalls(), 1, '처음 — 묶음');
+  const th = read(r, 'themes.json');
+  assert.deepEqual([th.at, th.items.length, th.items[0].title, th.items[0].codes.join(',')], [t0, 1, '앤트로픽 상장 추진', '005930,000660,AAPL'], JSON.stringify(th));
+  assert.match(read(r, 'manifest.json').files['themes.json'] || '', /^[0-9a-f]{10}$/, '파일 지문에 포함');
+  await pipeline(r, { gemini: route }, t0 + 60 * MIN, { refreshAll: false, themes: true });
+  assert.equal(themeCalls(), 0, '3시간 안 — 다시 안 함');
+  await pipeline(r, { gemini: route }, t0 + 180 * MIN, { refreshAll: false, themes: true });
+  assert.equal(themeCalls(), 1, '3시간 뒤 — 다시');
+  // 한도 배분 몫이 없으면 안 부름
+  const r2 = workspace();
+  seedNews(r2);
+  const b = bud.startBudget(null, t0), cap = Math.floor(bud.capacity(b, ['model-primary', 'model-fallback']) * b.fraction);
+  writeData(r2, 'status.json', { ai: { state: 'ok', model: 'model-primary', used: cap, cap: 40 }, budget: { day: b.day, used: { 'model-primary': Math.ceil(cap / 2), 'model-fallback': Math.floor(cap / 2) }, out: {} } });
+  await pipeline(r2, { gemini: route }, t0, { refreshAll: false, themes: true });
+  assert.equal(themeCalls(), 0, '몫 없음 — 안 부름');
+  assert.equal(fs.existsSync(path.join(r2, 'docs', 'data', 'themes.json')), false);
+  // 꺼 두면(themes: false — 자체 테스트 기본) 기사가 있어도 안 부름
+  const r3 = workspace();
+  seedNews(r3);
+  await pipeline(r3, { gemini: route }, t0, { refreshAll: false });
+  assert.equal(themeCalls(), 0, '꺼 두면 안 부름');
+  assert.equal(fs.existsSync(path.join(r3, 'docs', 'data', 'themes.json')), false);
+});
+await test('큰 소식(78차, 화면): 소식 이름·한 줄 요약·관련 종목(누르면 그 카드로)·기사 링크(출처·시각) · 36시간 넘었거나 비었으면 안 보임 · "왜 움직였나" 아래', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const top = appJs.slice(appJs.indexOf('function fmtPrice('), appJs.indexOf('\n', appJs.indexOf('function esc(')) + 1);
+  const links = appJs.slice(appJs.indexOf('function safeUrl('), appJs.indexOf('\n', appJs.indexOf('function extLink(')) + 1);
+  const block = appJs.slice(appJs.indexOf('const THEME_STALE_MS'), appJs.indexOf('function renderBoard('));
+  const ctx = { state: { data: { quotes: [{ code: '005930', name: '삼성전자' }, { code: 'AMZN', name: '아마존닷컴' }] } }, location: { href: 'https://example.com/' }, URL };
+  const g = vm.runInNewContext(`${top}\n${links}\n${block}; ({ themesHtml })`, ctx);
+  const now = Date.now();
+  const th = { at: now - 3600e3, items: [{ title: '앤트로픽 상장 추진', summary: '앤트로픽 IPO 기대에 메모리·클라우드 수혜 기대', codes: ['005930', 'AMZN'], refs: [{ t: 'Anthropic IPO: What It Means For Amazon', link: 'https://news.example.com/a', src: 'Benzinga', ms: now - 7200e3 }] }] };
+  const html = g.themesHtml(th);
+  assert.ok(html.includes('>앤트로픽 상장 추진<') && html.includes('>앤트로픽 IPO 기대에 메모리·클라우드 수혜 기대<'), html);
+  assert.ok(html.includes('data-code="005930">삼성전자<') && html.includes('data-code="AMZN">아마존닷컴<'), '관련 종목 — 누르면 그 카드로');
+  assert.ok(html.includes('href="https://news.example.com/a"') && html.includes('target="_blank"') && html.includes('Benzinga'), '기사 링크·출처');
+  assert.equal(g.themesHtml({ ...th, at: now - 37 * 3600e3 }), '', '36시간 넘으면 안 보임');
+  assert.equal(g.themesHtml({ at: now, items: [] }), '', '비었으면 안 보임');
+  assert.equal(g.themesHtml(null), '');
+  assert.ok(appJs.includes('</div>${themesHtml(state.themes)}`;'), '"왜 움직였나" 아래');
 });
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');

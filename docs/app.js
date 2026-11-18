@@ -393,9 +393,9 @@ const isNarrow = () => window.matchMedia('(max-width: 720px)').matches;
 
 // ---------- 보유 종목 ----------
 async function loadQuotes() {
-  let data, news, hist, inv, analysis, disc, moves, cal;
+  let data, news, hist, inv, analysis, disc, moves, cal, themes;
   try {
-    [data, news, hist, inv, analysis, disc, moves, cal] = await Promise.all([
+    [data, news, hist, inv, analysis, disc, moves, cal, themes] = await Promise.all([
       loadData('quotes.json'),
       loadData('news.json').catch(() => ({})),
       loadData('history.json').catch(() => ({})),
@@ -404,6 +404,7 @@ async function loadQuotes() {
       loadData('disclosures.json').catch(() => ({})),
       loadData('moves.json').catch(() => ({})),
       loadData('calendar.json').catch(() => null),
+      loadData('themes.json').catch(() => null), // 큰 소식(78차) — 못 받으면 직전 값
     ]);
   } catch (e) {
     // 자동 새로고침 중 일시적 실패(5xx·오프라인 등)로 이미 그려진 화면을 지우지 않는다.
@@ -420,6 +421,7 @@ async function loadQuotes() {
   state.disc = disc || {};
   state.moves = moves || {};
   if (cal && Array.isArray(cal.events)) state.cal = cal; // 공시 일정 달력 — 못 받으면 직전 값
+  if (themes && Array.isArray(themes.items)) state.themes = themes;
   state.data = data;
   const clock = $('#clock');
   if (clock) { // 좁은 화면에선 '확인' 글자를 숨겨 상단바를 한 줄로
@@ -967,6 +969,21 @@ function extRow(q) {
 function closeTag(q) {
   return extOf(q) ? '<span class="close-tag" title="공식 종가 — 등락률·칸 색은 이 기준이고, 아래 시간외 줄의 등락은 이 종가 대비">정규장 종가</span>' : '';
 }
+// 큰 소식(78차) — 봇이 약 3시간마다 AI로 묶은 내 종목들의 큰 이슈(themes.json). 소식 이름·한 줄 요약·관련 종목(누르면 그 카드로 — '한눈에'의 누르기와 같음)·
+// 기사 링크. 36시간 넘었거나 비었으면 안 보임
+const THEME_STALE_MS = 36 * 3600e3;
+function themesHtml(th) {
+  const list = th && Array.isArray(th.items) && Number.isFinite(th.at) && Date.now() - th.at < THEME_STALE_MS ? th.items.filter((x) => x && x.title) : [];
+  if (!list.length) return '';
+  const nameOf = (c) => ((state.data && state.data.quotes) || []).find((q) => q && q.code === c)?.name || c;
+  const rows = list.map((x) => `<div class="theme">
+      <div class="th-title">${esc(x.title)}</div>
+      ${x.summary ? `<div class="th-sum">${esc(x.summary)}</div>` : ''}
+      ${Array.isArray(x.codes) && x.codes.length ? `<div class="th-codes"><span class="muted">관련</span> ${x.codes.map((c) => `<button type="button" class="th-code" data-code="${esc(c)}">${esc(nameOf(c))}</button>`).join('<span class="muted"> · </span>')}</div>` : ''}
+      ${Array.isArray(x.refs) && x.refs.length ? `<ul class="th-refs">${x.refs.map((r) => `<li>${extLink(r.link, r.t)} <span class="muted">${esc(r.src || '')}${r.ms ? `${r.src ? ' · ' : ''}${esc(newsTime({ pubMs: r.ms }))}` : ''}</span></li>`).join('')}</ul>` : ''}
+    </div>`).join('');
+  return `<div class="themes"><div class="why-head">큰 소식 <span class="muted">여러 종목에 걸친 이슈 · AI가 기사 제목으로 묶음 · ${esc(fmtAiTime(th.at))}</span></div>${rows}</div>`;
+}
 function renderBoard(groups, closed, measures) {
   const el = $('#board');
   if (!el) return;
@@ -1003,7 +1020,7 @@ function renderBoard(groups, closed, measures) {
     <div class="why">
       <div class="why-head">왜 움직였나 <span class="muted">±${WHY_MIN}% 이상 · 많이 움직인 순</span></div>
       ${rows || `<div class="why-none muted">오늘은 ±${WHY_MIN}% 넘게 움직인 종목이 없어요.</div>`}${more}
-    </div>`;
+    </div>${themesHtml(state.themes)}`;
   el.hidden = false;
 }
 

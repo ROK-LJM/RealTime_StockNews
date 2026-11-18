@@ -251,6 +251,18 @@ input::placeholder { color: var(--muted); }
 .why-more:hover { color: var(--text); }
 .why-more .ic { width: 16px; height: 16px; }
 .why-none { padding: 6px 0; font-size: 13px; }
+/* 큰 소식(78차) — '왜 움직였나' 아래, 여러 종목에 걸친 이슈. 관련 종목은 글자 버튼(누르면 그 카드로) */
+.themes { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+.theme { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.theme:last-child { border-bottom: 0; padding-bottom: 0; }
+.th-title { font-size: 14px; font-weight: 700; }
+.th-sum { margin-top: 2px; font-size: 13px; line-height: 1.5; color: var(--text-2); }
+.th-codes { margin-top: 4px; font-size: 12px; }
+.th-code { padding: 0; border: 0; background: none; color: var(--text); font: inherit; font-weight: 600; cursor: pointer;
+  text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 2px; }
+.th-code:hover { text-decoration-color: currentColor; }
+.th-refs { margin: 4px 0 0; padding-left: 16px; font-size: 12px; line-height: 1.6; }
+.th-refs a { color: inherit; }
 
 /* 코스피·코스닥 오늘의 이유 */
 .briefs { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }

@@ -1021,6 +1021,63 @@ export async function aiStockBriefs(list, now = Date.now()) {
   return out;
 }
 
+// ---------- 큰 소식(78차, 화면 '왜 움직였나' 아래) ----------
+// 11/18 사용자 요청 — '앤트로픽 상장 같은, 내 종목에 도움 되는 큰 정보'. 그 기사는 삼성전자·SK하이닉스·SK텔레콤·아마존·마이크로소프트 카드 뉴스에
+// 흩어져 다른 기사에 묻혔다. 내 종목들의 최근 이틀 기사 제목을 AI가 사건별로 묶고(최대 4개), 관련 종목은 AI가 아니라 고른 기사가 걸린 종목으로 정한다
+export const THEME_MAX = 4, THEME_HEADS = 70, THEME_REFRESH_MS = 3 * 3600e3;
+// 새로 묶을 때인가 — 직전 것이 없거나 3시간 지났고(시계가 거꾸로 가도 다시), 무료 한도 배분 몫이 2번 넘게 남을 때(1번은 종목 분석에 남긴다)
+export function themeDue(prev, now, room) {
+  const stale = !prev || !Number.isFinite(prev.at) || now - prev.at >= THEME_REFRESH_MS || now < prev.at;
+  return stale && room >= 2;
+}
+// 입력 기사 — 종목마다 최근 48시간 기사에서 원인 아닌 기사(CSR)·시세 안내(priceOnly)를 빼고, 같은 제목은 하나로(걸린 종목을 모음).
+// 여러 종목에 걸린 것 먼저, 그다음 최신순으로 THEME_HEADS개까지
+export function themeHeads(items, news, now) {
+  const by = new Map();
+  for (const it of items || []) {
+    for (const n of (news && news[it.code] && Array.isArray(news[it.code].items) ? news[it.code].items : [])) {
+      if (!n || !n.title || !Number.isFinite(n.pubMs) || now - n.pubMs > 48 * 3600e3 || n.pubMs > now + 3600e3) continue;
+      if (CSR_RE.test(n.title) || priceOnly(n.title)) continue;
+      const k = String(n.title).replace(/\s+/g, ' ').trim();
+      const h = by.get(k) || { t: k, codes: [], names: [], ms: n.pubMs, link: n.link || '', src: n.source || '' };
+      if (!h.codes.includes(it.code)) { h.codes.push(it.code); h.names.push(it.name || it.code); }
+      h.ms = Math.max(h.ms, n.pubMs);
+      by.set(k, h);
+    }
+  }
+  return [...by.values()].sort((a, b) => b.codes.length - a.codes.length || b.ms - a.ms).slice(0, THEME_HEADS);
+}
+// AI가 사건별로 묶는다 — 기사가 3건 미만이면 부르지 않음. 반환 { items: [{ title, summary, refs: [기사 번호] }], model } 또는 null
+export async function aiThemes(heads, now = Date.now()) {
+  if (!GEMINI_KEY || !Array.isArray(heads) || heads.length < 3) return null;
+  const list = heads.map((h, i) => `[${i + 1}] (${h.names.join('·')}) ${h.t}${Number.isFinite(h.ms) ? ` [${mdOf(ymdIn(h.ms, 'Asia/Seoul'))}]` : ''}`).join('\n');
+  const prompt =
+    `너는 증시 뉴스 편집자다(답은 한국어로). 아래는 내 보유 종목들의 최근 기사 제목이다 — 앞 괄호는 그 기사가 걸린 내 종목, 뒤 [월/일]은 기사 날짜.\n` +
+    `여러 종목에 함께 걸린 이슈, 또는 한 종목이라도 큰 일(상장·인수합병·실적 발표·경영진 교체·규제·조사·대형 계약)을 최대 ${THEME_MAX}개 '큰 소식'으로 묶어라.\n` +
+    `같은 사건을 다룬 기사끼리 묶고, 기사 제목에 있는 사실만으로 써라. ${outsideRule(now)}\n` +
+    `주가 등락만 알리는 시세 기사·주가 전망·목표주가·종목 추천 글로만 된 것은 빼라. 큰 소식이 없으면 빈 목록. 중요한 것부터.\n` +
+    `반드시 이 JSON만 출력: {"items":[{"title":"큰 소식 이름(20자 내외, 예: '앤트로픽 상장 추진')","summary":"무슨 일이고 내 종목에 어떤 의미인지 한 문장(70자 내외, 기사에 있는 내용만)","refs":[기사 번호]}]}\n\n` +
+    `기사 목록:\n${list}`;
+  const r = await geminiJSON(prompt);
+  const got = r && r.json && Array.isArray(r.json.items) ? r.json.items : null;
+  if (!got) return null;
+  const items = [];
+  for (const x of got) {
+    const refs = [...new Set((Array.isArray(x && x.refs) ? x.refs : []).map((n) => parseInt(n, 10)).filter((n) => n >= 1 && n <= heads.length))];
+    const title = String((x && x.title) || '').trim(), summary = String((x && x.summary) || '').trim().replace(/[.。]+$/, '');
+    if (title && refs.length) items.push({ title: title.slice(0, 40), summary: summary.slice(0, 160), refs });
+    if (items.length >= THEME_MAX) break;
+  }
+  return { items, model: r.model };
+}
+// 고른 기사 번호 → 관련 종목(그 기사들이 걸린 종목, 처음 나온 순)·기사 3건(최신순)
+export function themeOut(x, heads) {
+  const hs = x.refs.map((n) => heads[n - 1]).filter(Boolean);
+  const codes = [...new Set(hs.flatMap((h) => h.codes))];
+  const refs = [...hs].sort((a, b) => b.ms - a.ms).slice(0, 3).map((h) => ({ t: h.t, link: h.link, src: h.src, ms: h.ms }));
+  return { title: x.title, summary: x.summary, codes, refs };
+}
+
 // 지수 급등락 "핵심 이유" — 구글뉴스 헤드라인 + (키 있으면) AI 핵심 판단. (전 세계 접근 가능)
 // prev(직전 reason)의 AI 판단은 같은 방향(급락/급등/보합)일 때만 이어 쓴다 — 방향이 바뀌면 이유도 달라지므로.
 // aiSig = 그 판단을 만들 때의 입력(등락 1% 구간 + 헤드라인). 지금 입력과 비교해:
