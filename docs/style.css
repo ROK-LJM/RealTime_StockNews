@@ -231,6 +231,8 @@ input::placeholder { color: var(--muted); }
 /* 시간외 등락(미국 프리·애프터마켓, 국내 시간외 단일가) — 칸 아래 띠: 카드색 바탕에 방향색 글자라 칸 색(정규장)과 상관없이 읽힌다(79차) */
 .t-ext { align-self: stretch; margin: 5px -11px -8px; padding: 3px 11px 4px; border-radius: 0 0 10px 10px; background: var(--surface); color: var(--text-2);
   font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 띠 바탕은 카드색을 78%만 — 칸 색이 살짝 비쳐 칸 모양이 이어진다(밝은 화면에서 흰 띠가 바탕과 섞여 칸이 잘려 보였다). 못 쓰는 브라우저는 위의 카드색 그대로 */
+.t-ext { background: color-mix(in srgb, var(--surface) 78%, transparent); }
 .t-ext.up { color: var(--up-deep); }
 .t-ext.down { color: var(--down-deep); }
 .t-ext.halt { color: var(--warn); }
