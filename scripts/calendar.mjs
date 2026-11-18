@@ -249,6 +249,14 @@ export function parseNasdaqDividends(j) {
   return out;
 }
 
+// 미국 실적 발표일 합치기(75차) — 나스닥은 발표가 끝나면(때로는 발표 당일부터) 다음 분기 날짜를 주거나 날짜를 안 줘, 지난·당일 실적 일정이
+// 통째로 사라졌다(11/17 16:30 엔비디아 '실적 발표(미국 장 마감 뒤)'가 실제 발표 14시간 전에 빠짐 · MSFT·AMZN·AAPL·SMCI·PLUG도 날이 지나며 사라짐).
+// 받은 날짜는 그대로, 직전 일정 중 오늘(한국 날짜)까지의 것은 남기고(받은 날짜와 같은 날은 받은 것으로), 받은 날짜가 없으면 앞으로의 것도 남긴다
+export function mergeEarn(got, prevEarn, today) {
+  const days = new Set(got.map((e) => e.d));
+  return [...got, ...prevEarn.filter((e) => !days.has(e.d) && (e.d <= today || !got.length))];
+}
+
 // ---------- 달력 만들기 ----------
 const sameCodes = (prev, items) => Array.isArray(prev?.codes) && prev.codes.join(',') === items.map((it) => it.code).sort().join(',');
 // 다시 만들 때인가 — 없거나 3시간 지났거나 종목이 바뀜, 또는 본문 읽는 방식의 판이 바뀜(고친 것을 바로 반영)
@@ -350,27 +358,31 @@ export async function buildCalendar({ items, corpMap = null, prev = null, now })
   // 미국 — 종목마다 실적 발표일·배당(나스닥)을 따로 받는다. 실패한 쪽만 직전 일정, 자료가 없는 종목(400·404)은 일정 없음
   const us = items.filter((it) => it.market === 'US');
   let usFail = 0;
+  // 실적 발표일을 못 읽은 종목의 나스닥 문구·상태(75차 진단 — 다음 분기 날짜가 안 나오는 까닭을 커밋 기록으로 보려고)
+  const usDiag = [];
   await mapLimit(us, 3, async (it) => {
     const sym = encodeURIComponent(it.code);
     const get = async (path, parse) => {
       try { return parse(await nasdaq(path)); }
       catch (e) {
-        if (/HTTP 40[04]/.test(e.message)) return [];
+        if (/HTTP 40[04]/.test(e.message)) { if (path.startsWith('analyst/')) usDiag.push({ c: it.code, st: e.message }); return []; }
         console.error(`    미국 일정 실패(${it.code}):`, e.message);
         return null;
       }
     };
     const earn = await get(`analyst/${sym}/earnings-date`, (j) => {
       const x = parseNasdaqEarnings(j);
+      if (!x) usDiag.push({ c: it.code, a: String(j?.data?.announcement ?? '').slice(0, 90), r: String(j?.data?.reportText ?? '').replace(/\s+/g, ' ').trim().slice(0, 140) });
       return x ? [{ d: x.d, k: 'earn', t: x.est ? '실적 발표(예상일)' : '실적 발표',
         ...(x.when ? { s: x.when === 'amc' ? '미국 장 마감 뒤' : '미국 장 시작 전' } : {}), ...(x.est ? { est: true } : {}) }] : [];
     });
     const div = await get(`quote/${sym}/dividends?assetclass=stocks`, parseNasdaqDividends);
     if (!earn || !div) usFail++;
-    for (const [got, k] of [[earn, 'earn'], [div, 'div']]) {
-      if (got) { for (const e of got) if (inRange(e.d)) events.push({ ...e, ...base(it) }); }
-      else events.push(...keepPrev(it.code).filter((e) => e.k === k));
-    }
+    const prevOf = (k) => keepPrev(it.code).filter((e) => e.k === k);
+    if (earn) events.push(...mergeEarn(earn.filter((e) => inRange(e.d)).map((e) => ({ ...e, ...base(it) })), prevOf('earn'), today));
+    else events.push(...prevOf('earn'));
+    if (div) { for (const e of div) if (inRange(e.d)) events.push({ ...e, ...base(it) }); }
+    else events.push(...prevOf('div'));
   });
 
   const out = finalizeEvents(events);
@@ -378,5 +390,6 @@ export async function buildCalendar({ items, corpMap = null, prev = null, now })
   // 진단 — 이번에 못 찾은 것 + 직전 진단 중 아직 기억에 있는 것
   const keptDiag = sameV && Array.isArray(prev?.diag) ? prev.diag.filter((d) => d && Array.isArray(docs[d.no]) && !diag.some((x) => x.no === d.no)) : [];
   console.log(`  · 공시 일정: ${out.length}건(국내 ${krState}${newDocs ? ` · 본문 ${newDocs}건 새로(일정 나온 것 ${gotDocs}건)` : ''} · 미국 ${usState})`);
-  return { v: 1, pv: PARSER_V, at: now, codes: items.map((it) => it.code).sort(), kr: krState, us: usState, events: out, docs, diag: pickDiag([...diag, ...keptDiag]) };
+  return { v: 1, pv: PARSER_V, at: now, codes: items.map((it) => it.code).sort(), kr: krState, us: usState, events: out, docs, diag: pickDiag([...diag, ...keptDiag]),
+    ...(usDiag.length ? { usDiag: usDiag.sort((a, b) => a.c.localeCompare(b.c)) } : {}) };
 }

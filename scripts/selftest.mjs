@@ -3111,6 +3111,31 @@ await test('AI 지시(74차): 종합분석 진단도 짧게 끝맺기("…에 �
   const got = await src.aiStockBriefs([row('000001', 3), row('000002', -3)], T('2026-11-13T10:00:00+09:00'));
   assert.deepEqual(Object.values(got || {}).map((v) => v.headline), ['공급 계약에 상승', '시장 흐름 따라 하락'], '한 줄 진단도 끝 마침표 뗌');
 });
+await test('미국 실적 일정(75차): 나스닥이 다음 분기 날짜를 주거나 날짜를 안 줘도 지난·당일 실적 일정은 남김 · 날짜를 못 받으면 앞으로의 일정도 남김 · 받은 날과 같은 날은 받은 것으로 · 날짜를 못 읽으면 나스닥 문구를 진단으로', async () => {
+  const cal = await import('./calendar.mjs');
+  const e = (d, t = '실적 발표') => ({ d, k: 'earn', t, c: 'AAPL', n: '애플', m: 'US' });
+  const days = (l) => l.map((x) => x.d).sort();
+  assert.deepEqual(days(cal.mergeEarn([], [e('20261001'), e('20261015'), e('20261029')], '20261015')), ['20261001', '20261015', '20261029'], '날짜를 못 받으면 모두 남김');
+  assert.deepEqual(days(cal.mergeEarn([e('20270128')], [e('20261001'), e('20261015'), e('20261029')], '20261015')), ['20261001', '20261015', '20270128'], '다음 분기 날짜 — 지난·오늘 것은 남기고 앞으로의 옛 날짜는 버림');
+  assert.deepEqual(cal.mergeEarn([e('20261029')], [e('20261029', '실적 발표(예상일)')], '20261015').map((x) => x.t), ['실적 발표'], '같은 날은 받은 것으로');
+  assert.deepEqual(cal.mergeEarn([e('20261015')], [e('20261015', '실적 발표(예상일)')], '20261015').map((x) => x.t), ['실적 발표'], '오늘 날짜도 받은 것으로');
+  // 봇 — 직전 달력의 애플 실적 일정(지난 10/1·앞으로 10/29)이 나스닥이 날짜를 안 줘도 남고, 나스닥 문구를 진단으로
+  const items = [{ code: 'AAPL', market: 'US', name: '애플' }, { code: 'TSLA', market: 'US', name: '테슬라' }];
+  const root = workspace(items);
+  writeData(root, 'calendar.json', { v: 1, pv: cal.PARSER_V, at: NOW_KR - 4 * 3600e3, codes: ['AAPL', 'TSLA'], kr: 'off', us: 'ok', docs: {}, diag: [], events: [e('20261001'), e('20261029', '실적 발표(예상일)')] });
+  const noDate = (kind, sym) => (sym !== 'AAPL' ? text('not found', 404) : json(kind === 'earn' ? { data: { announcement: 'Earnings announcement for AAPL: N/A', reportText: 'No upcoming   earnings date' } } : NASDAQ_DIV));
+  await pipeline(root, { nasdaq: noDate }, NOW_KR, { calendar: true });
+  let c = read(root, 'calendar.json');
+  assert.deepEqual(c.events.filter((x) => x.c === 'AAPL' && x.k === 'earn').map((x) => x.d), ['20261001', '20261029'], '날짜를 못 받아도 지난·앞으로 일정 남김');
+  assert.deepEqual(c.usDiag, [{ c: 'AAPL', a: 'Earnings announcement for AAPL: N/A', r: 'No upcoming earnings date' }, { c: 'TSLA', st: 'HTTP 404' }], '진단 — 나스닥 문구·자료 없는 종목');
+  // 다음 분기 날짜(1/28)를 받으면 — 지난 10/1은 남고 앞으로의 옛 날짜(10/29)는 버림
+  writeData(root, 'calendar.json', { ...c, at: NOW_KR - 4 * 3600e3 });
+  const next = (kind, sym) => (sym !== 'AAPL' ? text('not found', 404) : json(kind === 'earn' ? { data: { announcement: 'Earnings announcement* for AAPL: Jan 28, 2027', reportText: 'expected* to report earnings on 01/28/2027 after market close.' } } : NASDAQ_DIV));
+  await pipeline(root, { nasdaq: next }, NOW_KR, { calendar: true });
+  c = read(root, 'calendar.json');
+  assert.deepEqual(c.events.filter((x) => x.c === 'AAPL' && x.k === 'earn').map((x) => x.d), ['20261001', '20270128']);
+  assert.deepEqual(c.usDiag, [{ c: 'TSLA', st: 'HTTP 404' }], '날짜를 읽은 종목은 진단에 없음');
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
