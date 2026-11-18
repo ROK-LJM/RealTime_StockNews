@@ -3288,6 +3288,19 @@ await test('한눈에 칸(79차): 시간외 가격이 있으면 큰 숫자 앞�
   assert.equal(appJs.split('${valid.length && !valid.every(preOf) ? `<span class="mgroup-updown">').length - 1, 2, '오른/내린 수 — 한눈에·카드 묶음');
   assert.ok(appJs.includes('const cmp = avg == null && !bench.length ? \'\' :') && appJs.includes('${avg == null ? \'\' : `평균 <b class="${dirClass(avg)}-c">${fmtPct(avg)}</b>`}'), '평균 없어도 예상 지수');
 });
+await test('시간외 시장 칸(80차): 국내 시세에 네이버 overMarketPriceInfo(넥스트레이드 프리·애프터마켓 등)를 그대로 남김 — 글자·숫자 칸은 그대로, 객체 칸은 name · 없으면 안 붙음', async () => {
+  const over = { tradingSessionType: 'PRE_MARKET', overMarketStatus: 'OPEN', overPrice: '71,500', compareToPreviousClosePrice: '1,500', fluctuationsRatio: '2.14',
+    compareToPreviousPrice: { code: '2', text: '상승', name: 'RISING' }, localTradedAt: '2026-10-15T08:40:00+09:00', tradeStopType: { code: '1', text: '운영', name: 'TRADING' }, list: [1, 2], nothing: null };
+  assert.deepEqual(src.overOf(over), { tradingSessionType: 'PRE_MARKET', overMarketStatus: 'OPEN', overPrice: '71,500', compareToPreviousClosePrice: '1,500', fluctuationsRatio: '2.14',
+    compareToPreviousPrice: 'RISING', localTradedAt: '2026-10-15T08:40:00+09:00', tradeStopType: 'TRADING' }, '글자·숫자 그대로 · 객체는 name · 목록·빈 값은 뺌');
+  assert.equal(src.overOf(null), null);
+  assert.equal(src.overOf({ a: null, b: [] }), null, '남길 칸이 없으면 없음');
+  const root = workspace();
+  await pipeline(root, { krExtra: { '005930': { overMarketPriceInfo: over } } });
+  const q = read(root, 'quotes.json').quotes;
+  assert.deepEqual(q.find((x) => x.code === '005930').over, src.overOf(over), '시세 파일에 남김');
+  assert.equal('over' in q.find((x) => x.code === '000660'), false, '칸이 없는 종목은 안 붙음');
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');

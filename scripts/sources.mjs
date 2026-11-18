@@ -76,6 +76,18 @@ async function resolveKR(code) {
   throw new Error(`한국 종목을 찾지 못함: ${code}`);
 }
 
+// 시간외 시장 칸(80차, 네이버 overMarketPriceInfo — 넥스트레이드 프리마켓 08:00~08:50·애프터마켓 등). 11/18 사용자 '한눈에 칸은 판단에 쓰니 명확해야' —
+// 개장 전 31칸이 모두 어제 종가(0%)라 판단할 거리가 없었다. 칸 이름·값의 뜻(장 구분·가격·등락 방향)을 실제 아침 값으로 확인한 뒤 표시를 정하려고 우선
+// 글자·숫자 칸은 그대로, 객체 칸은 name만 남긴다(11/06 응답에 tradingSessionType·overMarketStatus·overPrice·fluctuationsRatio·tradeStopType… 있음)
+export function overOf(o) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
+  const out = {};
+  for (const [k, v] of Object.entries(o)) {
+    if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') out[k] = v;
+    else if (v && typeof v === 'object' && !Array.isArray(v) && typeof v.name === 'string') out[k] = v.name;
+  }
+  return Object.keys(out).length ? out : null;
+}
 // 한국 종목 실시간 시세 (네이버 polling, 지연 0분). 미국 IP에서도 동작 확인됨.
 async function krStockNaver(code) {
   const j = await http(`https://polling.finance.naver.com/api/realtime/domestic/stock/${code}`, { as: 'json' });
@@ -97,6 +109,7 @@ async function krStockNaver(code) {
     // 정지 중엔 값이 멈춰 있다(멈추기 직전 가격). 평소엔 이 칸이 없다
     ...(d.tradeStopType?.name === 'HALTED' ? { halt: d.tradableStatusCode === 'marketOperationHalt' ? 'market' : 'stock', haltAt: d.tradableStatusUpdatedAt || null } : {}),
     asOf: d.localTradedAt || new Date().toISOString(),
+    ...(overOf(d.overMarketPriceInfo) ? { over: overOf(d.overMarketPriceInfo) } : {}),
   };
 }
 

@@ -668,6 +668,10 @@ const MUTANTS = [
   ["[한눈에] 개장 전도 평균에", A, " && !pendingOf(q) && !preOf(q)", " && !pendingOf(q)"],
   ["[한눈에] 개장 전 판단 틀림", A, "q.marketStatus === 'PREOPEN'); }", "q.marketStatus === 'CLOSE'); }"],
   ["[한눈에] 개장 전 오른/내린 수 보임", A, "        ${valid.length && !valid.every(preOf) ?", "        ${valid.length ?"],
+  // ---------- 80차 — 시간외 시장 칸 남기기 ----------
+  ["[시간외 시장] 시세에 안 남김", S, "    ...(overOf(d.overMarketPriceInfo) ? { over: overOf(d.overMarketPriceInfo) } : {}),", ""],
+  ["[시간외 시장] 객체 칸 name 안 씀", S, "!Array.isArray(v) && typeof v.name === 'string') out[k] = v.name;", "!Array.isArray(v) && typeof v.name === 'string') out[k] = v;"],
+  ["[시간외 시장] 빈 결과도 남김", S, "return Object.keys(out).length ? out : null;", "return out;"],
   ["[공시 방향] 화면 반대 공시도", A, " && !(dir && discDir(x.title) === -dir)", ""],
   ["[공시 방향] 화면 방향 안 넘김", A, "keyDiscToday(q.code, Math.sign(q.changePct || 0))", "keyDiscToday(q.code)"],
   ["[공시 방향] 봇 반대 공시도", F, " && discDir(x.title) !== -Math.sign(q.changePct)", ""],
