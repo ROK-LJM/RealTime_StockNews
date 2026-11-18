@@ -347,7 +347,7 @@ async function googleNews(query, ko, recentDays = 0, keep = null, keys = [], mor
   return items;
   };
   const pipe = (items) => {
-  let out = items.filter((it) => it.title && !SPAM_RE.test(it.title) && !QUOTE_PAGE_RE.test(it.title) && !HOLDINGS_RE.test(it.title) && (!keep || keep(it.title)));
+  let out = items.filter((it) => it.title && !SPAM_RE.test(it.title) && !QUOTE_PAGE_RE.test(it.title) && !HOLDINGS_RE.test(it.title) && !INSIDER_RE.test(it.title) && (!keep || keep(it.title)));
   if (recentDays > 0) {
     const cutoff = Date.now() - recentDays * 86400000;
     out = out.filter((it) => it.pubMs == null || it.pubMs >= cutoff);
@@ -439,6 +439,11 @@ export const QUOTE_PAGE_RE = /\b(?:stock\s+price|quote)\s*[,&]?\s*(?:news|quote|
 // 기관의 13F 보유 변동 공시 자동 기사(MarketBeat — 'Apple Inc. $AAPL Stock: Axxcess Wealth Management LLC Lowers Stake'·'2,311 Amazon.com, Inc. $AMZN Shares Sold by Gibson Capital LLC')
 // — 회사 소식이 아니라 분기 지분 신고라 뺀다. 11/02~11/10 미국 뉴스 칸 6,907개 중 470개(6.8%), 제목의 캐시태그($AMZN)로 가린다(48차)
 export const HOLDINGS_RE = /^(?=.*\$[A-Z]{1,5}\b).*\b(?:Stock|Shares?|Stake|Position|Holdings?)\b/;
+// 내부자 거래 보고(Form 4) 자동 기사(77차, Stock Titan·GuruFocus — 'Amazon (AMZN) director Brad D. Smith converts a stock award into shares held in trust'·
+// 'Super Micro Computer (SMCI) withholds 1,525 shares for taxes …'·'Microsoft (MSFT) CFO sells 5,912 and 1,393 shares under a prearranged trading plan')
+// — 임원 보상 주식 전환·세금 원천징수·계획 매도라 회사 소식이 아니다. 지난 7일 미국 기사 1,150건 중 15건이지만 몰려 나와 11/18 아마존 뉴스 8건 중 5건.
+// '(티커) 직함 … 거래 말 … shares/주식 수'만 — 'What Does Nvidia (NVDA) CEO Resignation Mean …'·'… executive says AI demand holds up into 2027'은 그대로
+export const INSIDER_RE = /\([A-Z]{1,5}\)\s+(?:(?:EVP|SVP|CEO|CFO|COO|CTO|director|executive|officer|insider|president|chair\w*|general\s+counsel)\b.{0,50}?\b(?:sells?|sold|buys?|bought|holds?|converts?|acquires?|exercises?|gifts?|delivers?|withh[oe]lds?)\b(?:.{0,40}?\b(?:shares?|stock\s+awards?)\b|\s+\d{1,3}(?:,\d{3})+)|withh[oe]lds?\b)|\bshares?\s+were\s+withheld\b|\btax\s+withholding\b/i;
 // 뉴스에서 흔히 쓰는 다른 이름(종목코드·티커별). 없는 종목은 이름·영문명·티커로만 판단.
 const NEWS_ALIAS = {
   '000660': ['하이닉스', '삼전닉스'], '010120': ['LS일렉트릭'], '329180': ['현대중공업'], '005380': ['현대자동차'],

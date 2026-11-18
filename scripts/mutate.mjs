@@ -635,6 +635,11 @@ const MUTANTS = [
   // ---------- 76차 — 정규장 종가 표시 ----------
   ["[정규장 종가] 안 붙임", A, "return extOf(q) ? '<span class=\"close-tag\"", "return false ? '<span class=\"close-tag\""],
   ["[정규장 종가] 카드에 안 씀", A, "</span>${closeTag(q)}", "</span>"],
+  // ---------- 77차 — 내부자 거래 보고 자동 기사 ----------
+  ["[자동 기사] 내부자 거래 받을 때 안 뺌", S, " && !INSIDER_RE.test(it.title)", ""],
+  ["[자동 기사] 내부자 원천징수 놓침", S, "|withh[oe]lds?\\b)|", ")|"],
+  ["[자동 기사] 내부자 주식 수 안 봄", S, "(?:.{0,40}?\\b(?:shares?|stock\\s+awards?)\\b|\\s+\\d{1,3}(?:,\\d{3})+)", ""],
+  ["[자동 기사] 내부자 거래 말 없어도 뺌", S, "\\b(?:sells?|sold|buys?|bought|holds?|converts?|acquires?|exercises?|gifts?|delivers?|withh[oe]lds?)\\b(?:", "\\b\\w+\\b(?:"],
   ["[공시 방향] 화면 반대 공시도", A, " && !(dir && discDir(x.title) === -dir)", ""],
   ["[공시 방향] 화면 방향 안 넘김", A, "keyDiscToday(q.code, Math.sign(q.changePct || 0))", "keyDiscToday(q.code)"],
   ["[공시 방향] 봇 반대 공시도", F, " && discDir(x.title) !== -Math.sign(q.changePct)", ""],

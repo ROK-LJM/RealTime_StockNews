@@ -3150,6 +3150,27 @@ await test('정규장 종가 표시(76차): 시간외 줄이 있으면 큰 등�
   assert.equal(g.closeTag({ ok: true, market: 'US', marketStatus: 'CLOSE' }), '', '시간외 가격이 없으면 안 붙음');
   assert.ok(appJs.includes('(${fmtPct(q.changePct)})</span>${closeTag(q)}\n    </div>\n    ${extRow(q)}') || appJs.includes('(${fmtPct(q.changePct)})</span>${closeTag(q)}\r\n    </div>\r\n    ${extRow(q)}'), '카드 큰 등락 바로 옆');
 });
+await test('뉴스(77차): 미국 내부자 거래 보고(Form 4) 자동 기사(임원 보상 주식 전환·세금 원천징수·계획 매도)는 받을 때 뺌 · 직함만 나오는 보통 기사는 그대로', async () => {
+  const real = ['Amazon (AMZN) executive converts 9,352 stock awards and sells shares under a trading plan.', 'Amazon (AMZN) director Brad D. Smith converts a stock award into shares held in trust.',
+    'Amazon (AMZN) director Edith W. Cooper holds 10,264 shares after stock award conversion.', 'Amazon (AMZN) director holds 55,204 shares after converting a stock award.',
+    'Microsoft (MSFT) EVP Amy Coleman delivers or withholds 89 shares for exercise price or tax liability.', 'Super Micro Computer (SMCI) withholds executive shares for taxes at $27.79 each.',
+    'Tax withholding at $27.79 a share at Super Micro Computer (SMCI) involved no market sales.', "Super Micro Computer (SMCI) withholds shares from its CEO's spouse for taxes, not a market trade.",
+    "214 shares were withheld for taxes in a Super Micro Computer (SMCI) executive's stock settlement.", 'Microsoft (MSFT) EVP and CFO Amy Hood Sells 7,305 Shares',
+    'After buying 1,715 shares, Super Micro Computer (SMCI) director Scott Angel holds 8,770.', 'Microsoft (MSFT) CFO sells 5,912 and 1,393 shares under a prearranged trading plan.'];
+  for (const t of real) assert.equal(src.INSIDER_RE.test(t), true, '내부자 거래: ' + t);
+  for (const t of ['What Does Nvidia (NVDA) CEO Resignation Mean For Its AI Leadership?', 'Amazon Stock (AMZN) Falls 1.7% on Anthropic IPO Filing (Nov 11)', 'Nvidia (NVDA) CEO Jensen Huang resigns amid board probe',
+    'Microsoft (MSFT) executive says AI demand holds up into 2027', 'Tesla (TSLA) director warns on robotaxi timeline as shares slide', 'Nvidia interim-CEO Colette Kress speaks on quarterly revenue hitting $116B'])
+    assert.equal(src.INSIDER_RE.test(t), false, '보통 기사: ' + t);
+  // 봇 — 받을 때 뺀다
+  const item = (t, i) => '<item><title>' + t + ' - Stock Titan</title><link>https://news.example.com/f' + i + '</link><pubDate>' + RSS_PUB + '</pubDate><source url="https://news.example.com">Stock Titan</source></item>';
+  const feed = (ts) => text('<?xml version="1.0"?><rss><channel>' + ts.map(item).join('') + '</channel></rss>');
+  const root = workspace();
+  await pipeline(root, { news: (m, u) => (/AAPL/.test(new URL(u).searchParams.get('q'))
+    ? feed(['Apple (AAPL) director Art Levinson sells 90,000 shares under a trading plan.', 'Apple (AAPL) withholds 12,000 shares for taxes on RSU vesting.', 'Apple (AAPL) wins EU approval for new chip plant', 'AAPL shares rise on iPhone demand'])
+    : text(rss('', queryName(u)))) });
+  const titles = (read(root, 'news.json').AAPL?.items || []).map((x) => x.title);
+  assert.deepEqual(titles.sort(), ['AAPL shares rise on iPhone demand', 'Apple (AAPL) wins EU approval for new chip plant'], titles.join(' / '));
+});
 await test('AI 분석 대기 안내(app.js): 상태별 [지금 상태, 이유] · 순서 대기면 다음 분석 시각 · 키가 없거나 상태를 모르면 안내 안 함', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
