@@ -3238,6 +3238,28 @@ await test('큰 소식(78차, 봇): 내 종목들의 최근 48시간 기사(원�
   assert.equal(themeCalls(), 0, '꺼 두면 안 부름');
   assert.equal(fs.existsSync(path.join(r3, 'docs', 'data', 'themes.json')), false);
 });
+await test('큰 소식(87차): 지시문 — 같은 사건이면 다른 내 종목 기사도 모두 refs에(관련 종목은 고른 기사로 정해짐)·여러 종목 소식부터 · 저장은 관련 종목이 많은 소식부터(같으면 AI 순서)', async () => {
+  src.resetState(); src.setAiBudget(null);
+  const now = T('2026-11-13T10:00:00+09:00');
+  const n = (title, h) => ({ title, pubMs: now - h * 3600e3, link: 'https://news.example.com/' + encodeURIComponent(title), source: '테스트일보' });
+  const heads = src.themeHeads([{ code: '005930', name: '삼성전자', market: 'KR' }, { code: '000660', name: 'SK하이닉스', market: 'KR' }],
+    { '005930': { items: [n('삼성전자 새 공장 착공', 1), n('엔비디아 호실적에 삼성전자 상승', 2)] }, '000660': { items: [n('SK하이닉스, 엔비디아 호실적에 급등', 2)] } }, now);
+  NET.routes = routes({ gemini: () => json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ items: [] }) }] } }] }) }); NET.calls = []; NET.bodies = []; NET.blocked = [];
+  await src.aiThemes(heads, now);
+  const prompt = JSON.parse(NET.bodies.find((b, i) => isGemini(NET.calls[i]))).contents[0].parts[0].text;
+  assert.ok(prompt.includes('다른 내 종목에 걸린 기사도 같은 사건이면 모두 refs에 넣을 것') && prompt.includes('관련 종목은 고른 기사가 걸린 종목으로 정해진다'), '같은 사건의 다른 종목 기사도: ' + prompt);
+  assert.ok(prompt.includes('여러 내 종목에 걸친 소식부터'), '여러 종목 소식부터');
+  // 봇 — 관련 종목이 많은 소식부터 저장(같으면 AI 순서)
+  const t0 = T('2026-11-13T10:07:00+09:00');
+  const nn = (title, h) => ({ title, pubMs: t0 - h * 3600e3, link: 'https://news.example.com/' + encodeURIComponent(title), source: '테스트일보' });
+  const r = workspace();
+  writeData(r, 'news.json', { '005930': { ok: true, items: [nn('앤트로픽 IPO 기대감에 삼성전자·SK하이닉스 상승', 2), nn('삼성전자 새 공장 착공', 1)] },
+    '000660': { ok: true, items: [nn('앤트로픽 IPO 기대감에 삼성전자·SK하이닉스 상승', 2), nn('SK하이닉스 HBM4 양산', 5)] }, AAPL: { ok: true, items: [nn('Apple AAPL supplier deal expands', 1)] } });
+  const three = { items: [{ title: '한 종목 소식', summary: '공장', refs: [2] }, { title: '여러 종목 소식', summary: '앤트로픽', refs: [1, 3] }, { title: '또 한 종목 소식', summary: 'HBM', refs: [4] }] };
+  const route = () => json(NET.bodies.at(-1).includes("'큰 소식'") ? { candidates: [{ content: { parts: [{ text: JSON.stringify(three) }] } }] } : geminiOk);
+  await pipeline(r, { gemini: route }, t0, { refreshAll: false, themes: true });
+  assert.deepEqual(read(r, 'themes.json').items.map((x) => `${x.title}:${x.codes.length}`), ['여러 종목 소식:3', '한 종목 소식:1', '또 한 종목 소식:1'], '관련 종목이 많은 소식부터 · 같으면 AI 순서');
+});
 await test('큰 소식(78차, 화면): 소식 이름·한 줄 요약·관련 종목(누르면 그 카드로)·기사 링크(출처·시각) · 36시간 넘었거나 비었으면 안 보임 · "왜 움직였나" 아래', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');

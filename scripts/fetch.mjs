@@ -474,7 +474,8 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
       const heads = themeHeads(items, news, now);
       const got = await aiThemes(heads, now);
       if (got) {
-        write('themes.json', { at: now, model: got.model, items: got.items.map((x) => themeOut(x, heads)) });
+        // 관련 종목이 많은 소식부터(87차 — 같으면 AI가 고른 순서): 11/18 첫 큰 소식은 한 종목 소식(삼성전기 공급 계약)이 맨 앞이었다
+        write('themes.json', { at: now, model: got.model, items: got.items.map((x) => themeOut(x, heads)).sort((a, b) => b.codes.length - a.codes.length) });
         console.log(`  · 큰 소식 ${got.items.length}건(기사 ${heads.length}건에서)`);
       }
     }
