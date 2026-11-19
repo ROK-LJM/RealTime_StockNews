@@ -870,7 +870,11 @@ const MUTANTS = [
   ["[자동 기사] 내부자 'At $… apiece' 놓침", S, R`|^At\s+\$[\d.,]+\s+(?:apiece|a\s+share|per\s+share|each),.{0,60}\b(?:sold|bought|sells|buys)\s+[\d,]+\s+shares\b`, ''],
   ["[자동 기사] 내부자 계획 매도 놓침", S, R`|\b(?:sell|selling|sells|sale\s+of)\s+[\d,]+\s+(?:[A-Z][\w.&-]*\s+){0,4}(?:\([A-Z]{1,5}\)\s+)?shares\s+(?:under|pursuant\s+to)\s+(?:a\s+)?(?:pre-?arranged\s+)?(?:trading\s+plan|rule\s+10b5-1)`, ''],
   ["[자동 기사] 내부자 계획 매도 회사 이름 놓침", S, R`(?:[A-Z][\w.&-]*\s+){0,4}(?:\([A-Z]{1,5}\)\s+)?shares\s+(?:under`, R`shares\s+(?:under`],
-  ["[자동 기사] 내부자 '$… in 티커 shares' 놓침", S, R`|\b(?:director|officer|CEO|CFO|COO|EVP|SVP|president|chair\w*)\s+(?:[A-Z][\w.'-]+\s+){1,3}(?:buys|sells|bought|sold)\s+\$[\d,.]+[KMB]?\s+(?:(?:in|of|worth\s+of)\s+)?[A-Z]{1,5}\s+(?:shares|stock)\b`, ''],
+  ["[자동 기사] 내부자 '$… in 티커 shares' 놓침", S, R`|\b(?:director|officer|insider|CEO|CFO|COO|CTO|CSO|CAO|CLO|CMO|EVP|SVP|VP|president|chair\w*|general\s+counsel)\b[^$]{0,60}\b(?:buys|sells|bought|sold)\s+\$\d{1,3}(?:,\d{3})+(?:\.\d+)?\s+(?:in|of|worth\s+of)\s+(?:[A-Z]{1,5}\s+)?(?:shares|stock)\b`, ''],
+  ["[자동 기사] 내부자 금액 콤마 안 봄", S, R`(?:buys|sells|bought|sold)\s+\$\d{1,3}(?:,\d{3})+(?:\.\d+)?\s+(?:in|of|worth\s+of)`, R`(?:buys|sells|bought|sold)\s+\$[\d,.]+[KMB]?\s+(?:in|of|worth\s+of)`],
+  ["[자동 기사] 내부자 금액 앞 직함 안 봄", S, R`|\b(?:director|officer|insider|CEO|CFO|COO|CTO|CSO|CAO|CLO|CMO|EVP|SVP|VP|president|chair\w*|general\s+counsel)\b[^$]{0,60}\b(?:buys|sells|bought|sold)\s+\$\d`, R`|\b(?:buys|sells|bought|sold)\s+\$\d`],
+  ["[자동 기사] 내부자 'CSO' 직함 놓침", S, R`|CEO|CFO|COO|CTO|CSO|CAO|CLO|CMO|EVP|SVP|VP|president`, R`|CEO|CFO|COO|CTO|CAO|CLO|CMO|EVP|SVP|VP|president`],
+  ["[자동 기사] 내부자 'in stock'(티커 없음) 놓침", S, R`(?:in|of|worth\s+of)\s+(?:[A-Z]{1,5}\s+)?(?:shares|stock)\b`, R`(?:in|of|worth\s+of)\s+[A-Z]{1,5}\s+(?:shares|stock)\b`],
   ["[자동 기사] 내부자 'Insider trades:' 놓침", S, R`|^Insider\s+trades?:/i;`, R`/i;`],
 ];
 

@@ -3199,11 +3199,11 @@ await test('뉴스(93차): 미국 시세 페이지·내부자 거래 자동 기�
   const real = ['Apple(AAPL.US) Director Sells US$31.77 Million in Common Stock', 'Plug Power (NASDAQ:PLUG) Stock: Insider Benjamin Haycraft Sells 13,312 Shares',
     'An Apple (AAPL) director gave away 50,000 shares the same day he sold stock.', 'At $1.10 apiece, Benjamin Haycraft sold 13,312 shares of Plug Power (PLUG) on Nov. 16.',
     'Officer Benjamin Haycraft proposes selling 13,312 Plug Power (PLUG) shares under a trading plan.', 'Plug Power Officer Benjamin Haycraft Announces Intent to Sell 13,312 Shares Under Rule 10b5-1 Plan',
-    'Super Micro director Scott Angel buys $49,940 in SMCI shares', 'Insider trades: Microsoft, Netflix, Boeing among notable names (BA:NYSE)'];
+    'Super Micro director Scott Angel buys $49,940 in SMCI shares', 'Plug Power CSO & GM EMEA Benjamin Haycraft sells $14,643 in stock', 'Insider trades: Microsoft, Netflix, Boeing among notable names (BA:NYSE)'];
   for (const t of real) assert.equal(src.INSIDER_RE.test(t), true, '내부자 거래: ' + t);
   for (const t of ['Nvidia director sold nearly $1B in stock weeks before the Jensen Huang scandal broke — and no trading plan was flagged', "Billionaire Bill Ackman Sold 2 Million Shares of Microsoft Stock. But Here's Why He Says He's Still Bullish",
     'Pershing Square remains bullish on Microsoft despite selling 2M shares', 'Berkshire Hathaway sold 10,000,000 shares of Apple (AAPL) in the third quarter', 'Apple (AAPL) Puts Tim Cook At The Center Of A Surprise CEO Search',
-    'Elon Musk, Tom Lee, Shopify CEO Sign ‘Stand With Jensen’ Petition To Reinstate Him As Nvidia CEO'])
+    'Elon Musk, Tom Lee, Shopify CEO Sign ‘Stand With Jensen’ Petition To Reinstate Him As Nvidia CEO', 'Tesla CEO Elon Musk sells $5B in Tesla stock', 'Billionaire investor sells $12,500 in AAPL shares after rally'])
     assert.equal(src.INSIDER_RE.test(t), false, '보통 기사: ' + t);
   // 봇 — 받을 때 뺀다
   const item = (t, i) => '<item><title>' + t + ' - Moomoo</title><link>https://news.example.com/g' + i + '</link><pubDate>' + RSS_PUB + '</pubDate><source url="https://news.example.com">Moomoo</source></item>';
