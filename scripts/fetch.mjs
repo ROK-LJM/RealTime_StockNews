@@ -532,7 +532,8 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
           const ix = idxOfQuote(q);
           const mk = ix && Math.abs(ix.pct) >= 1 && Math.sign(q.changePct) === Math.sign(ix.pct) && Math.abs(q.changePct) < Math.abs(ix.pct) + 1 ? ix : null;
           const mkWhy = mk ? { r: `${mk.name} ${mk.pct >= 0 ? '+' : ''}${mk.pct.toFixed(2)}% 흐름 — 종목만의 이유 기사 없음`, s: 'mkt' } : null;
-          const why = a && a.headline && Number.isFinite(a.at) && ymdIn(a.at, tz) >= day ? { r: a.headline, s: 'ai' }
+          // AI 진단 끝말은 그날 등락에 맞춰(89차 — 진단은 만들 때 등락으로 맞추는데 그 뒤 등락이 줄면 '+3.31% … 급등'처럼 어긋났다) — 회차마다 다시 써서 마감 등락이 기준
+          const why = a && a.headline && Number.isFinite(a.at) && ymdIn(a.at, tz) >= day ? { r: toneTail(a.headline, q.changePct), s: 'ai' }
             : d ? { r: `[${d.tag || '공시'}] ${d.title}`, s: 'disc' } : n && (!mk || strongNews(n, q.changePct, names)) ? { r: n.title, s: 'news' }
             : mkWhy || (n ? { r: n.title, s: 'news' } : dMinor ? { r: `[${dMinor.tag || '공시'}] ${dMinor.title}`, s: 'disc' } : { r: '', s: '' });
           const old = i >= 0 ? list[i] : null;

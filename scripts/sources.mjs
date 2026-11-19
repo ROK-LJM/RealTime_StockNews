@@ -1109,11 +1109,15 @@ export async function aiThemes(heads, now = Date.now(), ahead = 0) {
   }
   return { items, model: r.model };
 }
-// 고른 기사 번호 → 관련 종목(그 기사들이 걸린 종목, 처음 나온 순)·기사 3건(최신순)
+// 고른 기사 번호 → 관련 종목(그 기사들이 걸린 종목, 처음 나온 순)·기사 3건(최신순) — 관련 종목마다 그 종목에 걸린 가장 새 기사를 먼저 고르고 남은 자리는 새 기사순
+// (89차 — 11/19 아침 '아마존, 앤트로픽 투자 가치 부각'의 관련 종목에 삼성전기가 있는데 기사 3건이 모두 아마존 영어 기사라 왜 걸렸는지 안 보였다)
 export function themeOut(x, heads) {
   const hs = x.refs.map((n) => heads[n - 1]).filter(Boolean);
   const codes = [...new Set(hs.flatMap((h) => h.codes))];
-  const refs = [...hs].sort((a, b) => b.ms - a.ms).slice(0, 3).map((h) => ({ t: h.t, link: h.link, src: h.src, ms: h.ms }));
+  const byNew = [...hs].sort((a, b) => b.ms - a.ms), pick = [];
+  for (const c of codes) if (pick.length < 3 && !pick.some((h) => h.codes.includes(c))) pick.push(byNew.find((h) => h.codes.includes(c)));
+  for (const h of byNew) if (pick.length < 3 && !pick.includes(h)) pick.push(h);
+  const refs = pick.sort((a, b) => b.ms - a.ms).map((h) => ({ t: h.t, link: h.link, src: h.src, ms: h.ms }));
   return { title: x.title, summary: x.summary, codes, refs };
 }
 

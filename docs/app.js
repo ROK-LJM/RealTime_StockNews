@@ -928,7 +928,7 @@ function keyDiscToday(code, dir = 0) {
 function whyOf(q) {
   const a = state.analysis[q.code];
   // 전날 분석·AI를 꺼 둔 종목이면 오늘 공시·뉴스로 · 한 줄 진단만 있으면(60차) 출처 'AI 간단'
-  if (q.ai !== false && a && a.headline && aiFresh(q, a)) return { src: a.lite ? 'AI 간단' : 'AI', label: a.lite ? 'AI 한 줄 진단(여러 종목을 한 번에 본 것 — 종합분석 전)' : 'AI 진단', text: a.headline };
+  if (q.ai !== false && a && a.headline && aiFresh(q, a)) return { src: a.lite ? 'AI 간단' : 'AI', label: a.lite ? 'AI 한 줄 진단(여러 종목을 한 번에 본 것 — 종합분석 전)' : 'AI 진단', text: toneTail(a.headline, q.changePct) };
   const d = keyDiscToday(q.code, Math.sign(q.changePct || 0)), disc = d && { src: '공시', label: '오늘 주요 공시', text: `[${d.tag || '공시'}] ${d.title}` };
   if (d && !MINOR_DISC_RE.test(d.title)) return disc;
   const m = marketOf(q), at = +new Date(q.asOf), day = Number.isFinite(at) ? marketYmd(at, m) : '';
@@ -937,6 +937,13 @@ function whyOf(q) {
   const nd = n && Number.isFinite(n.pubMs) && day ? marketYmd(n.pubMs, m) : '';
   if (n) return { src: '뉴스', label: '최근 뉴스', text: n.title, item: n, ...(nd && nd !== day ? { day: `${+nd.slice(4, 6)}/${+nd.slice(6, 8)}` } : {}) };
   return disc || null; // 정정·자회사 공시는 맞는 뉴스가 없을 때만
+}
+// 진단 끝말을 지금 등락 폭에 맞춘다(89차 — 봇 scripts/sources.mjs toneTail과 같은 규칙, 자체 테스트가 비교). 진단은 만들 때 등락으로 끝말을 맞추는데(86차)
+// 그 뒤 등락이 줄면 '+3.31% … 급등'처럼 어긋났다(11/19 10:45 한 줄 진단 — 샌즈랩 +6.08%·유진로봇 -5.44%였다가 +3.31%·-4.59%).
+// 5% 안쪽이면 끝의 '급등·급락(세)'만 '상승·하락(세)'으로 — 그날 진단에만 쓴다(지난 거래일 진단은 그날 등락의 말)
+function toneTail(h, pct) {
+  const s = String(h ?? '');
+  return Number.isFinite(pct) && Math.abs(pct) < 5 ? s.replace(/급(등|락)(세)?$/, (m, a, b) => (a === '등' ? '상승' : '하락') + (b || '')) : s;
 }
 // '왜 움직였나' 한 줄의 이유 칸 — '시장 따라' 표시 + 이유(출처 · 그 종목 거래일 기사가 아니면 날짜). 이유가 없거나 시장 흐름이 더 나은 설명이면
 // 시장 흐름(시장 따라 · 시장보다 덜 움직임 — 31차) 또는 '아직 이유 정보가 없어요'
@@ -1019,7 +1026,7 @@ function extWhyOf(q) {
 // 시간외 움직임의 이유 — AI 애프터마켓 진단 → 정규장 마감 뒤 기사 중 시간외 방향과 같은 방향 기사(시세 안내·원인 아닌 기사 빼고, pickReasonNews) → 없음. 미국 종목만
 function extReason(q) {
   const a = extWhyOf(q);
-  if (a) return { src: 'AI', label: 'AI 애프터마켓 진단(정규장 마감 뒤 기사로)', text: a.text, at: a.at };
+  if (a) return { src: 'AI', label: 'AI 애프터마켓 진단(정규장 마감 뒤 기사로)', text: toneTail(a.text, extOf(q).changePct), at: a.at }; // 끝말은 지금 시간외 등락에(89차)
   const x = marketOf(q) === 'US' ? extOf(q) : null, qt = Date.parse(q && q.asOf), s = Math.sign((x && x.changePct) || 0);
   if (!x || !s || !Number.isFinite(qt)) return null;
   const names = reasonNames(q);
@@ -1217,10 +1224,11 @@ function renderAnalysis(q, data) {
   // 지난 거래일에 만든 분석(장이 새로 열렸는데 아직 새 분석 전) — 배지에 그날 날짜를 주황으로
   const oldYmd = aiFresh(q, data) ? '' : marketYmd(data.at, marketOf(q));
   const oldMd = oldYmd ? `${+oldYmd.slice(4, 6)}/${+oldYmd.slice(6, 8)}` : '';
+  const head = oldMd ? data.headline : toneTail(data.headline, q.changePct); // 그날 진단은 끝말을 지금 등락에 맞춤(89차)
   // 한 줄 진단만 있을 때(60차 — 여러 종목을 AI 한 번에 묶어 받은 진단) — 펼칠 내용이 없어 'AI 간단' 배지와 진단 한 줄만. 종합분석 차례가 오면 바뀐다
   if (data.lite) {
     const tip = `여러 종목을 AI 한 번에 묶어 받은 한 줄 진단${fmtAiTime(data.at) ? `(${fmtAiTime(data.at)})` : ''}${oldMd ? ` — 지난 거래일(${oldMd}) 것` : ''}. 종합분석은 AI 차례가 오면 바뀌어요. 투자조언이 아닙니다.`;
-    el.innerHTML = `<div class="an-lite ${dirCls}" title="${esc(tip)}"><span class="an-badge${oldMd ? ' old' : ''}">AI 간단${oldMd ? ` · ${oldMd}` : ''}</span><span class="an-head">${esc(data.headline)}</span></div>`;
+    el.innerHTML = `<div class="an-lite ${dirCls}" title="${esc(tip)}"><span class="an-badge${oldMd ? ' old' : ''}">AI 간단${oldMd ? ` · ${oldMd}` : ''}</span><span class="an-head">${esc(head)}</span></div>`;
     el.classList.toggle('open', false);
     return;
   }
@@ -1235,7 +1243,7 @@ function renderAnalysis(q, data) {
   const wasOpen = state.openAnalysis.has(q.code); // 새로고침 전에 펼쳐 뒀다면 그대로 유지
   el.innerHTML = `<button class="an-toggle ${dirCls}" type="button" aria-expanded="${wasOpen}">
       ${badge}
-      <span class="an-head">${esc(data.headline)}</span>
+      <span class="an-head">${esc(head)}</span>
       <span class="an-caret"><svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></span>
     </button>
     <div class="an-detail"${wasOpen ? '' : ' hidden'}>${detail}</div>`;

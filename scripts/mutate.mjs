@@ -665,6 +665,16 @@ const MUTANTS = [
   ["[큰 소식] 저장 순서 안 바꿈", F, ".sort((a, b) => b.codes.length - a.codes.length) });", " });"],
   ["[큰 소식] 다른 종목 기사 묶기 지시 없음", S, " — 다른 내 종목에 걸린 기사도 같은 사건이면 모두 refs에 넣을 것(관련 종목은 고른 기사가 걸린 종목으로 정해진다. 예: 한 회사의 실적 발표면 그 회사 기사와 '○○, △△ 호실적에 급등'처럼 그 소식에 움직인 다른 종목 기사까지)", ""],
   ["[큰 소식] 여러 종목 소식부터 지시 없음", S, "여러 내 종목에 걸친 소식부터, 그다음 중요한 것.", "중요한 것부터."],
+  // ---------- 89차 — 진단 끝말 지금 등락 · 큰 소식 기사 ----------
+  ["[끝말] 화면 왜 움직였나 지금 등락 안 봄", A, "text: toneTail(a.headline, q.changePct) };", "text: a.headline };"],
+  ["[끝말] 화면 카드 지금 등락 안 봄", A, "const head = oldMd ? data.headline : toneTail(data.headline, q.changePct);", "const head = data.headline;"],
+  ["[끝말] 화면 지난 진단도 바꿈", A, "const head = oldMd ? data.headline : toneTail(data.headline, q.changePct);", "const head = toneTail(data.headline, q.changePct);"],
+  ["[끝말] 화면 애프터 지금 등락 안 봄", A, "text: toneTail(a.text, extOf(q).changePct), at: a.at }", "text: a.text, at: a.at }"],
+  ["[끝말] 화면 5% 기준 없음", A, "Number.isFinite(pct) && Math.abs(pct) < 5 ?", "Number.isFinite(pct) ?"],
+  ["[끝말] 기록 그날 등락 안 봄", F, "{ r: toneTail(a.headline, q.changePct), s: 'ai' }", "{ r: a.headline, s: 'ai' }"],
+  ["[큰 소식] 관련 종목 기사 안 챙김", S, "  for (const c of codes) if (pick.length < 3 && !pick.some((h) => h.codes.includes(c))) pick.push(byNew.find((h) => h.codes.includes(c)));", ""],
+  ["[큰 소식] 기사 3건 넘게", S, "for (const h of byNew) if (pick.length < 3 && !pick.includes(h)) pick.push(h);", "for (const h of byNew) if (!pick.includes(h)) pick.push(h);"],
+  ["[큰 소식] 기사 새 순서 아님", S, "const refs = pick.sort((a, b) => b.ms - a.ms).map(", "const refs = pick.map("],
   // ---------- 88차 — 아침 큰 소식 ----------
   ["[아침 큰 소식] 아침 칸 안 봄", S, "return old && early >= 1 && themeMorning(now);", "return old && early >= 1;"],
   ["[아침 큰 소식] 앞당긴 몫 안 봄", S, "return old && early >= 1 && themeMorning(now);", "return old && themeMorning(now);"],

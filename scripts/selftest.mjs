@@ -3570,6 +3570,56 @@ await test('진단 끝말(86차): 5% 안쪽 움직임의 끝 "급등·급락(세
   assert.deepEqual([a3['005380']?.lite, a3['005380']?.headline, a3['035720']?.lite, a3['035720']?.headline], [true, '005380 수주 기대에 급등', true, '035720 수주 기대에 상승'],
     '한 줄 진단 — 현대차 +6% 그대로 · 카카오 +4% 상승: ' + JSON.stringify(a3));
 });
+await test('진단 끝말 — 지금 등락(89차): 화면("왜 움직였나"·카드·애프터 줄)은 그날 진단의 끝말을 지금 등락에 맞춤(지난 거래일 진단은 그대로) · 지난 급등락 기록도 그날 등락으로 · 화면 규칙 = 봇 규칙', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const line = (k) => appJs.slice(appJs.indexOf(k), appJs.indexOf('\n', appJs.indexOf(k)));
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const ra = appJs.slice(appJs.indexOf('function renderAnalysis('), appJs.indexOf('// 수급 날짜 표시'));
+  const why = appJs.slice(appJs.indexOf('function whyOf('), appJs.indexOf('function tileHtml('));
+  const el = { innerHTML: '', classList: { toggle() {} }, querySelector: () => ({ addEventListener() {} }) };
+  const ctx = { document: { getElementById: () => el }, state: { analysis: {}, news: {}, status: null, openAnalysis: new Set() }, keyDiscToday: () => null,
+    fmtAiTime: () => '10:45', fmtNextAt: () => '', basisOf: () => '뉴스', WHY_MIN: 2 };
+  const f = vm.runInNewContext([line('function cssId('), line('function esc('), block, ra, why].join('\n') + '; ({ renderAnalysis, whyOf, toneTail })', ctx);
+  // 화면 규칙 = 봇 규칙
+  for (const [h, p] of [['…선보여 급등', 3.31], ['…공시에 급락', -4.59], ['…급락세', -2], ['…급등', 6.08], ['…급등', -5], ['단기 급등에 따른 하락', -3], ['…급등', NaN], ['', 1]])
+    assert.equal(f.toneTail(h, p), src.toneTail(h, p), `화면 = 봇: ${h} ${p}`);
+  // 왜 움직였나 · 카드 — 그날 진단(10:45 +6.08%에 만든 '…급등')은 지금 +3.31%면 '…상승'
+  const q = { code: 'A', name: '샌즈랩', market: 'KR', ok: true, changePct: 3.31, asOf: '2026-11-19T11:20:00+09:00' };
+  const lite = { headline: 'AI 보안 플랫폼 선보여 급등', lite: true, at: T('2026-11-19T10:45:00+09:00') };
+  ctx.state.analysis.A = lite;
+  assert.equal(f.whyOf(q).text, 'AI 보안 플랫폼 선보여 상승', '왜 움직였나');
+  f.renderAnalysis(q, lite);
+  assert.ok(el.innerHTML.includes('<span class="an-head">AI 보안 플랫폼 선보여 상승</span>'), '카드(한 줄 진단): ' + el.innerHTML);
+  f.renderAnalysis(q, { headline: '실적 기대에 급등', summary: '요약', at: lite.at });
+  assert.ok(el.innerHTML.includes('<span class="an-head">실적 기대에 상승</span>'), '카드(종합분석): ' + el.innerHTML);
+  f.renderAnalysis({ ...q, changePct: 6.2 }, lite);
+  assert.ok(el.innerHTML.includes('>AI 보안 플랫폼 선보여 급등</span>'), '5% 넘으면 그대로');
+  f.renderAnalysis(q, { ...lite, at: T('2026-11-18T14:00:00+09:00') });
+  assert.ok(el.innerHTML.includes('AI 간단 · 11/18') && el.innerHTML.includes('>AI 보안 플랫폼 선보여 급등</span>'), '지난 거래일 진단은 그날 말 그대로: ' + el.innerHTML);
+  // 애프터 줄 — 지금 시간외 등락으로
+  assert.ok(appJs.includes("text: toneTail(a.text, extOf(q).changePct), at: a.at }"), '애프터 줄');
+  // 지난 급등락 기록 — 몫이 없어 그날 진단('…급등', +4.2%)을 그대로 두는 회차에도 기록은 그날 등락에 맞춤
+  const r = workspace();
+  const b = bud.startBudget(null, NOW_KR), cap = Math.floor(bud.capacity(b, ['model-primary', 'model-fallback']) * b.fraction);
+  writeData(r, 'status.json', statusSeed({ 'model-primary': Math.ceil(cap / 2), 'model-fallback': Math.floor(cap / 2) }));
+  writeData(r, 'analysis.json', { '005930': { headline: '수주 기대감에 급등', summary: '요약', model: 'model-primary', sig: '7|옛', at: NOW_KR - 10 * MIN, pv: src.ANALYSIS_PV } });
+  await pipeline(r, { krAt: NOW_KR });
+  assert.equal(read(r, 'analysis.json')['005930']?.headline, '수주 기대감에 급등', '진단은 그대로(몫 없음)');
+  assert.equal(read(r, 'moves.json')['005930']?.[0]?.r, '수주 기대감에 상승', '기록은 그날 등락(+4.2%)에 맞춤');
+});
+await test('큰 소식 기사(89차): 관련 종목마다 그 종목에 걸린 가장 새 기사 하나씩 먼저 · 남은 자리는 새 기사순 · 3건까지 · 보이는 순서는 새 기사순', async () => {
+  const now = T('2026-11-19T07:00:00+09:00');
+  const h = (t, codes, hAgo) => ({ t, codes, names: codes, ms: now - hAgo * 3600e3, link: 'https://news.example.com/' + encodeURIComponent(t), src: '테스트' });
+  const heads = [h('Amazon Anthropic stake worth $150B', ['AMZN'], 1), h('Amazon stock gains on Anthropic', ['AMZN'], 4), h('Amazon and Alphabet to own 28% of Anthropic', ['AMZN'], 5), h('삼성전기 주가…앤트로픽 상장 주목', ['009150'], 20)];
+  const out = src.themeOut({ title: '앤트로픽', summary: '', refs: [1, 2, 3, 4] }, heads);
+  assert.deepEqual(out.codes, ['AMZN', '009150']);
+  assert.deepEqual(out.refs.map((x) => x.t), ['Amazon Anthropic stake worth $150B', 'Amazon stock gains on Anthropic', '삼성전기 주가…앤트로픽 상장 주목'], '삼성전기 기사도 보임: ' + out.refs.map((x) => x.t).join(' / '));
+  const one = src.themeOut({ title: 'x', summary: '', refs: [3, 2, 1] }, heads);
+  assert.deepEqual(one.refs.map((x) => x.t), ['Amazon Anthropic stake worth $150B', 'Amazon stock gains on Anthropic', 'Amazon and Alphabet to own 28% of Anthropic'], '한 종목이면 새 기사순 3건');
+  const many = src.themeOut({ title: 'y', summary: '', refs: [1, 4] }, [h('a', ['A', 'B'], 1), h('b', ['C'], 2), h('c', ['D'], 3), h('d', ['E'], 4)]);
+  assert.deepEqual(many.refs.map((x) => x.t), ['a', 'd'], '고른 기사만');
+});
 await test('시간외 시장 칸(80차): 국내 시세에 네이버 overMarketPriceInfo(넥스트레이드 프리·애프터마켓 등)를 그대로 남김 — 글자·숫자 칸은 그대로, 객체 칸은 name · 없으면 안 붙음', async () => {
   const over = { tradingSessionType: 'PRE_MARKET', overMarketStatus: 'OPEN', overPrice: '71,500', compareToPreviousClosePrice: '1,500', fluctuationsRatio: '2.14',
     compareToPreviousPrice: { code: '2', text: '상승', name: 'RISING' }, localTradedAt: '2026-10-15T08:40:00+09:00', tradeStopType: { code: '1', text: '운영', name: 'TRADING' }, list: [1, 2], nothing: null };
