@@ -82,6 +82,7 @@ function safeUrl(u) {
 function extLink(url, label) { return `<a href="${esc(safeUrl(url))}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`; }
 
 async function loadJson(name) {
+  _netFetches++; // 실제로 받은 데이터 파일(91차 — 새로고침 결과 '새 데이터 반영')
   const r = await fetch(`./data/${name}?t=${Date.now()}`, { cache: 'no-store' });
   if (!r.ok) throw new Error(name + ' ' + r.status);
   return r.json();
@@ -94,6 +95,7 @@ async function loadJson(name) {
 const _files = new Map();     // 파일 이름 → { v: 지문, data }
 const _mismatch = new Set();  // 내용이 지문과 달랐던 '이름@지문' — 그 주소는 다시 쓰지 않는다(캐시에 틀린 내용이 남아 있을 수 있어서)
 let _manifest = null;
+let _netFetches = 0;          // 실제로 받은 데이터 파일 수 — 지문이 같아 이미 받은 것을 쓴 건 세지 않는다(91차 새로고침 결과)
 async function loadManifest() {
   try {
     const r = await fetch(`./data/manifest.json?t=${Date.now()}`, { cache: 'no-store' });
@@ -113,6 +115,7 @@ async function loadData(name, optional = false) {
   if (typeof v !== 'string' || !/^[0-9a-f]{8,40}$/.test(v) || _mismatch.has(`${name}@${v}`)) return loadJson(name);
   const hit = _files.get(name);
   if (hit && hit.v === v) return hit.data;
+  _netFetches++; // 지문이 바뀐 파일
   const r = await fetch(`./data/${name}?v=${v}`); // 주소에 지문이 들어 있어 캐시에서 와도 내용이 같다
   if (!r.ok) throw new Error(name + ' ' + r.status);
   const buf = await r.arrayBuffer();
@@ -428,12 +431,8 @@ async function loadQuotes() {
   if (themes && Array.isArray(themes.items)) state.themes = themes;
   if (extwhy && extwhy.items && typeof extwhy.items === 'object') state.extwhy = extwhy;
   state.data = data;
-  const clock = $('#clock');
-  if (clock) { // 좁은 화면에선 '확인' 글자를 숨겨 상단바를 한 줄로
-    clock.innerHTML = `<span class="clock-l">확인 </span>${new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
-    clock.title = '화면이 마지막으로 데이터를 확인한 시각';
-    clock.classList.remove('warn');
-  }
+  state.checkedAt = Date.now();
+  renderClock(); // 상단 시계(91차부터 renderClock — 새로고침 버튼을 누른 뒤엔 초까지·결과)
   renderQuotes();
 }
 
@@ -1450,13 +1449,46 @@ async function loadStatus() {
   } catch { el.hidden = true; if (dEl) dEl.hidden = true; }
 }
 
-async function tick() {
+// ---------- 새로고침 버튼·시계(91차) ----------
+// 11/19 사용자 — 새로고침 버튼을 눌러도 새로고침됐는지 몰랐다(바뀐 파일이 없으면 화면이 그대로이고, 시계는 분까지라 같은 분 안에선 안 바뀜).
+// 누르면 아이콘이 돌고(끝날 때까지, 최소 0.6초) 겹쳐 누를 수 없으며, 끝나면 시계에 초까지와 결과('새 데이터 반영' — 봇이 그 사이 새로 만든 파일을 받음 ·
+// '이미 최신')를 4초 진하게(좁은 화면은 결과 글자 없이 초까지). 실패하면 '갱신 실패'가 그대로 보인다
+const SPIN_MIN_MS = 600, NOTE_MS = 4000;
+// 상단 시계 — 화면이 마지막으로 데이터를 확인한 시각(좁은 화면은 '확인'·결과 글자를 숨겨 상단바를 한 줄로)
+function renderClock() {
+  const clock = $('#clock');
+  if (!clock) return;
+  const n = state.clockNote, now = !!n && Date.now() < n.until;
+  const t = (o) => new Date(state.checkedAt || Date.now()).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', ...o, hour12: false });
+  // 좁은 화면은 '방금'만(초까지 붙이면 상단바 이름이 잘린다 — 375px에서 '주식시...')
+  clock.innerHTML = now ? `<span class="clock-l">확인 ${t({ second: '2-digit' })} · ${esc(n.msg)}</span><span class="clock-s">방금</span>` : `<span class="clock-l">확인 </span>${t({})}`;
+  clock.title = now ? `방금 새로고침 — ${n.msg}` : '화면이 마지막으로 데이터를 확인한 시각';
+  clock.classList.toggle('now', now);
+  clock.classList.remove('warn');
+}
+async function refreshNow() {
+  const btn = $('#refreshBtn');
+  if (!btn || btn.classList.contains('busy')) return;
+  btn.classList.add('busy');
+  btn.setAttribute('aria-busy', 'true');
+  const n0 = _netFetches, t0 = Date.now();
+  try { await tick(true); } catch (e) { console.warn('새로고침 실패:', e); }
+  await new Promise((r) => setTimeout(r, Math.max(0, SPIN_MIN_MS - (Date.now() - t0))));
+  btn.classList.remove('busy');
+  btn.removeAttribute('aria-busy');
+  if ($('#clock')?.classList.contains('warn')) return; // 실패면 '갱신 실패'가 그대로
+  state.clockNote = { msg: _netFetches > n0 ? '새 데이터 반영' : '이미 최신', until: Date.now() + NOTE_MS };
+  renderClock();
+  setTimeout(() => { if (!$('#clock')?.classList.contains('warn')) renderClock(); }, NOTE_MS + 100);
+}
+async function tick(full = false) {
   // 개장 직후 창(pollSec)에 들어가거나 벗어나면 확인 간격을 바꾼다
   if (state.timer && pollSec(state.intervalSec) !== state.timerSec) restartTimer();
   await loadManifest(); // 지문 먼저(작음) — 바뀐 파일만 받는다
   // AI 상태·지수를 먼저(작은 파일) — 카드의 'AI 분석 대기' 안내와 시장 대비가 같은 회차 값을 쓰게
   await Promise.all([loadStatus().catch(() => {}), loadMarket().catch((e) => console.warn('시장 갱신 실패:', e))]);
-  loadQuotes().catch((e) => console.warn('종목 갱신 실패:', e));
+  const q = loadQuotes().catch((e) => console.warn('종목 갱신 실패:', e));
+  if (full) await q; // 새로고침 버튼은 끝까지 기다린다(91차)
 }
 function restartTimer() {
   if (state.timer) clearInterval(state.timer);
@@ -1471,7 +1503,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // index.html 구조 변경 등으로 요소가 없어도 스크립트 초기화가 중단되지 않도록 옵셔널 체이닝으로 보호.
-$('#refreshBtn')?.addEventListener('click', tick);
+$('#refreshBtn')?.addEventListener('click', refreshNow);
 $('#interval')?.addEventListener('change', (e) => { state.intervalSec = +e.target.value; restartTimer(); });
 // 리사이즈는 드래그 중 초당 수십 번 발생한다. 종목이 늘면 그때마다 차트를 전부 다시 그려 버벅이므로
 // 크기 조절이 멈춘 뒤 한 번만 다시 그린다(디바운스).

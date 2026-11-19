@@ -109,6 +109,10 @@ button { cursor: pointer; }
   background: transparent; color: var(--text-2); text-decoration: none; white-space: nowrap;
 }
 .icon-btn:hover { background: var(--surface-3); color: var(--text); }
+/* 새로고침 중(91차) — 아이콘이 돈다 · 끝나면 시계가 4초 진하게(초까지) */
+.icon-btn.busy .ic { animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .icon-btn.busy .ic { animation: none; opacity: .45; } }
 select, input {
   border: 1px solid var(--line-2); border-radius: 9px; background: var(--surface); color: var(--text);
   font-size: 13px;
@@ -134,6 +138,8 @@ input::placeholder { color: var(--muted); }
 .controls { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .clock { margin-right: 8px; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .clock.warn { color: var(--warn); font-weight: 600; }
+.clock.now { color: var(--text); font-weight: 600; }
+.clock-s { display: none; }
 .refresh { display: inline-flex; align-items: center; gap: 6px; margin-right: 2px; font-size: 12.5px; color: var(--muted); }
 .help-link { font-size: 13px; font-weight: 600; }
 
@@ -598,6 +604,7 @@ input::placeholder { color: var(--muted); }
   .brand { gap: 8px; font-size: 15px; }
   .logo { width: 24px; height: 24px; }
   .brand-long, .refresh-l, .help-l, .clock-l { display: none; }
+  .clock-s { display: inline; }
   .controls { gap: 0; } /* 아이콘 5개(새로고침·밝기·일정·설명서 등)와 제목이 한 줄에 들어가게 */
   .clock { margin-right: 4px; }
   .icon-btn { min-width: 30px; padding: 0 5px; }

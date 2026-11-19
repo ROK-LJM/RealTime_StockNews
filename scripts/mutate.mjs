@@ -665,6 +665,18 @@ const MUTANTS = [
   ["[큰 소식] 저장 순서 안 바꿈", F, ".sort((a, b) => b.codes.length - a.codes.length) });", " });"],
   ["[큰 소식] 다른 종목 기사 묶기 지시 없음", S, " — 다른 내 종목에 걸린 기사도 같은 사건이면 모두 refs에 넣을 것(관련 종목은 고른 기사가 걸린 종목으로 정해진다. 예: 한 회사의 실적 발표면 그 회사 기사와 '○○, △△ 호실적에 급등'처럼 그 소식에 움직인 다른 종목 기사까지)", ""],
   ["[큰 소식] 여러 종목 소식부터 지시 없음", S, "여러 내 종목에 걸친 소식부터, 그다음 중요한 것.", "중요한 것부터."],
+  // ---------- 91차 — 새로고침 버튼 ----------
+  ["[새로고침] 돌지 않음", A, "  btn.classList.add('busy');", ""],
+  ["[새로고침] 겹쳐 눌림", A, "if (!btn || btn.classList.contains('busy')) return;", "if (!btn) return;"],
+  ["[새로고침] 결과 안 보임", A, "state.clockNote = { msg:", "state.clockNoteX = { msg:"],
+  ["[새로고침] 새 데이터 판정 없음", A, "_netFetches > n0 ? '새 데이터 반영' : '이미 최신'", "'이미 최신'"],
+  ["[새로고침] 실패도 결과", A, "  if ($('#clock')?.classList.contains('warn')) return; // 실패면 '갱신 실패'가 그대로", ""],
+  ["[새로고침] 시계 초 없음", A, "확인 ${t({ second: '2-digit' })} · ", "확인 ${t({})} · "],
+  ["[새로고침] 좁은 화면 방금 없음", A, "<span class=\"clock-s\">방금</span>", ""],
+  ["[새로고침] 진하게 안 함", A, "clock.classList.toggle('now', now);", ""],
+  ["[새로고침] 받은 파일 안 셈", A, "  _netFetches++; // 지문이 바뀐 파일", ""],
+  ["[새로고침] 버튼이 예전 동작", A, "$('#refreshBtn')?.addEventListener('click', refreshNow);", "$('#refreshBtn')?.addEventListener('click', tick);"],
+  ["[새로고침] 끝까지 안 기다림", A, "  if (full) await q; // 새로고침 버튼은 끝까지 기다린다(91차)", ""],
   // ---------- 90차 — 넥스트레이드 프리마켓(P11) ----------
   ["[NXT 프리] 칸 띠 없음", A, "return nxtPreOf(q); // 국내 개장 전엔 넥스트레이드 프리마켓(90차)", "return null;"],
   ["[NXT 프리] 개장 전만 아님", A, "marketOf(q) === 'KR' && q.marketStatus === 'PREOPEN' ? q.over : null;", "marketOf(q) === 'KR' ? q.over : null;"],

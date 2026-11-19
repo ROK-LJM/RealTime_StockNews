@@ -3539,6 +3539,16 @@ await test('애프터마켓 이유(85차, 화면): "왜 움직였나"에 미국 
   await two.L.loadManifest();
   await assert.rejects(() => two.L.loadData('extwhy.json', true), /extwhy\.json 404/, '지문 파일을 못 받았으면 예전처럼 받아 봄');
   assert.ok(appJs.includes("loadData('themes.json', true)") && appJs.includes("loadData('extwhy.json', true)"), '큰 소식·애프터마켓 이유');
+  // 받은 파일 수(91차 새로고침 결과) — 지문이 바뀐 파일·지문 없이 받은 파일만, 이미 받은 것을 쓴 건 세지 않음
+  const L3 = vm.runInNewContext(`${ld}; ({ loadManifest, loadData, fetched: () => _netFetches })`, { fetch: async (u) => { const m = u.includes('manifest.json');
+    return { ok: true, status: 200, json: async () => (m ? { files: { 'quotes.json': 'abcdef1234' } } : { x: 1 }), arrayBuffer: async () => new TextEncoder().encode('{"x":1}').buffer }; }, TextDecoder, TextEncoder });
+  await L3.loadManifest();
+  await L3.loadData('quotes.json');
+  assert.equal(L3.fetched(), 1, '지문이 바뀐 파일');
+  await L3.loadData('quotes.json');
+  assert.equal(L3.fetched(), 1, '같은 지문 — 이미 받은 것(세지 않음)');
+  await L3.loadData('market.json');
+  assert.equal(L3.fetched(), 2, '지문 없는 파일은 예전처럼 받음');
 });
 await test('진단 끝말(86차): 5% 안쪽 움직임의 끝 "급등·급락(세)"은 "상승·하락(세)"으로 — 종합분석·한 줄 진단·애프터마켓 진단을 저장할 때 · 가운데 말·5%부터·등락 모를 때는 그대로', async () => {
   assert.equal(src.toneTail('3분기 실적 호조에 급등', 4.57), '3분기 실적 호조에 상승');
@@ -3646,6 +3656,38 @@ await test('넥스트레이드 프리마켓(90차, P11): 국내 개장 전 칸 �
   // 봇 — 화면이 쓰는 칸만(그 밖의 시가·누적 거래대금 등은 뺌)
   assert.deepEqual(JSON.parse(JSON.stringify(src.overOf({ ...over, openPrice: '197,800', accumulatedTradingValue: '1조', tradableStatus: 'tradable', compareToPreviousPrice: { code: '2', name: 'RISING' } }))),
     { ...over, compareToPreviousPrice: 'RISING' }, '화면이 쓰는 칸만');
+});
+await test('새로고침 버튼(91차): 누르면 아이콘이 돎(끝날 때까지)·겹쳐 눌러도 한 번 · 끝나면 시계에 초까지와 결과(새 데이터 반영·이미 최신) · 실패면 갱신 실패 그대로 · 4초 뒤엔 분까지', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const blk = appJs.slice(appJs.indexOf('// ---------- 새로고침 버튼·시계(91차)'), appJs.indexOf('async function tick('));
+  const el = () => { const cls = new Set(); return { innerHTML: '', title: '', cls, attrs: {}, classList: { add: (c) => cls.add(c), remove: (c) => cls.delete(c), contains: (c) => cls.has(c), toggle: (c, on) => (on ? cls.add(c) : cls.delete(c)) },
+    setAttribute(k, v) { this.attrs[k] = v; }, removeAttribute(k) { delete this.attrs[k]; } }; };
+  const clock = el(), btn = el();
+  let ticks = 0, add = 0, fail = false;
+  const ctx = { $: (s) => (s === '#clock' ? clock : s === '#refreshBtn' ? btn : null), state: {}, esc: (s) => String(s), console, setTimeout, _netFetches: 0,
+    tick: async (full) => { ticks++; assert.equal(full, true, '끝까지 기다리는 새로고침'); ctx._netFetches += add; if (fail) { clock.innerHTML = '갱신 실패'; clock.classList.add('warn'); } else ctx.state.checkedAt = Date.now(); } };
+  const f = vm.runInNewContext(`${blk}; ({ refreshNow, renderClock })`, ctx);
+  add = 2;
+  const p = f.refreshNow();
+  assert.ok(btn.cls.has('busy') && btn.attrs['aria-busy'] === 'true', '누르는 즉시 아이콘이 돎');
+  const p2 = f.refreshNow(); // 도는 중에 또 누름
+  await Promise.all([p, p2]);
+  assert.equal(ticks, 1, '겹쳐 눌러도 한 번');
+  assert.ok(!btn.cls.has('busy') && !('aria-busy' in btn.attrs), '끝나면 멈춤');
+  assert.ok(/^<span class="clock-l">확인 \d{2}:\d{2}:\d{2} · 새 데이터 반영<\/span><span class="clock-s">방금<\/span>$/.test(clock.innerHTML) && clock.cls.has('now'), '초까지·새 데이터 반영(좁은 화면은 방금): ' + clock.innerHTML);
+  add = 0;
+  await f.refreshNow();
+  assert.ok(clock.innerHTML.includes(' · 이미 최신') && clock.title.includes('방금 새로고침'), '이미 최신: ' + clock.innerHTML);
+  fail = true;
+  await f.refreshNow();
+  assert.equal(clock.innerHTML, '갱신 실패', '실패면 그대로');
+  // 4초 뒤 — 분까지·보통 글자
+  ctx.state.clockNote = { msg: '이미 최신', until: Date.now() - 1 };
+  f.renderClock();
+  assert.ok(/^<span class="clock-l">확인 <\/span>\d{2}:\d{2}$/.test(clock.innerHTML) && !clock.cls.has('now') && !clock.cls.has('warn'), '분까지: ' + clock.innerHTML);
+  const clockOnLoad = appJs.includes('state.checkedAt = Date.now();\r\n  renderClock();') || appJs.includes('state.checkedAt = Date.now();\n  renderClock();');
+  assert.ok(appJs.includes("$('#refreshBtn')?.addEventListener('click', refreshNow);") && appJs.includes('if (full) await q;') && clockOnLoad, '버튼·끝까지 기다림·시세 받을 때 시계');
 });
 await test('시간외 시장 칸(80차): 국내 시세에 네이버 overMarketPriceInfo(넥스트레이드 프리·애프터마켓 등)를 그대로 남김 — 글자·숫자 칸은 그대로, 객체 칸은 name · 없으면 안 붙음', async () => {
   const over = { tradingSessionType: 'PRE_MARKET', overMarketStatus: 'OPEN', overPrice: '71,500', compareToPreviousClosePrice: '1,500', fluctuationsRatio: '2.14',
