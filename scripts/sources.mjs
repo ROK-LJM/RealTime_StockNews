@@ -451,7 +451,9 @@ export function mergeMeasures(prev, found, now = Date.now()) {
 export const SPAM_RE = /카지노|바카라|토토\s?사이트|스포츠\s?토토|먹튀|꽁머니|홀덤|양방\s?배팅|파워볼|릴게임|슬롯\s?머신|온라인\s?슬롯|#[^\s#]{2,}.*#[^\s#]{2,}|채널\s?지웁니다|반드시\s?체크해\s?보세요|\*[^*\s]{0,6}\s?속보\*|물량\s?모아둘\s?기회로\s?보이며|\((?=[A-Za-z]*[A-Z]{2,}[a-z])(?=[A-Za-z]*(?:[A-Z][a-z]+[A-Z]+[a-z]|[a-z][A-Z]+[a-z]+[A-Z]))[A-Za-z]{10}\)\s*$/; // 넷은 유튜브 낚시 제목(41차) · 씽크풀 자동 글 '…물량 모아둘 기회로 보이며 이후 전망 및 대응전략'·끝의 무작위 영문 10자 '(PpuuHQKAIs)'(53차)
 // 기사가 아닌 시세 페이지('NVIDIA Corporation (NVDA) Stock Price, News, Quote & History'·'Apple AAPL Stock Price and Chart | Live AAPL Quote Today'·'TSM Stock Price — TSMC Chart')
 // — 구글 뉴스가 늘 새 날짜로 잡아 뉴스 칸과 AI 입력을 차지했다(11/02~11/10 미국 뉴스 55건 중 1~3건씩). 어느 검색이든 뺀다(45차)
-export const QUOTE_PAGE_RE = /\b(?:stock\s+price|quote)\s*[,&]?\s*(?:news|quote|history|chart|analysis)\s*[,&]\s*(?:and\s+)?(?:news|quote|history|analysis)\b|\bstock\s+price\s+and\s+chart\b|\blive\s+[A-Z.]{1,6}\s+quote\b|\bstock\s+price\s*[—–-]\s*[^—–-]*\bchart\s*$/i;
+// 93차 — 복수형·다른 매체 꼴도: 'Tesla (TSLA) Stock Price, News, Quotes, Financial Reports'(Moomoo)·'Tesla Stock Quotes, Company News And Chart Analysis'(IBD)·
+// 'Microsoft Corporation (MSFT.O) | Stock Price & Latest News'(Reuters) — 11/12~11/19 미국 뉴스 897건 중 3건(11/19 테슬라 카드 첫 뉴스)
+export const QUOTE_PAGE_RE = /\b(?:stock\s+price|quotes?)\s*[,&]?\s*(?:company\s+)?(?:news|quotes?|history|chart|analysis)\s*(?:[,&]|\band\b)\s*(?:and\s+)?(?:company\s+)?(?:news|quotes?|history|chart\s+analysis|analysis)\b|\bstock\s+price\s+and\s+chart\b|\blive\s+[A-Z.]{1,6}\s+quote\b|\bstock\s+price\s*[—–-]\s*[^—–-]*\bchart\s*$|\|\s*stock\s+price\s*&\s*latest\s+news\s*$/i;
 // 기관의 13F 보유 변동 공시 자동 기사(MarketBeat — 'Apple Inc. $AAPL Stock: Axxcess Wealth Management LLC Lowers Stake'·'2,311 Amazon.com, Inc. $AMZN Shares Sold by Gibson Capital LLC')
 // — 회사 소식이 아니라 분기 지분 신고라 뺀다. 11/02~11/10 미국 뉴스 칸 6,907개 중 470개(6.8%), 제목의 캐시태그($AMZN)로 가린다(48차)
 export const HOLDINGS_RE = /^(?=.*\$[A-Z]{1,5}\b).*\b(?:Stock|Shares?|Stake|Position|Holdings?)\b/;
@@ -459,7 +461,12 @@ export const HOLDINGS_RE = /^(?=.*\$[A-Z]{1,5}\b).*\b(?:Stock|Shares?|Stake|Posi
 // 'Super Micro Computer (SMCI) withholds 1,525 shares for taxes …'·'Microsoft (MSFT) CFO sells 5,912 and 1,393 shares under a prearranged trading plan')
 // — 임원 보상 주식 전환·세금 원천징수·계획 매도라 회사 소식이 아니다. 지난 7일 미국 기사 1,150건 중 15건이지만 몰려 나와 11/18 아마존 뉴스 8건 중 5건.
 // '(티커) 직함 … 거래 말 … shares/주식 수'만 — 'What Does Nvidia (NVDA) CEO Resignation Mean …'·'… executive says AI demand holds up into 2027'은 그대로
-export const INSIDER_RE = /\([A-Z]{1,5}\)\s+(?:(?:EVP|SVP|CEO|CFO|COO|CTO|director|executive|officer|insider|president|chair\w*|general\s+counsel)\b.{0,50}?\b(?:sells?|sold|buys?|bought|holds?|converts?|acquires?|exercises?|gifts?|delivers?|withh[oe]lds?)\b(?:.{0,40}?\b(?:shares?|stock\s+awards?)\b|\s+\d{1,3}(?:,\d{3})+)|withh[oe]lds?\b)|\bshares?\s+were\s+withheld\b|\btax\s+withholding\b/i;
+// 93차 — 다른 매체 꼴도: 거래소 붙은 티커 'Apple(AAPL.US) Director Sells US$31.77 Million in Common Stock'(Moomoo)·'Plug Power (NASDAQ:PLUG) Stock: Insider … Sells 13,312 Shares'(MarketBeat)·
+// 'An Apple (AAPL) director gave away 50,000 shares …'·'At $1.10 apiece, Benjamin Haycraft sold 13,312 shares of Plug Power (PLUG) …'(Stock Titan)·
+// '… proposes selling 13,312 Plug Power (PLUG) shares under a trading plan.'·'… Intent to Sell 13,312 Shares Under Rule 10b5-1 Plan'·'Super Micro director Scott Angel buys $49,940 in SMCI shares'·
+// 'Insider trades: Microsoft, Netflix, …' — 11/12~11/19 미국 뉴스 897건 중 8건. 'Nvidia director sold nearly $1B in stock weeks before the … scandal'(취재 기사)·
+// 'Billionaire Bill Ackman Sold 2 Million Shares of Microsoft Stock …'(투자자 소식)은 그대로
+export const INSIDER_RE = /\((?:[A-Z]+:)?[A-Z]{1,5}(?:\.[A-Z]{1,2})?\)\s+(?:Stock:\s+)?(?:(?:EVP|SVP|CEO|CFO|COO|CTO|director|executive|officer|insider|president|chair\w*|general\s+counsel)\b.{0,50}?\b(?:sells?|sold|buys?|bought|holds?|converts?|acquires?|exercises?|gifts?|gave\s+away|delivers?|withh[oe]lds?)\b(?:.{0,40}?\b(?:shares?|stock\s+awards?|common\s+stock)\b|\s+\d{1,3}(?:,\d{3})+)|withh[oe]lds?\b)|\bshares?\s+were\s+withheld\b|\btax\s+withholding\b|^At\s+\$[\d.,]+\s+(?:apiece|a\s+share|per\s+share|each),.{0,60}\b(?:sold|bought|sells|buys)\s+[\d,]+\s+shares\b|\b(?:sell|selling|sells|sale\s+of)\s+[\d,]+\s+(?:[A-Z][\w.&-]*\s+){0,4}(?:\([A-Z]{1,5}\)\s+)?shares\s+(?:under|pursuant\s+to)\s+(?:a\s+)?(?:pre-?arranged\s+)?(?:trading\s+plan|rule\s+10b5-1)|\b(?:director|officer|CEO|CFO|COO|EVP|SVP|president|chair\w*)\s+(?:[A-Z][\w.'-]+\s+){1,3}(?:buys|sells|bought|sold)\s+\$[\d,.]+[KMB]?\s+(?:(?:in|of|worth\s+of)\s+)?[A-Z]{1,5}\s+(?:shares|stock)\b|^Insider\s+trades?:/i;
 // 뉴스에서 흔히 쓰는 다른 이름(종목코드·티커별). 없는 종목은 이름·영문명·티커로만 판단.
 const NEWS_ALIAS = {
   '000660': ['하이닉스', '삼전닉스'], '010120': ['LS일렉트릭'], '329180': ['현대중공업'], '005380': ['현대자동차'],
@@ -831,13 +838,17 @@ const datedTitle = (h, timeZone) => `${Number.isFinite(h && h.pubMs) ? `[${mdOf(
 // 헤드라인 목록을 주고 "오늘 가장 가치 있는 핵심 뉴스 1~3개 + 한 줄 요약"을 JSON으로 받는다.
 // 이틀치 기사라 제목 앞에 기사 날짜(한국 날짜)를 붙인다 — 어제 기사를 오늘 원인으로 고르지 않게(30차)
 // open: 국내 장중인지(67차 — 장중이면 '지금 …% 보합 중'·'마감' 금지. 11/13 12:10 코스피 -0.35%에 '…코스피가 보합 마감했습니다'를 어제 마감 기사로 썼다)
+// 보합은 ±0.5% 안쪽만(93차) — ±0.5~1%는 '상승'·'하락'(검색어·화면 머리의 ±1% 구간은 그대로). 11/19 15:50 코스피 +0.8%를 '지금 0.8x%로 보합 중'으로 넘겨
+// '외국인·기관 매도세에 하락했으나 기관 매수에 보합권 회복'(14:07 '…보합권 회복 [장중시황]' 기사 그대로)이 됐다 — 기사 시점의 등락을 옮겨 쓰지 말라는 지시도 붙인다
+export const coreDir = (pct) => (pct <= -1 ? '급락' : pct >= 1 ? '급등' : pct <= -0.5 ? '하락' : pct >= 0.5 ? '상승' : '보합');
 export async function aiCoreNews(name, changePct, headlines, now = Date.now(), open = false) {
   if (!GEMINI_KEY || !headlines || !headlines.length) return null;
-  const dir = changePct <= -1 ? '급락' : changePct >= 1 ? '급등' : '보합';
+  const dir = coreDir(changePct);
   const list = headlines.map((h, i) => `${i + 1}. ${datedTitle(h, 'Asia/Seoul')}${h.source ? ` (${h.source})` : ''}`).join('\n');
   const prompt =
     `너는 한국 증시 애널리스트다. 오늘(${mdOf(ymdIn(now, 'Asia/Seoul'))}${open ? ' 장중' : ''}) ${name}이(가) ${open ? `지금 ${changePct.toFixed(2)}%로 ${dir} 중이다` : `${changePct.toFixed(2)}% ${dir}했다`}.\n` +
     (open ? `아직 장중이다 — '마감'·'마감했다'로 쓰지 말고, 지난 장 마감 기사는 오늘 움직임과 이어질 때만 고를 것.\n` : '') +
+    `기사 속 지수 등락(보합권·하락 전환·반등 등)은 기사를 쓴 때의 것이라 지금과 다를 수 있다 — 옮겨 쓰지 말고 지금 등락(${changePct.toFixed(2)}% ${dir})에 맞춰 써라.\n` +
     `아래 뉴스 제목 중 오늘 이 움직임을 설명하는, 투자자에게 가장 가치 있고 핵심적인 것만 1~3개 골라라.\n` +
     `제목 앞 [월/일]은 기사 날짜다 — 오늘 기사를 먼저 보고, 지난 기사는 오늘까지 이어진 원인일 때만 고른다.\n` +
     `광고·홍보·중복·단순 시황중계·무관한 것은 제외하고, 실제 원인/재료가 되는 것만 고른다.\n` +
@@ -1098,6 +1109,8 @@ export async function aiThemes(heads, now = Date.now(), ahead = 0) {
     // 'SK하이닉스, 엔비디아 호실적에 5%대 급등'·'TSM Stock Trending After Nvidia Posts Strong Q3 Results'가 있었다) — 다른 종목 기사도 refs에 넣게 한다
     `같은 사건을 다룬 기사끼리 묶어라 — 다른 내 종목에 걸린 기사도 같은 사건이면 모두 refs에 넣을 것(관련 종목은 고른 기사가 걸린 종목으로 정해진다. 예: 한 회사의 실적 발표면 그 회사 기사와 '○○, △△ 호실적에 급등'처럼 그 소식에 움직인 다른 종목 기사까지). 기사 제목에 있는 사실만으로 써라. ${outsideRule(now)}\n` +
     `주가 등락만 알리는 시세 기사·주가 전망·목표주가·종목 추천 글로만 된 것은 빼라. 큰 소식이 없으면 빈 목록. 여러 내 종목에 걸친 소식부터, 그다음 중요한 것.\n` +
+    // 사건만(93차) — 11/18 16:00 '두산에너빌리티 주가가 상승 전환했다'(그날 -5.12% 마감)·11/19 16:00 '삼성전자·SK하이닉스, AI 투자 우려 속 약세'(그때 +0.51%·+3.15%)
+    `이름·요약은 사건을 써라 — 주가 등락·주가 수준(급등·급락·강세·약세·상승·하락·○만원선 회복 등)은 쓰지 말 것: 기사를 쓴 때의 주가는 지금과 다를 수 있고, 지금 주가는 화면에 따로 보인다. 주가가 움직였다는 것만 다룬 기사는 큰 소식이 아니다.\n` +
     `반드시 이 JSON만 출력: {"items":[{"title":"큰 소식 이름(20자 내외, 예: '앤트로픽 상장 추진')","summary":"무슨 일이고 내 종목에 어떤 의미인지 한 문장(70자 내외, 기사에 있는 내용만)","refs":[기사 번호]}]}\n\n` +
     `기사 목록:\n${list}`;
   const r = await geminiJSON(prompt, { ahead });
@@ -1106,11 +1119,24 @@ export async function aiThemes(heads, now = Date.now(), ahead = 0) {
   const items = [];
   for (const x of got) {
     const refs = [...new Set((Array.isArray(x && x.refs) ? x.refs : []).map((n) => parseInt(n, 10)).filter((n) => n >= 1 && n <= heads.length))];
-    const title = String((x && x.title) || '').trim(), summary = String((x && x.summary) || '').trim().replace(/[.。]+$/, '');
+    const { title, summary } = themeClean(x && x.title, x && x.summary); // 주가 움직임 말은 떼거나 비움(93차)
     if (title && refs.length) items.push({ title: title.slice(0, 40), summary: summary.slice(0, 160), refs });
     if (items.length >= THEME_MAX) break;
   }
   return { items, model: r.model };
+}
+// 큰 소식 이름·요약에 남은 주가 움직임(93차) — 위 지시에도 남으면 이름은 끝의 움직임 말을 떼고('…AI 투자 우려 속 약세' → '…AI 투자 우려'·'…소멸에 급락' → '…소멸'),
+// 떼고도 움직임 말이 남으면(가운데) 그 소식은 버린다. 요약은 비운다(이름·관련 종목·기사로 충분). 큰 소식은 3시간 넘게 남아 그때 맞던 말도 틀려진다.
+// 이름의 '상승'·'하락'은 '금리 상승'처럼 다른 것의 오르내림일 수 있어 '상승세·상승 전환·상승 마감'과 주가 말만 뗀다. 환율 강세·약세는 주가 아님(36차와 같음)
+const THEME_MOVE_WORD = '(?:급등|급락|폭등|폭락|(?<!(?:원화|달러|엔화|유로)\\s?)(?:강세|약세))';
+const THEME_LEVEL = '[\\d,.]+\\s?만?\\s?원\\s?(?:선|대)(?:을|를|으로|로)?\\s?(?:회복|돌파|붕괴|탈환|재진입|진입|안착)';
+export const THEME_TAIL_RE = new RegExp(`\\s*(?:(?:속|에|에도|로|으로|하며|딛고|따라|바탕으로|힘입어|타고)\\s+){0,2}(?:주가\\s*)?(?:(?:[\\d.]+%대?\\s*)?(?:${THEME_MOVE_WORD}|반등|반락|(?:상승|하락)\\s?(?:세|전환|마감))|${THEME_LEVEL})$`);
+export const THEME_MOVE_RE = new RegExp(`주가[가는도의]?\\s+(?:\\S+\\s+){0,5}?\\S*?(?:급등|급락|폭등|폭락|강세|약세|상승|하락|반등|반락|올랐|오른|내렸|내린|떨어|뛰었|밀렸|회복)|(?:급등|급락|폭등|폭락)(?:했|하며|하자|해|세)|(?:강세|약세)를\\s?보|(?:상승|하락)\\s?(?:전환|마감)|\\d\\s?만?\\s?원\\s?(?:선|대)(?:을|를|으로|로)?\\s?(?:회복|돌파|붕괴|탈환|재진입|진입|안착)`);
+export function themeClean(title, summary) {
+  let t = String(title ?? '').trim().replace(THEME_TAIL_RE, '').replace(/[,\s·…]+$/, '');
+  if (THEME_MOVE_RE.test(t) || new RegExp(THEME_MOVE_WORD).test(t)) t = ''; // 떼고도 움직임 말이 남으면(가운데) 그 소식은 버림
+  const s = String(summary ?? '').trim().replace(/[.。]+$/, '');
+  return { title: t, summary: THEME_MOVE_RE.test(s) ? '' : s };
 }
 // 고른 기사 번호 → 관련 종목(그 기사들이 걸린 종목, 처음 나온 순)·기사 3건(최신순) — 관련 종목마다 그 종목에 걸린 가장 새 기사를 먼저 고르고 남은 자리는 새 기사순
 // (89차 — 11/19 아침 '아마존, 앤트로픽 투자 가치 부각'의 관련 종목에 삼성전기가 있는데 기사 3건이 모두 아마존 영어 기사라 왜 걸렸는지 안 보였다)

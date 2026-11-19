@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis, aiStockBriefs, BRIEF_MAX, ANALYSIS_PV, aiThemes, themeHeads, themeOut, themeDue, themeMorning, THEME_EARLY_AHEAD, calmExpected, aiExtBriefs, extMovers, extHeads, extDue, extRel, extSame, EXT_AHEAD, toneTail,
+  getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis, aiStockBriefs, BRIEF_MAX, ANALYSIS_PV, aiThemes, themeHeads, themeOut, themeDue, themeClean, themeMorning, THEME_EARLY_AHEAD, calmExpected, aiExtBriefs, extMovers, extHeads, extDue, extRel, extSame, EXT_AHEAD, toneTail,
   getSidecarNews, sidecarEvents, mergeMeasures,
   aiStatus, aiGate, aiRoom, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, pickReasonNews, strongNews, tagSentiment, krBaseName,
 } from './sources.mjs';
@@ -480,6 +480,12 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
         write('themes.json', { at: now, model: got.model, items: got.items.map((x) => themeOut(x, heads)).sort((a, b) => b.codes.length - a.codes.length) });
         console.log(`  · 큰 소식 ${got.items.length}건(기사 ${heads.length}건에서)`);
       }
+    } else {
+      // 지난 큰 소식도 지금 규칙으로(93차 — 묶은 지 몇 시간씩 남는다): 이름 끝의 주가 움직임 말은 떼고 요약은 비움(themeClean, 이름이 비면 뺌).
+      // 시각(at)은 그대로(화면 '16:00'·36시간 숨김 기준), 바뀐 때만 쓴다
+      const prev = readJson('themes.json');
+      const kept = prev && Array.isArray(prev.items) ? prev.items.map((x) => ({ ...x, ...themeClean(x.title, x.summary) })).filter((x) => x.title) : null;
+      if (kept && JSON.stringify(kept) !== JSON.stringify(prev.items)) write('themes.json', { ...prev, items: kept });
     }
   } catch (e) { console.error('  ✗ 큰 소식 실패 — themes.json 유지:', e.message); }
 

@@ -2967,6 +2967,25 @@ await test('지수 핵심 이유(67차): 장중 보합이면 "○○ 장중" 기
   await src.getIndexReason('코스닥', 2.4, null, now, true);
   assert.ok(q().includes('코스닥 급등 이유'), '급등락은 그대로 이유 기사');
 });
+await test('지수 핵심 이유(93차): 보합은 ±0.5% 안쪽만 — ±0.5~1%는 AI에 "지금 …% 상승·하락 중"(검색어·화면 머리의 ±1% 구간은 그대로) · 기사 속 등락은 기사를 쓴 때의 것이니 지금 등락에 맞추라는 지시', async () => {
+  src.resetState(); src.setAiBudget(null);
+  assert.deepEqual([-1.2, -1, -0.62, -0.5, -0.49, 0, 0.35, 0.49, 0.5, 0.8, 1, 2.6].map(src.coreDir), ['급락', '급락', '하락', '하락', '보합', '보합', '보합', '보합', '상승', '상승', '급등', '급등']);
+  const q = () => NET.calls.map((u) => decodeURIComponent(u)).filter((u) => /news\.google\.com/.test(u)).map((u) => new URL(u).searchParams.get('q').replace(/\s+when:\S+/, ''));
+  const body = () => { const b = NET.bodies.find((x, i) => isGemini(NET.calls[i])); return b ? JSON.parse(b).contents[0].parts[0].text : ''; };
+  // 11/19 15:50 코스피 +0.8% — '지금 0.8x%로 보합 중'으로 넘겨 '…하락했으나 기관 매수에 보합권 회복'(14:07 기사 그대로)이 됐다
+  NET.routes = routes(); NET.calls = []; NET.bodies = []; NET.blocked = [];
+  const r = await src.getIndexReason('코스피', 0.8, null, T('2026-11-19T15:50:00+09:00'), true);
+  assert.equal(r.dir, 'flat', '검색어·화면 머리 구간은 ±1% 그대로');
+  assert.ok(q().includes('코스피 장중'), q().join(' / '));
+  assert.ok(body().includes('오늘(11/19 장중) 코스피이(가) 지금 0.80%로 상승 중이다') && body().includes('"summary":"오늘 코스피 상승 핵심 이유'), body().slice(0, 600));
+  assert.ok(body().includes('기사 속 지수 등락(보합권·하락 전환·반등 등)은 기사를 쓴 때의 것이라 지금과 다를 수 있다') && body().includes('지금 등락(0.80% 상승)에 맞춰 써라'), '기사 시점 지시');
+  NET.routes = routes(); NET.calls = []; NET.bodies = []; NET.blocked = [];
+  await src.getIndexReason('코스닥', -0.62, null, T('2026-11-19T17:00:00+09:00'), false);
+  assert.ok(body().includes('오늘(11/19) 코스닥이(가) -0.62% 하락했다') && body().includes('지금 등락(-0.62% 하락)'), body().slice(0, 300));
+  NET.routes = routes(); NET.calls = []; NET.bodies = []; NET.blocked = [];
+  await src.getIndexReason('코스피', 0.3, null, T('2026-11-19T11:00:00+09:00'), true);
+  assert.ok(body().includes('지금 0.30%로 보합 중이다'), '±0.5% 안쪽은 보합');
+});
 await test('지수 핵심 이유(68차): 판단 근거 검색어(aiQuery)를 남겨 장중엔 지금 검색어와 다른 기사로 만든 판단을 다시 함(90분 안이어도) · 같으면 재사용 · 장 밖은 그대로 · aiQuery 없던 예전 보합 판단은 장중이면 다시, 급등락은 그대로', async () => {
   src.resetState(); src.setAiBudget(null);
   const now = T('2026-11-13T13:50:00+09:00');
@@ -3170,6 +3189,88 @@ await test('뉴스(77차): 미국 내부자 거래 보고(Form 4) 자동 기사(
     : text(rss('', queryName(u)))) });
   const titles = (read(root, 'news.json').AAPL?.items || []).map((x) => x.title);
   assert.deepEqual(titles.sort(), ['AAPL shares rise on iPhone demand', 'Apple (AAPL) wins EU approval for new chip plant'], titles.join(' / '));
+});
+await test('뉴스(93차): 미국 시세 페이지·내부자 거래 자동 기사의 다른 꼴도 받을 때 뺌 — 복수형 Quotes·IBD·Reuters 시세 페이지 · 거래소 붙은 티커·"Stock: Insider"·gave away·"At $… apiece"·계획 매도·"$… in 티커 shares"·"Insider trades:" · 취재 기사·투자자 소식은 그대로', async () => {
+  for (const t of ['Tesla (TSLA) Stock Price, News, Quotes, Financial Reports', 'Tesla Stock Quotes, Company News And Chart Analysis', 'Microsoft Corporation (MSFT.O) | Stock Price & Latest News'])
+    assert.equal(src.QUOTE_PAGE_RE.test(t), true, '시세 페이지: ' + t);
+  for (const t of ['Don’t Know What to Do With Nvidia Stock After Jensen Huang Stepped Down as CEO? Consider These 5 Warren Buffett Quotes.', 'Tesla Stock News: Robotaxi Expansion Lifts Shares',
+    'Microsoft Stock (MSFT) Forecast – Mizuho Stays Bullish on Strong Revenue Growth Prospects', 'Tesla (TSLA) Stock Price Prediction: Robotaxi progress keeps Tesla above the key moving-average cluster'])
+    assert.equal(src.QUOTE_PAGE_RE.test(t), false, '기사: ' + t);
+  const real = ['Apple(AAPL.US) Director Sells US$31.77 Million in Common Stock', 'Plug Power (NASDAQ:PLUG) Stock: Insider Benjamin Haycraft Sells 13,312 Shares',
+    'An Apple (AAPL) director gave away 50,000 shares the same day he sold stock.', 'At $1.10 apiece, Benjamin Haycraft sold 13,312 shares of Plug Power (PLUG) on Nov. 16.',
+    'Officer Benjamin Haycraft proposes selling 13,312 Plug Power (PLUG) shares under a trading plan.', 'Plug Power Officer Benjamin Haycraft Announces Intent to Sell 13,312 Shares Under Rule 10b5-1 Plan',
+    'Super Micro director Scott Angel buys $49,940 in SMCI shares', 'Insider trades: Microsoft, Netflix, Boeing among notable names (BA:NYSE)'];
+  for (const t of real) assert.equal(src.INSIDER_RE.test(t), true, '내부자 거래: ' + t);
+  for (const t of ['Nvidia director sold nearly $1B in stock weeks before the Jensen Huang scandal broke — and no trading plan was flagged', "Billionaire Bill Ackman Sold 2 Million Shares of Microsoft Stock. But Here's Why He Says He's Still Bullish",
+    'Pershing Square remains bullish on Microsoft despite selling 2M shares', 'Berkshire Hathaway sold 10,000,000 shares of Apple (AAPL) in the third quarter', 'Apple (AAPL) Puts Tim Cook At The Center Of A Surprise CEO Search',
+    'Elon Musk, Tom Lee, Shopify CEO Sign ‘Stand With Jensen’ Petition To Reinstate Him As Nvidia CEO'])
+    assert.equal(src.INSIDER_RE.test(t), false, '보통 기사: ' + t);
+  // 봇 — 받을 때 뺀다
+  const item = (t, i) => '<item><title>' + t + ' - Moomoo</title><link>https://news.example.com/g' + i + '</link><pubDate>' + RSS_PUB + '</pubDate><source url="https://news.example.com">Moomoo</source></item>';
+  const feed = (ts) => text('<?xml version="1.0"?><rss><channel>' + ts.map(item).join('') + '</channel></rss>');
+  const root = workspace();
+  await pipeline(root, { news: (m, u) => (/AAPL/.test(new URL(u).searchParams.get('q'))
+    ? feed(['Apple(AAPL.US) Director Sells US$31.77 Million in Common Stock', 'An Apple (AAPL) director gave away 50,000 shares the same day he sold stock.', 'Apple (AAPL) Stock Price, News, Quotes, Financial Reports',
+      'Apple (AAPL) wins EU approval for new chip plant', 'AAPL shares rise on iPhone demand'])
+    : text(rss('', queryName(u)))) });
+  const titles = (read(root, 'news.json').AAPL?.items || []).map((x) => x.title);
+  assert.deepEqual(titles.sort(), ['AAPL shares rise on iPhone demand', 'Apple (AAPL) wins EU approval for new chip plant'], titles.join(' / '));
+});
+await test('큰 소식(93차, 봇): 이름·요약은 사건만 — AI에 주가 등락·수준을 쓰지 말라는 지시 · 그래도 남은 움직임 말은 이름 끝에서 떼고(가운데 남으면 그 소식은 버림) 요약은 비움 · 11/18·19 실제 큰 소식 12건', async () => {
+  src.resetState(); src.setAiBudget(null);
+  // [이름, 요약, 정리된 이름, 요약 남김] — 11/18 16:00 '…두산에너빌리티 주가가 상승 전환했다'는 그날 -5.12% 마감, 11/19 16:00 '…AI 투자 우려 속 약세'는 그때 +0.51%·+3.15%
+  const real = [
+    ['삼성전자·SK하이닉스, AI 투자 우려 속 약세', 'AI 투자에 대한 우려가 지속되며 삼성전자와 SK하이닉스 주가가 약세를 보였습니다', '삼성전자·SK하이닉스, AI 투자 우려', false],
+    ['SK텔레콤, 앤트로픽 상장 기대감 소멸에 급락', '앤트로픽 나스닥 상장 기대감으로 올랐던 SK텔레콤 주가가 차익 실현 매물 출회로 급락했습니다', 'SK텔레콤, 앤트로픽 상장 기대감 소멸', false],
+    ['한화오션, 초대형 원유운반선 2척 수주', '한화오션이 3642억원 규모의 초대형 원유운반선 2척을 추가 수주하며 올해 누적 수주액 11조원을 돌파했습니다', '한화오션, 초대형 원유운반선 2척 수주', true],
+    ['HD현대일렉트릭, 수주잔고 바탕으로 40만원대 회복', 'HD현대일렉트릭이 88억 달러 규모의 수주잔고를 바탕으로 장중 40만원선을 회복했습니다', 'HD현대일렉트릭, 수주잔고', false],
+    ['아마존, 앤트로픽 투자 가치 부각', '아마존이 투자한 앤트로픽의 상장 추진과 함께 해당 지분 가치가 1,500억 달러에 달할 것으로 평가받으며 주가 상승 동력으로 작용하고 있습니다', '아마존, 앤트로픽 투자 가치 부각', false],
+    ['엔비디아 경영진 교체 및 불확실성', '엔비디아 이사회 의장이 젠슨 황의 복귀 가능성을 일축하며 투자자들 사이에서 경영 공백에 대한 우려와 불확실성이 커지고 있습니다', '엔비디아 경영진 교체 및 불확실성', true],
+    ['슈퍼마이크로컴퓨터 신제품 출시', '슈퍼마이크로컴퓨터가 AMD 칩을 탑재한 차세대 AI 스토리지 서버와 PCIe Gen 6 서버를 공개하며 기술적 돌파구를 마련했습니다', '슈퍼마이크로컴퓨터 신제품 출시', true],
+    ['마이크로소프트-인텔 인프라 협력', '마이크로소프트가 인텔과 장기적인 애저(Azure) 인프라 구축을 위한 협력을 확대하며 AI 수요 대응을 강화하고 있습니다', '마이크로소프트-인텔 인프라 협력', true],
+    ['삼성전기 엔비디아 공급 계약', '삼성전기가 엔비디아와 공급 계약 및 협력 확대 소식에 주가가 급등했다', '삼성전기 엔비디아 공급 계약', false],
+    ['두산에너빌리티 체코 원전 추진', '체코 원전의 정상 추진 소식에 두산에너빌리티 주가가 상승 전환했다', '두산에너빌리티 체코 원전 추진', false],
+    ['LIG D&A 입찰 자격 유지', '법원의 결정으로 LIG디펜스앤에어로스페이스가 입찰 자격을 유지하게 되었다', 'LIG D&A 입찰 자격 유지', true],
+    ['엔비디아 호실적 및 경영 소식', '엔비디아가 호실적을 발표한 가운데 실적과 경영진 관련 소식들이 전해졌다', '엔비디아 호실적 및 경영 소식', true]];
+  for (const [t, s, et, keep] of real) assert.deepEqual(src.themeClean(t, s), { title: et, summary: keep ? s : '' }, t);
+  // 요약 — '주가' 없이도: '…급등했다'·'…약세를 보였다'·'…상승 전환했다'
+  for (const s of ['엔비디아와 공급 계약 소식에 급등했다', '두 종목 모두 약세를 보였다', '체코 원전 추진 소식에 상승 전환했다']) assert.equal(src.themeClean('공급 계약', s).summary, '', s);
+  // 이름 끝 떼기 — 연결 말 두 개까지 · 가운데 남으면 버림 · 다른 것의 오르내림(금리 상승·환율 약세·원유 가격 급등에)은 그대로
+  assert.equal(src.themeClean('반도체 수주에 힘입어 급등', '').title, '반도체 수주');
+  assert.equal(src.themeClean('SK하이닉스 급등에 삼성전자도 강세', '').title, '', '떼고도 가운데 움직임 말');
+  assert.equal(src.themeClean('두산에너빌리티 상승 전환 기대', '').title, '', '가운데 상승 전환');
+  assert.equal(src.themeClean('SK텔레콤, 급락', '').title, 'SK텔레콤', '뗀 뒤 끝 쉼표도');
+  assert.equal(src.themeClean('급락', '').title, '', '움직임 말뿐');
+  assert.deepEqual(src.themeClean('금리 상승 부담', '원유 가격 급등에 정유사 수혜 기대.'), { title: '금리 상승 부담', summary: '원유 가격 급등에 정유사 수혜 기대' });
+  assert.deepEqual(src.themeClean('원화 약세 수혜', '수출 기업 실적 개선 기대'), { title: '원화 약세 수혜', summary: '수출 기업 실적 개선 기대' });
+  // AI 요청·받기
+  const now = T('2026-11-19T16:00:00+09:00');
+  const n = (title, h) => ({ title, pubMs: now - h * 3600e3, link: 'https://news.example.com/' + encodeURIComponent(title), source: '테스트일보' });
+  const items = [{ code: '005930', name: '삼성전자', market: 'KR' }, { code: '000660', name: 'SK하이닉스', market: 'KR' }, { code: '042660', name: '한화오션', market: 'KR' }];
+  const news = { '005930': { items: [n("[특징주] 삼성전자·SK하이닉스, AI 투자 우려 여전.. '약세'", 5)] }, '000660': { items: [n("[특징주] 삼성전자·SK하이닉스, AI 투자 우려 여전.. '약세'", 5)] },
+    '042660': { items: [n('한화오션, VLCC 2척 추가 수주…올해 누적 11조원 돌파', 2), n('한화오션, 초대형 원유운반선 2척 수주…3642억원 규모', 3)] } };
+  const heads = src.themeHeads(items, news, now);
+  const reply = (o) => () => json({ candidates: [{ content: { parts: [{ text: JSON.stringify(o) }] } }] });
+  NET.routes = routes({ gemini: reply({ items: [{ title: '삼성전자·SK하이닉스, AI 투자 우려 속 약세', summary: 'AI 투자 우려가 지속되며 두 종목 주가가 약세를 보였습니다.', refs: [1] },
+    { title: '한화오션, 초대형 원유운반선 2척 수주', summary: '한화오션이 VLCC 2척을 추가 수주하며 올해 누적 수주액 11조원을 돌파했습니다.', refs: [2, 3] }, { title: 'SK하이닉스 급등에 삼성전자도 강세', refs: [1] }] }) });
+  NET.calls = []; NET.bodies = []; NET.blocked = [];
+  const got = await src.aiThemes(heads, now);
+  const prompt = JSON.parse(NET.bodies.find((b, i) => isGemini(NET.calls[i]))).contents[0].parts[0].text;
+  assert.ok(prompt.includes('이름·요약은 사건을 써라 — 주가 등락·주가 수준(급등·급락·강세·약세·상승·하락·○만원선 회복 등)은 쓰지 말 것') && prompt.includes('주가가 움직였다는 것만 다룬 기사는 큰 소식이 아니다'), '사건만 지시');
+  assert.deepEqual(JSON.parse(JSON.stringify(got.items)), [{ title: '삼성전자·SK하이닉스, AI 투자 우려', summary: '', refs: [1] },
+    { title: '한화오션, 초대형 원유운반선 2척 수주', summary: '한화오션이 VLCC 2척을 추가 수주하며 올해 누적 수주액 11조원을 돌파했습니다', refs: [2, 3] }], '이름 끝 떼고 요약 비움 · 가운데 남은 소식은 버림');
+  // 봇 — 묶을 때가 아닌 회차엔 저장된 큰 소식을 지금 규칙으로 정리(시각 그대로 · 이름이 비면 뺌) — 배포 전에 묶은 16:00 큰 소식이 다음 묶음까지 남지 않게
+  const r = workspace(), t1 = T('2026-11-19T16:30:00+09:00');
+  writeData(r, 'themes.json', { at: t1 - 30 * MIN, model: 'm', items: [
+    { title: '삼성전자·SK하이닉스, AI 투자 우려 속 약세', summary: 'AI 투자에 대한 우려가 지속되며 삼성전자와 SK하이닉스 주가가 약세를 보였습니다', codes: ['005930', '000660'], refs: [] },
+    { title: '한화오션, 초대형 원유운반선 2척 수주', summary: '한화오션이 초대형 원유운반선 2척을 추가 수주했습니다', codes: ['042660'], refs: [] },
+    { title: 'SK하이닉스 급등에 삼성전자도 강세', summary: '', codes: ['000660'], refs: [] }] });
+  NET.calls = []; NET.bodies = [];
+  await pipeline(r, {}, t1, { refreshAll: false, themes: true });
+  assert.equal(NET.bodies.filter((b, i) => isGemini(NET.calls[i]) && b.includes("'큰 소식'")).length, 0, '묶을 때가 아님(30분 전)');
+  const th = read(r, 'themes.json');
+  assert.equal(th.at, t1 - 30 * MIN, '시각 그대로');
+  assert.deepEqual(th.items.map((x) => [x.title, x.summary, x.codes.join(',')]), [['삼성전자·SK하이닉스, AI 투자 우려', '', '005930,000660'], ['한화오션, 초대형 원유운반선 2척 수주', '한화오션이 초대형 원유운반선 2척을 추가 수주했습니다', '042660']], JSON.stringify(th.items));
 });
 await test('큰 소식(78차, 봇): 내 종목들의 최근 48시간 기사(원인 아닌 기사·시세 안내 빼고 같은 제목은 하나로 — 여러 종목에 걸린 것 먼저)를 AI가 묶음 · 엉뚱한 번호·빈 이름은 버리고 4개까지 · 관련 종목은 고른 기사가 걸린 종목 · 3시간 안엔 다시 안 함 · 한도 배분 몫이 없으면 안 부름', async () => {
   src.resetState(); src.setAiBudget(null);
