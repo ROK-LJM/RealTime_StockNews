@@ -24,6 +24,7 @@
   --ink: #15171c; --on-ink: #ffffff;
   --logo-bg: #16181d; --logo-line: #16181d;
   --shadow-pop: 0 8px 28px rgba(15, 17, 22, .14), 0 1px 3px rgba(15, 17, 22, .08);
+  --toast-ok: #3ddc84; --toast-bad: #ff6a5f;  /* 새로고침 알림창(92차) — 바탕이 글자색(검정)이라 밝은 초록·빨강 */
   --font: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", system-ui, sans-serif;
   --page-max: 1440px;
   --gutter: 24px;
@@ -51,6 +52,7 @@
   --ink: #edeff2; --on-ink: #111215;
   --logo-bg: #16181d; --logo-line: #363940;
   --shadow-pop: 0 10px 32px rgba(0, 0, 0, .55), 0 0 0 1px rgba(255, 255, 255, .04);
+  --toast-ok: #0f8a3e; --toast-bad: #d1342a;  /* 알림창 바탕이 밝아짐 */
 }
 /* 스크립트가 꺼져 theme.js가 못 돌 때만 — 기기 설정을 그대로 따른다(위 어두운 값과 같게 유지) */
 @media (prefers-color-scheme: dark) {
@@ -62,7 +64,7 @@
     --down: #4a90ff; --down-rgb: 74, 144, 255; --down-deep: #6aa4ff;
     --up-h3: rgba(255, 75, 95, .55); --up-h4: #d62d42; --down-h3: rgba(74, 144, 255, .55); --down-h4: #2f6fe0;
     --warn: #f2a93b; --warn-rgb: 242, 169, 59; --live: #2fd170; --live-rgb: 47, 209, 112;
-    --ok: #3ddc84; --bad: #ff6a5f; --ink: #edeff2; --on-ink: #111215; --logo-line: #363940;
+    --ok: #3ddc84; --bad: #ff6a5f; --ink: #edeff2; --on-ink: #111215; --logo-line: #363940; --toast-ok: #0f8a3e; --toast-bad: #d1342a;
   }
 }
 
@@ -109,7 +111,7 @@ button { cursor: pointer; }
   background: transparent; color: var(--text-2); text-decoration: none; white-space: nowrap;
 }
 .icon-btn:hover { background: var(--surface-3); color: var(--text); }
-/* 새로고침 중(91차) — 아이콘이 돈다 · 끝나면 시계가 4초 진하게(초까지) */
+/* 새로고침 중(91차) — 아이콘이 돈다 · 끝나면 버튼 아래 알림창(.rf-toast, 92차) */
 .icon-btn.busy .ic { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .icon-btn.busy .ic { animation: none; opacity: .45; } }
@@ -138,10 +140,22 @@ input::placeholder { color: var(--muted); }
 .controls { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .clock { margin-right: 8px; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .clock.warn { color: var(--warn); font-weight: 600; }
-.clock.now { color: var(--text); font-weight: 600; }
-.clock-s { display: none; }
 .refresh { display: inline-flex; align-items: center; gap: 6px; margin-right: 2px; font-size: 12.5px; color: var(--muted); }
 .help-link { font-size: 13px; font-weight: 600; }
+/* 새로고침 결과 알림창(92차) — 상단바 바로 아래, 버튼 가운데에 2초(실패는 3초). 위치·글은 app.js showRefreshToast.
+   바탕은 글자색(밝은 화면은 검정 · 어두운 화면은 흰색)이라 어느 화면에서도 눈에 띄고, 아이콘만 의미색(초록 = 됨 · 빨강 = 못 함) */
+.rf-toast {
+  position: fixed; z-index: 30; left: 0; top: 0;
+  display: flex; align-items: center; gap: 8px; padding: 9px 14px 9px 11px; border-radius: 10px;
+  background: var(--ink); color: var(--on-ink); font-size: 13px; font-weight: 600; line-height: 1.3; letter-spacing: -.01em; white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .22); pointer-events: none;
+  opacity: 0; visibility: hidden; transform: translateY(-6px);
+  transition: opacity .2s, transform .2s, visibility 0s .2s;
+}
+.rf-toast.show { opacity: 1; visibility: visible; transform: none; transition: opacity .2s, transform .2s; }
+.rf-toast .ic { color: var(--toast-ok); stroke-width: 2; }
+.rf-toast.bad .ic { color: var(--toast-bad); }
+@media (prefers-reduced-motion: reduce) { .rf-toast { transform: none; } }
 
 /* 페이지 본문 — 넓은 화면에서도 1440px 안에 */
 .page { max-width: var(--page-max); margin: 0 auto; padding: 20px var(--gutter) 8px; display: flex; flex-direction: column; gap: 16px; }
@@ -604,7 +618,6 @@ input::placeholder { color: var(--muted); }
   .brand { gap: 8px; font-size: 15px; }
   .logo { width: 24px; height: 24px; }
   .brand-long, .refresh-l, .help-l, .clock-l { display: none; }
-  .clock-s { display: inline; }
   .controls { gap: 0; } /* 아이콘 5개(새로고침·밝기·일정·설명서 등)와 제목이 한 줄에 들어가게 */
   .clock { margin-right: 4px; }
   .icon-btn { min-width: 30px; padding: 0 5px; }

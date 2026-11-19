@@ -82,7 +82,7 @@ function safeUrl(u) {
 function extLink(url, label) { return `<a href="${esc(safeUrl(url))}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`; }
 
 async function loadJson(name) {
-  _netFetches++; // 실제로 받은 데이터 파일(91차 — 새로고침 결과 '새 데이터 반영')
+  _netFetches++; // 실제로 받은 데이터 파일(91·92차 — 새로고침 결과 '새 데이터를 반영했어요')
   const r = await fetch(`./data/${name}?t=${Date.now()}`, { cache: 'no-store' });
   if (!r.ok) throw new Error(name + ' ' + r.status);
   return r.json();
@@ -432,7 +432,7 @@ async function loadQuotes() {
   if (extwhy && extwhy.items && typeof extwhy.items === 'object') state.extwhy = extwhy;
   state.data = data;
   state.checkedAt = Date.now();
-  renderClock(); // 상단 시계(91차부터 renderClock — 새로고침 버튼을 누른 뒤엔 초까지·결과)
+  renderClock(); // 상단 시계 — 확인 시각(새로고침 버튼의 결과는 버튼 아래 알림창, 92차)
   renderQuotes();
 }
 
@@ -1449,37 +1449,50 @@ async function loadStatus() {
   } catch { el.hidden = true; if (dEl) dEl.hidden = true; }
 }
 
-// ---------- 새로고침 버튼·시계(91차) ----------
+// ---------- 새로고침 버튼·알림(91·92차) ----------
 // 11/19 사용자 — 새로고침 버튼을 눌러도 새로고침됐는지 몰랐다(바뀐 파일이 없으면 화면이 그대로이고, 시계는 분까지라 같은 분 안에선 안 바뀜).
-// 누르면 아이콘이 돌고(끝날 때까지, 최소 0.6초) 겹쳐 누를 수 없으며, 끝나면 시계에 초까지와 결과('새 데이터 반영' — 봇이 그 사이 새로 만든 파일을 받음 ·
-// '이미 최신')를 4초 진하게(좁은 화면은 결과 글자 없이 초까지). 실패하면 '갱신 실패'가 그대로 보인다
-const SPIN_MIN_MS = 600, NOTE_MS = 4000;
-// 상단 시계 — 화면이 마지막으로 데이터를 확인한 시각(좁은 화면은 '확인'·결과 글자를 숨겨 상단바를 한 줄로)
+// 누르면 아이콘이 돌고(끝날 때까지, 최소 0.6초) 겹쳐 누를 수 없다(91차). 끝나면 버튼 바로 아래 작은 알림창(92차 — 사용자가 시안 중 B안을 고름,
+// 91차의 시계 글씨 대신): 초록 체크 + '새 데이터를 반영했어요'(봇이 그 사이 새로 만든 파일을 받음)·'이미 최신이에요' 2초,
+// 시세를 받지 못했으면 빨간 느낌표 + '새로고침하지 못했어요' 3초(시계는 '갱신 실패')
+const SPIN_MIN_MS = 600, TOAST_MS = 2000, TOAST_BAD_MS = 3000;
+// 상단 시계 — 화면이 마지막으로 데이터를 확인한 시각(좁은 화면은 '확인' 글자를 숨겨 상단바를 한 줄로)
 function renderClock() {
   const clock = $('#clock');
   if (!clock) return;
-  const n = state.clockNote, now = !!n && Date.now() < n.until;
-  const t = (o) => new Date(state.checkedAt || Date.now()).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', ...o, hour12: false });
-  // 좁은 화면은 '방금'만(초까지 붙이면 상단바 이름이 잘린다 — 375px에서 '주식시...')
-  clock.innerHTML = now ? `<span class="clock-l">확인 ${t({ second: '2-digit' })} · ${esc(n.msg)}</span><span class="clock-s">방금</span>` : `<span class="clock-l">확인 </span>${t({})}`;
-  clock.title = now ? `방금 새로고침 — ${n.msg}` : '화면이 마지막으로 데이터를 확인한 시각';
-  clock.classList.toggle('now', now);
+  clock.innerHTML = `<span class="clock-l">확인 </span>${new Date(state.checkedAt || Date.now()).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
+  clock.title = '화면이 마지막으로 데이터를 확인한 시각';
   clock.classList.remove('warn');
+}
+// 새로고침 결과 알림창 — 상단바 바로 아래, 버튼 가운데에 맞춤(화면 양끝 12px 안), 잠깐 뒤 사라짐
+let _toastTimer = 0;
+function showRefreshToast(ok, msg) {
+  const el = $('#rfToast'), btn = $('#refreshBtn');
+  if (!el || !btn) return;
+  el.classList.toggle('bad', !ok);
+  el.querySelector('use')?.setAttribute('href', ok ? '#i-ok' : '#i-alert');
+  const m = el.querySelector('.rf-msg');
+  if (m) m.textContent = msg;
+  const r = btn.getBoundingClientRect(), bar = $('.topbar')?.getBoundingClientRect();
+  const w = el.offsetWidth, vw = document.documentElement.clientWidth;
+  el.style.left = `${Math.round(Math.max(12, Math.min(vw - 12 - w, r.left + r.width / 2 - w / 2)))}px`;
+  el.style.top = `${Math.round((bar ? bar.bottom : r.bottom) + 8)}px`;
+  el.classList.add('show');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.remove('show'), ok ? TOAST_MS : TOAST_BAD_MS);
 }
 async function refreshNow() {
   const btn = $('#refreshBtn');
   if (!btn || btn.classList.contains('busy')) return;
   btn.classList.add('busy');
   btn.setAttribute('aria-busy', 'true');
-  const n0 = _netFetches, t0 = Date.now();
+  const n0 = _netFetches, c0 = state.checkedAt, t0 = Date.now();
   try { await tick(true); } catch (e) { console.warn('새로고침 실패:', e); }
   await new Promise((r) => setTimeout(r, Math.max(0, SPIN_MIN_MS - (Date.now() - t0))));
   btn.classList.remove('busy');
   btn.removeAttribute('aria-busy');
-  if ($('#clock')?.classList.contains('warn')) return; // 실패면 '갱신 실패'가 그대로
-  state.clockNote = { msg: _netFetches > n0 ? '새 데이터 반영' : '이미 최신', until: Date.now() + NOTE_MS };
-  renderClock();
-  setTimeout(() => { if (!$('#clock')?.classList.contains('warn')) renderClock(); }, NOTE_MS + 100);
+  // 시세를 새로 확인했을 때만 됨 — 못 받으면 loadQuotes가 확인 시각을 그대로 두고 시계를 '갱신 실패'로(첫 화면 전 실패도 여기서 걸림)
+  if (state.checkedAt === c0) showRefreshToast(false, '새로고침하지 못했어요');
+  else showRefreshToast(true, _netFetches > n0 ? '새 데이터를 반영했어요' : '이미 최신이에요');
 }
 async function tick(full = false) {
   // 개장 직후 창(pollSec)에 들어가거나 벗어나면 확인 간격을 바꾼다

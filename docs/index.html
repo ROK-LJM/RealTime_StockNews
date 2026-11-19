@@ -35,6 +35,8 @@
     <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5.5M6.5 11 12 5.5l5.5 5.5"/></symbol>
     <symbol id="i-x" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
     <symbol id="i-cal" viewBox="0 0 24 24"><rect x="4.5" y="5.5" width="15" height="14" rx="2.4"/><path d="M4.5 10h15M8.8 3.6v3.6M15.2 3.6v3.6"/></symbol>
+    <symbol id="i-ok" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6"/><path d="M8.3 12.4l2.6 2.6 4.9-5.2"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6"/><path d="M12 7.8v5"/><path d="M12 16.2h.01"/></symbol>
   </svg>
 
   <header class="topbar">
@@ -60,6 +62,8 @@
       </div>
     </div>
   </header>
+  <!-- 새로고침 결과 알림(92차) — 버튼을 누른 뒤 버튼 아래에 잠깐. 위치·글은 app.js showRefreshToast, 화면 읽기 프로그램은 바뀐 글을 읽어 줌 -->
+  <div id="rfToast" class="rf-toast" role="status" aria-live="polite"><svg class="ic" aria-hidden="true"><use href="#i-ok"/></svg><span class="rf-msg"></span></div>
 
   <main class="page">
     <!-- 시장 — 공포·탐욕 막대 + 지수·환율. 내용은 app.js loadMarket -->

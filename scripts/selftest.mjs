@@ -3657,17 +3657,26 @@ await test('넥스트레이드 프리마켓(90차, P11): 국내 개장 전 칸 �
   assert.deepEqual(JSON.parse(JSON.stringify(src.overOf({ ...over, openPrice: '197,800', accumulatedTradingValue: '1조', tradableStatus: 'tradable', compareToPreviousPrice: { code: '2', name: 'RISING' } }))),
     { ...over, compareToPreviousPrice: 'RISING' }, '화면이 쓰는 칸만');
 });
-await test('새로고침 버튼(91차): 누르면 아이콘이 돎(끝날 때까지)·겹쳐 눌러도 한 번 · 끝나면 시계에 초까지와 결과(새 데이터 반영·이미 최신) · 실패면 갱신 실패 그대로 · 4초 뒤엔 분까지', async () => {
+await test('새로고침 버튼(91·92차): 누르면 아이콘이 돎(끝날 때까지)·겹쳐 눌러도 한 번 · 끝나면 버튼 아래 알림창 — 새 데이터를 반영했어요·이미 최신이에요 2초, 시세를 못 받으면 새로고침하지 못했어요 3초 · 버튼 가운데·화면 안 · 시계는 확인 시각(분까지)', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
-  const blk = appJs.slice(appJs.indexOf('// ---------- 새로고침 버튼·시계(91차)'), appJs.indexOf('async function tick('));
-  const el = () => { const cls = new Set(); return { innerHTML: '', title: '', cls, attrs: {}, classList: { add: (c) => cls.add(c), remove: (c) => cls.delete(c), contains: (c) => cls.has(c), toggle: (c, on) => (on ? cls.add(c) : cls.delete(c)) },
+  const html = fs.readFileSync(new URL('../docs/index.html', import.meta.url), 'utf8');
+  const css = fs.readFileSync(new URL('../docs/style.css', import.meta.url), 'utf8');
+  const blk = appJs.slice(appJs.indexOf('// ---------- 새로고침 버튼·알림(91·92차)'), appJs.indexOf('async function tick('));
+  const el = (x = {}) => { const cls = new Set(); return { innerHTML: '', textContent: '', title: '', style: {}, cls, attrs: {}, ...x,
+    classList: { add: (c) => cls.add(c), remove: (c) => cls.delete(c), contains: (c) => cls.has(c), toggle: (c, on) => (on ? cls.add(c) : cls.delete(c)) },
     setAttribute(k, v) { this.attrs[k] = v; }, removeAttribute(k) { delete this.attrs[k]; } }; };
-  const clock = el(), btn = el();
-  let ticks = 0, add = 0, fail = false;
-  const ctx = { $: (s) => (s === '#clock' ? clock : s === '#refreshBtn' ? btn : null), state: {}, esc: (s) => String(s), console, setTimeout, _netFetches: 0,
-    tick: async (full) => { ticks++; assert.equal(full, true, '끝까지 기다리는 새로고침'); ctx._netFetches += add; if (fail) { clock.innerHTML = '갱신 실패'; clock.classList.add('warn'); } else ctx.state.checkedAt = Date.now(); } };
-  const f = vm.runInNewContext(`${blk}; ({ refreshNow, renderClock })`, ctx);
+  const use = el(), msg = el();
+  const toast = el({ offsetWidth: 190, querySelector: (s) => (s === 'use' ? use : s === '.rf-msg' ? msg : null) });
+  let rect = { left: 1040, width: 34, bottom: 44 };
+  const clock = el(), btn = el({ getBoundingClientRect: () => rect }), bar = el({ getBoundingClientRect: () => ({ bottom: 55 }) });
+  const doc = { documentElement: { clientWidth: 1280 } }, hides = [];
+  let ticks = 0, add = 0, fail = false, boom = false;
+  const ctx = { $: (s) => ({ '#clock': clock, '#refreshBtn': btn, '#rfToast': toast, '.topbar': bar })[s] || null, state: { checkedAt: 1 }, console: { warn() {} }, document: doc, _netFetches: 0,
+    setTimeout: (fn, ms) => { if (ms >= 1000) { hides.push({ fn, ms }); return hides.length; } return setTimeout(fn, ms); }, clearTimeout: () => {},
+    tick: async (full) => { ticks++; assert.equal(full, true, '끝까지 기다리는 새로고침'); if (boom) throw new Error('x'); ctx._netFetches += add;
+      if (fail) { clock.textContent = '갱신 실패'; clock.classList.add('warn'); } else ctx.state.checkedAt += 1000; } };
+  const f = vm.runInNewContext(`${blk}; ({ refreshNow, renderClock, showRefreshToast })`, ctx);
   add = 2;
   const p = f.refreshNow();
   assert.ok(btn.cls.has('busy') && btn.attrs['aria-busy'] === 'true', '누르는 즉시 아이콘이 돎');
@@ -3675,17 +3684,39 @@ await test('새로고침 버튼(91차): 누르면 아이콘이 돎(끝날 때까
   await Promise.all([p, p2]);
   assert.equal(ticks, 1, '겹쳐 눌러도 한 번');
   assert.ok(!btn.cls.has('busy') && !('aria-busy' in btn.attrs), '끝나면 멈춤');
-  assert.ok(/^<span class="clock-l">확인 \d{2}:\d{2}:\d{2} · 새 데이터 반영<\/span><span class="clock-s">방금<\/span>$/.test(clock.innerHTML) && clock.cls.has('now'), '초까지·새 데이터 반영(좁은 화면은 방금): ' + clock.innerHTML);
+  assert.ok(toast.cls.has('show') && !toast.cls.has('bad') && use.attrs.href === '#i-ok' && msg.textContent === '새 데이터를 반영했어요', '알림창 — 새 데이터: ' + msg.textContent);
+  assert.deepEqual([toast.style.left, toast.style.top], ['962px', '63px'], '버튼 가운데·상단바 바로 아래');
+  assert.equal(hides.at(-1).ms, 2000, '2초 뒤');
+  hides.at(-1).fn();
+  assert.ok(!toast.cls.has('show'), '사라짐');
   add = 0;
   await f.refreshNow();
-  assert.ok(clock.innerHTML.includes(' · 이미 최신') && clock.title.includes('방금 새로고침'), '이미 최신: ' + clock.innerHTML);
+  assert.ok(toast.cls.has('show') && msg.textContent === '이미 최신이에요', '이미 최신: ' + msg.textContent);
+  // 화면 밖으로 나가지 않게 — 오른쪽(휴대폰 좁은 화면)·왼쪽 끝 12px 안
+  doc.documentElement.clientWidth = 390; rect = { left: 256, width: 30, bottom: 42 }; toast.offsetWidth = 260;
+  f.showRefreshToast(true, '이미 최신이에요');
+  assert.equal(toast.style.left, '118px', '오른쪽 끝 12px 안');
+  rect = { left: 10, width: 30, bottom: 42 };
+  f.showRefreshToast(true, '이미 최신이에요');
+  assert.equal(toast.style.left, '12px', '왼쪽 끝 12px 안');
+  doc.documentElement.clientWidth = 1280; rect = { left: 1040, width: 34, bottom: 44 }; toast.offsetWidth = 190;
+  // 실패 — 시세를 못 받음(시계는 갱신 실패 그대로)·새로고침 중 오류
   fail = true;
   await f.refreshNow();
-  assert.equal(clock.innerHTML, '갱신 실패', '실패면 그대로');
-  // 4초 뒤 — 분까지·보통 글자
-  ctx.state.clockNote = { msg: '이미 최신', until: Date.now() - 1 };
+  assert.ok(toast.cls.has('bad') && use.attrs.href === '#i-alert' && msg.textContent === '새로고침하지 못했어요' && hides.at(-1).ms === 3000, '실패 3초: ' + msg.textContent);
+  assert.equal(clock.textContent, '갱신 실패', '시계는 갱신 실패 그대로');
+  fail = false; boom = true;
+  await f.refreshNow();
+  assert.ok(toast.cls.has('bad') && msg.textContent === '새로고침하지 못했어요' && !btn.cls.has('busy'), '새로고침 중 오류도 못 함(아이콘은 멈춤)');
+  boom = false;
+  await f.refreshNow();
+  assert.ok(!toast.cls.has('bad') && use.attrs.href === '#i-ok' && msg.textContent === '이미 최신이에요', '다시 되면 초록 체크');
+  // 시계 — 확인 시각(분까지)·경고 지움
   f.renderClock();
-  assert.ok(/^<span class="clock-l">확인 <\/span>\d{2}:\d{2}$/.test(clock.innerHTML) && !clock.cls.has('now') && !clock.cls.has('warn'), '분까지: ' + clock.innerHTML);
+  assert.ok(/^<span class="clock-l">확인 <\/span>\d{2}:\d{2}$/.test(clock.innerHTML) && !clock.cls.has('warn'), '시계: ' + clock.innerHTML);
+  // 화면·스타일 — 알림창 자리(읽어 주는 상태 영역)·아이콘 두 개·아이콘 색(밝은 화면·어두운 화면·기기 설정 세 곳)
+  assert.ok(html.includes('<div id="rfToast" class="rf-toast" role="status" aria-live="polite">') && html.includes('<symbol id="i-ok"') && html.includes('<symbol id="i-alert"'), '알림창 자리·아이콘');
+  assert.ok(css.includes('.rf-toast.show {') && (css.match(/--toast-ok:/g) || []).length === 3 && (css.match(/--toast-bad:/g) || []).length === 3, '보임·색 세 곳');
   const clockOnLoad = appJs.includes('state.checkedAt = Date.now();\r\n  renderClock();') || appJs.includes('state.checkedAt = Date.now();\n  renderClock();');
   assert.ok(appJs.includes("$('#refreshBtn')?.addEventListener('click', refreshNow);") && appJs.includes('if (full) await q;') && clockOnLoad, '버튼·끝까지 기다림·시세 받을 때 시계');
 });
