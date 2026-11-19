@@ -665,6 +665,15 @@ const MUTANTS = [
   ["[큰 소식] 저장 순서 안 바꿈", F, ".sort((a, b) => b.codes.length - a.codes.length) });", " });"],
   ["[큰 소식] 다른 종목 기사 묶기 지시 없음", S, " — 다른 내 종목에 걸린 기사도 같은 사건이면 모두 refs에 넣을 것(관련 종목은 고른 기사가 걸린 종목으로 정해진다. 예: 한 회사의 실적 발표면 그 회사 기사와 '○○, △△ 호실적에 급등'처럼 그 소식에 움직인 다른 종목 기사까지)", ""],
   ["[큰 소식] 여러 종목 소식부터 지시 없음", S, "여러 내 종목에 걸친 소식부터, 그다음 중요한 것.", "중요한 것부터."],
+  // ---------- 90차 — 넥스트레이드 프리마켓(P11) ----------
+  ["[NXT 프리] 칸 띠 없음", A, "return nxtPreOf(q); // 국내 개장 전엔 넥스트레이드 프리마켓(90차)", "return null;"],
+  ["[NXT 프리] 개장 전만 아님", A, "marketOf(q) === 'KR' && q.marketStatus === 'PREOPEN' ? q.over : null;", "marketOf(q) === 'KR' ? q.over : null;"],
+  ["[NXT 프리] 국내 아니어도", A, "marketOf(q) === 'KR' && q.marketStatus === 'PREOPEN' ? q.over : null;", "q.marketStatus === 'PREOPEN' ? q.over : null;"],
+  ["[NXT 프리] 장 구분 안 봄", A, "o.tradingSessionType !== 'PRE_MARKET' || ", ""],
+  ["[NXT 프리] 넥스트레이드 상태 안 봄", A, " || o.overMarketStatus !== 'OPEN') return null;", ") return null;"],
+  ["[NXT 프리] 체결 없어도", A, " || !(vol > 0)", ""],
+  ["[NXT 프리] 말풍선 없음", A, "${x ? ` · ${x.label} ${fmtPct(x.changePct)}(전날 종가 대비)` : ''}", ""],
+  ["[시간외 시장] 칸 다 남김", S, "for (const k of OVER_KEYS) {", "for (const k of Object.keys(o)) {"],
   // ---------- 89차 — 진단 끝말 지금 등락 · 큰 소식 기사 ----------
   ["[끝말] 화면 왜 움직였나 지금 등락 안 봄", A, "text: toneTail(a.headline, q.changePct) };", "text: a.headline };"],
   ["[끝말] 화면 카드 지금 등락 안 봄", A, "const head = oldMd ? data.headline : toneTail(data.headline, q.changePct);", "const head = data.headline;"],

@@ -3620,6 +3620,33 @@ await test('큰 소식 기사(89차): 관련 종목마다 그 종목에 걸린 �
   const many = src.themeOut({ title: 'y', summary: '', refs: [1, 4] }, [h('a', ['A', 'B'], 1), h('b', ['C'], 2), h('c', ['D'], 3), h('d', ['E'], 4)]);
   assert.deepEqual(many.refs.map((x) => x.t), ['a', 'd'], '고른 기사만');
 });
+await test('넥스트레이드 프리마켓(90차, P11): 국내 개장 전 칸 아래 띠 "NXT 프리 ±x%"(전날 종가 대비 — 체결이 있을 때만)·말풍선·카드 시간외 줄 · 장이 열렸거나 장 구분이 다르면 없음 · 봇은 화면이 쓰는 칸만 저장', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const top = appJs.slice(appJs.indexOf('function fmtPrice('), appJs.indexOf('\n', appJs.indexOf('function esc(')) + 1);
+  const links = appJs.slice(appJs.indexOf('function safeUrl('), appJs.indexOf('\n', appJs.indexOf('function extLink(')) + 1);
+  const a = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const b = appJs.slice(appJs.indexOf('// ---------- 데이터 지연 경고'), appJs.indexOf('// ---------- 내 종목 한눈에'));
+  const c = appJs.slice(appJs.indexOf('// ---------- 내 종목 한눈에'), appJs.indexOf('const THEME_STALE_MS'));
+  const f = vm.runInNewContext(`${top}${links}${a}${b}${c}; ({ tileHtml, extRow, extOf })`, { state: { disc: {}, hist: {}, market: {}, analysis: {}, moves: {}, news: {}, cal: null, extwhy: null },
+    location: { href: 'https://example.com/' }, URL, lastTimeOf: () => '', kstYmd: () => '' });
+  const over = { tradingSessionType: 'PRE_MARKET', overMarketStatus: 'OPEN', overPrice: '196,000', fluctuationsRatio: '0.67', localTradedAt: '2026-11-20T08:35:12.1+09:00', accumulatedTradingVolumeRaw: '152300' };
+  const kr = (x) => ({ ok: true, code: '005930', name: '삼성전자', market: 'KR', currency: 'KRW', exch: 'KOSPI', marketStatus: 'PREOPEN', price: 194700, change: 0, changePct: 0, volume: null, asOf: '2026-11-20T08:35:00+09:00', over, ...x });
+  const t = f.tileHtml(kr({}));
+  assert.ok(t.includes('<span class="t-pct">개장 전</span>') && t.includes('<span class="t-ext up">NXT 프리 +0.67%</span>') && /class="tile flat h0 pend"/.test(t), '칸은 개장 전 그대로 · 아래 띠: ' + t);
+  assert.ok(t.includes('넥스트레이드 프리마켓 +0.67%(전날 종가 대비)'), '말풍선: ' + t);
+  assert.ok(f.tileHtml(kr({ over: { ...over, fluctuationsRatio: '-1.25', overPrice: '192,266' } })).includes('<span class="t-ext down">NXT 프리 -1.25%</span>'), '내리면 파랑');
+  assert.ok(!f.tileHtml(kr({ over: { ...over, accumulatedTradingVolumeRaw: '' } })).includes('t-ext'), '체결 없음(수능일처럼 안 열린 날)');
+  assert.ok(!f.tileHtml(kr({ over: { ...over, tradingSessionType: 'AFTER_MARKET' } })).includes('t-ext'), '장 구분이 다름(밤사이 남은 애프터마켓 값)');
+  assert.ok(!f.tileHtml(kr({ over: { ...over, overMarketStatus: 'PREOPEN' } })).includes('t-ext'), '넥스트레이드도 개장 전');
+  assert.ok(!f.tileHtml(kr({ marketStatus: 'OPEN', volume: 10, changePct: 0.5 })).includes('NXT'), '장이 열리면 정규장');
+  assert.equal(f.extOf({ ...kr({}), market: 'US', currency: 'USD' }), null, '국내만');
+  const row = f.extRow(kr({}));
+  assert.ok(row.includes('>넥스트레이드 프리마켓</span>') && row.includes('<b>196,000</b>') && row.includes('+1,300 (+0.67%)'), '카드 시간외 줄: ' + row);
+  // 봇 — 화면이 쓰는 칸만(그 밖의 시가·누적 거래대금 등은 뺌)
+  assert.deepEqual(JSON.parse(JSON.stringify(src.overOf({ ...over, openPrice: '197,800', accumulatedTradingValue: '1조', tradableStatus: 'tradable', compareToPreviousPrice: { code: '2', name: 'RISING' } }))),
+    { ...over, compareToPreviousPrice: 'RISING' }, '화면이 쓰는 칸만');
+});
 await test('시간외 시장 칸(80차): 국내 시세에 네이버 overMarketPriceInfo(넥스트레이드 프리·애프터마켓 등)를 그대로 남김 — 글자·숫자 칸은 그대로, 객체 칸은 name · 없으면 안 붙음', async () => {
   const over = { tradingSessionType: 'PRE_MARKET', overMarketStatus: 'OPEN', overPrice: '71,500', compareToPreviousClosePrice: '1,500', fluctuationsRatio: '2.14',
     compareToPreviousPrice: { code: '2', text: '상승', name: 'RISING' }, localTradedAt: '2026-10-15T08:40:00+09:00', tradeStopType: { code: '1', text: '운영', name: 'TRADING' }, list: [1, 2], nothing: null };

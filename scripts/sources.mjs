@@ -79,10 +79,13 @@ async function resolveKR(code) {
 // 시간외 시장 칸(80차, 네이버 overMarketPriceInfo — 넥스트레이드 프리마켓 08:00~08:50·애프터마켓 등). 11/18 사용자 '한눈에 칸은 판단에 쓰니 명확해야' —
 // 개장 전 31칸이 모두 어제 종가(0%)라 판단할 거리가 없었다. 칸 이름·값의 뜻(장 구분·가격·등락 방향)을 실제 아침 값으로 확인한 뒤 표시를 정하려고 우선
 // 글자·숫자 칸은 그대로, 객체 칸은 name만 남긴다(11/06 응답에 tradingSessionType·overMarketStatus·overPrice·fluctuationsRatio·tradeStopType… 있음)
+// 화면이 쓰는 칸만 남긴다(90차 — 80차엔 뜻을 보려고 모두 받아 뒀다: 종목마다 약 20칸 → 9칸, 넥스트레이드 종목 21개면 시세 파일 약 9KB 줄어듦)
+const OVER_KEYS = ['tradingSessionType', 'overMarketStatus', 'overPrice', 'compareToPreviousClosePrice', 'compareToPreviousPrice', 'fluctuationsRatio', 'localTradedAt', 'tradeStopType', 'accumulatedTradingVolumeRaw'];
 export function overOf(o) {
   if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
   const out = {};
-  for (const [k, v] of Object.entries(o)) {
+  for (const k of OVER_KEYS) {
+    const v = o[k];
     if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') out[k] = v;
     else if (v && typeof v === 'object' && !Array.isArray(v) && typeof v.name === 'string') out[k] = v.name;
   }

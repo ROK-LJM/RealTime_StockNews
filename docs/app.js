@@ -980,7 +980,7 @@ function tileHtml(q) {
   const x = extOf(q);
   const mk = sixMonthMark(q, state.hist[q.code]);
   const vs = vsMarket(q, state.market?.indices);
-  const tip = pre ? `${q.name} — 개장 전이라 어제 종가 그대로예요(첫 체결 뒤 바뀜)${disc ? ` · 오늘 주요 공시: ${disc.title}` : ''}` : pend ? `${q.name} — ${PENDING_TIP}${disc ? ` · 오늘 주요 공시: ${disc.title}` : ''}`
+  const tip = pre ? `${q.name} — 개장 전이라 어제 종가 그대로예요(첫 체결 뒤 바뀜)${x ? ` · ${x.label} ${fmtPct(x.changePct)}(전날 종가 대비)` : ''}${disc ? ` · 오늘 주요 공시: ${disc.title}` : ''}` : pend ? `${q.name} — ${PENDING_TIP}${disc ? ` · 오늘 주요 공시: ${disc.title}` : ''}`
     : `${q.name} ${fmtPct(p)}${halt ? ` · 매매 정지${since ? `(${since}부터)` : ''} — 값은 멈추기 직전 가격` : ''}${vs ? ` · ${vs.name} 대비 ${fmtPctP(vs.diff)}${vs.follows ? '(시장 따라)' : ''}` : ''}${x ? ` · ${x.label} ${fmtPct(x.changePct)}` : ''}${mk ? ` · 6개월 ${mk === 'high' ? '신고가' : '신저가'}` : ''}${disc ? ` · 오늘 주요 공시: ${disc.title}` : ''}`;
   // 시간외 가격이 있으면 큰 숫자 앞에 '정규장'(칸 색도 정규장 기준), 칸 아래 띠에 애프터·프리·시간외 등락 — 띠는 카드색 바탕에 방향색 글자라 칸 색과 상관없이 읽힌다(79차,
   // 11/18 제보 — 슈퍼 마이크로 컴퓨터 '-3.54% / 애프터 +4.27%'에서 큰 숫자·파란 칸이 무엇인지, 애프터가 어느 쪽인지 칸만 봐서는 분명하지 않았다)
@@ -993,10 +993,21 @@ function tileHtml(q) {
 // 등락은 정규장 종가 대비, 시각은 마지막 체결이 있었던 5분봉 시각.
 function extOf(q) {
   const x = q && q.ok && q.marketStatus !== 'OPEN' ? q.ext : null;
-  if (!x || !Number.isFinite(x.price) || !Number.isFinite(x.changePct)) return null;
+  if (!x || !Number.isFinite(x.price) || !Number.isFinite(x.changePct)) return nxtPreOf(q); // 국내 개장 전엔 넥스트레이드 프리마켓(90차)
   // 국내는 정규장 뒤 시간외 단일가 가격(34차 — 봇이 정규장 종가를 지키고 붙임)
   const pre = x.session === 'pre', kr = marketOf(q) === 'KR';
   return { ...x, label: kr ? '시간외' : pre ? '프리마켓' : '애프터마켓', short: kr ? '시간외' : pre ? '프리' : '애프터' };
+}
+// 국내 넥스트레이드 프리마켓(90차, P11) — 개장 전(08:00~08:50) 넥스트레이드에서 체결된 가격, 등락은 전날 종가 대비(봇이 받아 둔 q.over — 80차).
+// 개장 전 칸은 '개장 전'만 보여 아침 분위기를 알 수 없었다. 체결이 있을 때만(거래량 > 0 — 11/19 수능일처럼 열리지 않은 날은 'PREOPEN'·거래량 없음),
+// 장 구분이 프리마켓일 때만(밤사이 남은 애프터마켓 값은 아님), 장이 열리면 정규장 가격
+function nxtPreOf(q) {
+  const o = q && q.ok && marketOf(q) === 'KR' && q.marketStatus === 'PREOPEN' ? q.over : null;
+  if (!o || o.tradingSessionType !== 'PRE_MARKET' || o.overMarketStatus !== 'OPEN') return null;
+  const num = (v) => Number(String(v ?? '').replace(/,/g, ''));
+  const price = num(o.overPrice), pct = num(o.fluctuationsRatio), vol = num(o.accumulatedTradingVolumeRaw), at = Date.parse(o.localTradedAt);
+  if (!(price > 0) || !Number.isFinite(pct) || !(vol > 0) || !Number.isFinite(at)) return null;
+  return { session: 'pre', price, change: q.price > 0 ? price - q.price : null, changePct: pct, at, label: '넥스트레이드 프리마켓', short: 'NXT 프리' };
 }
 function extRow(q) {
   const x = extOf(q);
