@@ -624,6 +624,7 @@ const PRICE_ONLY = [
   /^[^\s,…·]+(?:\s[^\s,…·]+)?\s거래량\s*[\d,]+만?주…\s*[\d만,.]+원\s*형성$/, // '한화오션 거래량 587,295주…47,650원 형성'(62차 — 잡포스트 자동 기사)
   /^[\d만,.]+원\s*기록한\s[^,]+,\s*거래대금\s*[\d,.]+(?:백만|억)원$/, // '109,100원 기록한 안랩, 거래대금 43,839백만원'(62차)
   /^[^\s,…·]+(?:\s[^\s,…·]+)?\s[\d만,.]+원\s*(?:약|강)?보합권?(?:…|$)/, // 'LS ELECTRIC 12만400원 약보합…장중 낙폭 축소'·'대덕전자 14만6200원 보합권…'(62차 — 보합 기사는 ±2% 움직임의 이유일 수 없다)
+  /주가,?\s*(?:\d{1,2}월\s*\d{1,2}일\s*)?(?:장중|장\s?초반|장\s?마감|오전|오후)?\s*[\d,.]+원\s*(?:내린|오른)\s*[\d,.]+원\s*(?:기록|마감|거래|형성)?$/, // '효성중공업 주가, 장중 114,000원 내린 1,682,000원 기록'(97차 보완)
 ];
 // 제목 끝에 붙는 매체의 꼭지 이름(' : 기업주식정보'·' : 경제')은 떼고 판단한다
 const coreTitle = (t) => String(t ?? '').trim().replace(/\s:\s\S{1,10}$/, '');
@@ -689,15 +690,17 @@ const tickerAt = (t, n) => { const m = /^[A-Z][A-Z.\-]{0,9}$/.test(n || '') ? t.
 const moveWhy = (t, names) => (names || []).some((n) => { const i = tickerAt(t, n); return i >= 0 && MOVE_WHY_RE.test(t.slice(i)); });
 // 지난 거래일 시세 기사(97차) — 거래일 전 기사가 그날의 주가 움직임을 '…1.60% 조정'·'8%대 급등'·'Falls 1.7%'처럼 전한 것이면 오늘 움직임의 이유가 아니다
 // (11/20 대덕전자 -10.50%(코스피 -4.36%)의 '왜 움직였나'가 11/19 '영업이익 259% 늘어난 대덕전자, 주가는 1.60% 조정'이었다). 뉴스 목록엔 그대로, 봇·화면 같음
-// 그날 거래를 전한 [특징주]·'장중' 기사도 같다(97차 보완 — 그 뒤 대덕전자 -11.44%의 이유가 11/19 '[특징주] 대덕전자 장중 7만원대…코스피200 편입 확정')
-const PAST_MOVE_RE = /\[특징주\]|장중|\d+(?:\.\d+)?%\s?대?\s?(?:상승|하락|급등|급락|강세|약세|조정|올라|오른|올랐|내려|내린|내렸|떨어|뛰었|빠졌|오름|내림)|\b(?:ris(?:e|es|ing)|rose|fall(?:s|ing)?|fell|jump(?:s|ed)?|drop(?:s|ped)?|gain(?:s|ed)?|slid(?:e|es|ing)?|sink(?:s|ing)?|sank|surg(?:e|es|ed)|climb(?:s|ed)?|tumbl(?:e|es|ed)|plung(?:e|es|ed)|soar(?:s|ed)?|slip(?:s|ped)?)\s+(?:by\s+)?[\d.]+%/i;
+// 그날 거래를 전한 [특징주]·'장중' 기사도 같다(97차 보완 — 그 뒤 대덕전자 -11.44%의 이유가 11/19 '[특징주] 대덕전자 장중 7만원대…코스피200 편입 확정').
+// 지난 기사는 오늘 움직임과 방향이 같을 때만(방향을 모르면 아님 — 그 다음엔 11/19 '두산퓨얼셀·대덕전자·효성 코스피200 편입…내달 11일 반영'이 -10.73%의 이유였다).
+// 그날 거래를 전한 말: [특징주]·[마감분석]·장중·장 초반·애프터마켓·프리마켓·시간외·'주가 약세'·'…% 하락'·'2.18%↓'·'7만7600원 약세'·'500원 내린'(11/19 기사들)
+const PAST_MOVE_RE = /\[특징주\]|\[마감분석\]|장중|장\s?초반|애프터마켓|프리마켓|시간외|주가[가는]?\s?(?:약세|강세|상승|하락|급등|급락|보합)|\d+(?:\.\d+)?%\s?대?\s?(?:상승|하락|급등|급락|강세|약세|조정|올라|오른|올랐|내려|내린|내렸|떨어|뛰었|빠졌|오름|내림|↑|↓)|\d[\d,]*원\s?(?:대\s?)?(?:으로\s?)?(?:약세|강세|상승|하락|급등|급락|마감|내려|올라|내린|오른)|\b(?:ris(?:e|es|ing)|rose|fall(?:s|ing)?|fell|jump(?:s|ed)?|drop(?:s|ped)?|gain(?:s|ed)?|slid(?:e|es|ing)?|sink(?:s|ing)?|sank|surg(?:e|es|ed)|climb(?:s|ed)?|tumbl(?:e|es|ed)|plung(?:e|es|ed)|soar(?:s|ed)?|slip(?:s|ped)?)\s+(?:by\s+)?[\d.]+%/i;
 function pickReasonNews(items, pct, day, ymd, names = []) {
   const s = Math.sign(Number(pct) || 0);
   const dir = (it) => newsDir(it, names);
   const tier = (it) => (/\[특징주\]/.test(it.title) && s && dir(it) === s && Number.isFinite(it.pubMs) && ymd(it.pubMs) === day ? 0
     : weakTitle(it.title) ? 3 : s && dir(it) === s ? (moveWhy(it.title, names) ? 1 : 1.5) : 2);
   return (Array.isArray(items) ? items : []).filter((it) => it && it.title && !priceOnly(it.title) && !LISTING_RE.test(it.title) && !CSR_RE.test(it.title) && !(s && dir(it) === -s)
-      && !(Number.isFinite(it.pubMs) && ymd(it.pubMs) < day && PAST_MOVE_RE.test(it.title))) // 지난 거래일 시세 기사는 오늘 이유 아님(97차)
+      && !(Number.isFinite(it.pubMs) && ymd(it.pubMs) < day && (PAST_MOVE_RE.test(it.title) || dir(it) !== s))) // 지난 거래일 시세 기사·방향이 같지 않은 지난 기사는 오늘 이유 아님(97차)
     .map((it, i) => [tier(it), i, it]).sort((a, b) => a[0] - b[0] || a[1] - b[1])[0]?.[2] || null;
 }
 // O1 시장 대비 — 종목마다 같은 시장 지수와 비교(국내 상장 시장별 코스피·코스닥, 미국 나스닥 상장은 나스닥 · 그 밖은 S&P 500).
