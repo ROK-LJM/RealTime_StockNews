@@ -347,10 +347,26 @@ async function loadMarket() {
 }
 
 // ---------- 코스피·코스닥 급등락 핵심 이유 + 수급 (메인 배너) ----------
+// AI 핵심의 지수 등락 폭을 지금 등락에 맞춘다(100차 — 11/20 코스피 -5.9%인데 14:20 분석이 '미국 빅테크 급락 여파, 코스피 4%대 급락': 기사 제목
+// '[속보] 코스피, 4%대 급락'의 숫자를 옮겨 썼고 재분석 간격(90분) 사이엔 그대로 남는다). 두 지수 이름 바로 뒤(조사·'지수'까지)의 'N%대'·'N.NN%'·'N% 넘게'만 —
+// 다른 지수·종목의 숫자, '장중 4%대까지'처럼 이름과 떨어진 숫자, '5% 가까이' 같은 어림, '전날 코스피 4%대'는 그대로 · 보합(±1% 안쪽)인 지수와
+// 오늘 09시 전 분석(개장 전 '지난 장 핵심'·어제 판단을 이어 쓴 것)엔 손대지 않음
+function coreMag(text, idx, aiAt, now = Date.now()) {
+  const s = String(text ?? '');
+  const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString();
+  if (!Number.isFinite(aiAt) || kst(aiAt).slice(0, 10) !== kst(now).slice(0, 10) || kst(aiAt).slice(11, 16) < '09:00') return s;
+  return (idx || []).reduce((t, [name, pct]) => {
+    if (!name || !Number.isFinite(pct) || Math.abs(pct) < 1) return t;
+    const n = Math.floor(Math.abs(pct)), nm = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return t.replace(new RegExp(`(?<!(?:전날|전일|어제|간밤)\\s?)(${nm}(?:\\s?지수)?(?:가|이|는|은|도)?\\s*)(\\d{1,2}(?:\\.\\d+)?)%(대|\\s?(?:넘게|넘는|넘어|이상))?`, 'g'),
+      (m, pre, num, tail) => (tail === '대' ? `${pre}${n}%대` : tail ? `${pre}${n}%${tail}` : num.includes('.') ? `${pre}${Math.abs(pct).toFixed(2)}%` : m));
+  }, s);
+}
 function renderBriefs(briefs) {
   const el = $('#briefs');
   if (!el) return;
   if (!briefs || !briefs.length) { el.innerHTML = ''; return; }
+  const mags = briefs.map((x) => [x.name, x.changePct]); // AI 핵심 속 두 지수의 등락 폭을 지금 등락으로(100차)
   el.innerHTML = briefs.map((b) => {
     const pct = b.changePct ?? 0;
     const { est, dirCls, cardCls, arrow, label } = briefLook(pct, (state.market?.indices || []).find((i) => i && i.currency === 'KRW' && i.name === b.name));
@@ -364,7 +380,7 @@ function renderBriefs(briefs) {
       // 근거 뉴스는 접을 수 있게 — 휴대폰에선 처음에 접어 둔다(펼친 상태는 새로고침해도 유지)
       const key = String(b.key || b.name);
       const open = state.briefOpen.has(key) ? state.briefOpen.get(key) : !isNarrow();
-      reasonBlock = `<div class="brief-reason"><span class="ai-badge">AI 핵심</span>${esc(ai.summary)}${at ? ` <span class="ai-at">${esc(at)} 분석</span>` : ''}</div>
+      reasonBlock = `<div class="brief-reason"><span class="ai-badge">AI 핵심</span>${esc(coreMag(ai.summary, mags, b.reason.aiAt))}${at ? ` <span class="ai-at">${esc(at)} 분석</span>` : ''}</div>
         <details class="ai-items-d" data-key="${esc(key)}"${open ? ' open' : ''}><summary>근거 뉴스 ${ai.items.length}건</summary>
         <div class="ai-items">${items}</div></details>`;
     } else {
@@ -956,10 +972,12 @@ function whyOf(q) {
 }
 // 진단 끝말을 지금 등락 폭에 맞춘다(89차 — 봇 scripts/sources.mjs toneTail과 같은 규칙, 자체 테스트가 비교). 진단은 만들 때 등락으로 끝말을 맞추는데(86차)
 // 그 뒤 등락이 줄면 '+3.31% … 급등'처럼 어긋났다(11/19 10:45 한 줄 진단 — 샌즈랩 +6.08%·유진로봇 -5.44%였다가 +3.31%·-4.59%).
-// 5% 안쪽이면 끝의 '급등·급락(세)'만 '상승·하락(세)'으로 — 그날 진단에만 쓴다(지난 거래일 진단은 그날 등락의 말)
+// 5% 안쪽이면 끝의 '급등·급락(세)'만 '상승·하락(세)'으로, 끝 'N%대 급락'의 숫자는 지금 등락의 정수 자리로(101차) — 그날 진단에만 쓴다(지난 거래일 진단은 그날 등락의 말)
 function toneTail(h, pct) {
   const s = String(h ?? '');
-  return Number.isFinite(pct) && Math.abs(pct) < 5 ? s.replace(/급(등|락)(세)?$/, (m, a, b) => (a === '등' ? '상승' : '하락') + (b || '')) : s;
+  // 끝 'N%대 급락'의 숫자도 지금 등락의 정수 자리로(101차 — 11/20 SK텔레콤 -13.09%에 '…재료 소진 심리가 겹치며 12%대 급락') · 지수·'장중'·'한때' 뒤 숫자·소수·1% 안쪽은 그대로
+  const t = Math.abs(pct) >= 1 ? s.replace(/(?<!(?:코스피|코스닥|나스닥|지수|장중|한때)\s?)(?<![\d.])\d{1,2}%대(\s*(?:급등|급락|상승|하락|강세|약세)세?)$/, (m, tail) => `${Math.floor(Math.abs(pct))}%대${tail}`) : s;
+  return Math.abs(pct) < 5 ? t.replace(/급(등|락)(세)?$/, (m, a, b) => (a === '등' ? '상승' : '하락') + (b || '')) : t;
 }
 // '왜 움직였나' 한 줄의 이유 칸 — '시장 따라' 표시 + 이유(출처 · 그 종목 거래일 기사가 아니면 날짜). 이유가 없거나 시장 흐름이 더 나은 설명이면
 // 시장 흐름(시장 따라 · 시장보다 덜 움직임 — 31차 · 지수와 같은 방향으로 더 움직임 — '코스피 -5.37%보다 7.84%p 더 하락', 99차) 또는 '아직 이유 정보가 없어요'.

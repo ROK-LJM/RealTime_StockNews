@@ -2198,6 +2198,43 @@ await test('개장 전 예상 지수(35차): 08:55 전 값은 어제 종가·0%�
   assert.deepEqual(look(0.4, 'OPEN'), { est: false, dirCls: 'up', cardCls: 'brief-up', arrow: '▲', label: '오늘의 핵심' });
   assert.deepEqual(look(0, null), { est: false, dirCls: 'flat', cardCls: '', arrow: '–', label: '오늘의 핵심' });
 });
+await test('지수 핵심 폭(100차): AI 핵심 속 두 지수 이름 바로 뒤의 "N%대"·"N.NN%"·"N% 넘게"는 지금 등락으로(11/20 코스피 -5.9%에 "코스피 4%대 급락") · 다른 지수·떨어진 숫자·어림·전날 숫자·보합·오늘 09시 전 분석은 그대로 · 화면 배너에 씀', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const fn = appJs.slice(appJs.indexOf('function coreMag('), appJs.indexOf('function renderBriefs('));
+  const f = vm.runInNewContext(fn + '; ({ coreMag })', {});
+  const NOW = Date.parse('2026-11-20T15:00:00+09:00'), AT = Date.parse('2026-11-20T14:20:00+09:00');
+  const m = (t, idx, at = AT) => f.coreMag(t, idx, at, NOW);
+  const K = (p) => [['코스피', p]];
+  assert.equal(m('미국 빅테크 급락 여파, 코스피 4%대 급락', K(-5.9)), '미국 빅테크 급락 여파, 코스피 5%대 급락');
+  assert.equal(m('외국인 매도세로 코스닥이 5%대 급락하며 매도 사이드카가 발동했습니다.', [['코스닥', -5.9]]), '외국인 매도세로 코스닥이 5%대 급락하며 매도 사이드카가 발동했습니다.', '이미 맞으면 그대로');
+  assert.equal(m('코스피가 4.36% 하락하며 나스닥 2%대 약세 여파가 이어졌습니다', K(-5.25)), '코스피가 5.25% 하락하며 나스닥 2%대 약세 여파가 이어졌습니다', '소수 % · 다른 지수 숫자는 그대로');
+  assert.equal(m('코스피지수가 3%대 반등', K(4.1)), '코스피지수가 4%대 반등', "'지수'가 붙어도");
+  assert.equal(m('코스피 지수는 3%대 반등', K(4.1)), '코스피 지수는 4%대 반등', "'지수'·조사가 붙어도");
+  assert.equal(m('코스피가 5% 넘게 폭락했습니다', K(-6.3)), '코스피가 6% 넘게 폭락했습니다', "'N% 넘게'는 지금 등락의 정수");
+  assert.equal(m('코스피가 5% 넘게 폭락했습니다', K(-5.21)), '코스피가 5% 넘게 폭락했습니다');
+  assert.equal(m('코스피가 5% 가까이 빠졌다', K(-4.8)), '코스피가 5% 가까이 빠졌다', '어림(가까이)은 그대로');
+  assert.equal(m('코스피가 장중 4%대까지 밀렸다가 낙폭을 줄였다', K(-2.5)), '코스피가 장중 4%대까지 밀렸다가 낙폭을 줄였다', '이름과 떨어진 숫자는 그대로');
+  assert.equal(m('전날 코스피 4%대 급락에 이어 코스닥도 3%대 하락', [['코스피', -1.5], ['코스닥', -2.2]]), '전날 코스피 4%대 급락에 이어 코스닥도 2%대 하락', '전날 숫자는 그대로 · 다른 지수도 제 등락으로');
+  assert.equal(m('코스피 4%대·코스닥 3%대 급락', [['코스피', -5.9], ['코스닥', -5.1]]), '코스피 5%대·코스닥 5%대 급락', '두 지수 모두');
+  assert.equal(m('코스피 1%대 상승 출발 뒤 보합권', K(0.5)), '코스피 1%대 상승 출발 뒤 보합권', '보합(±1% 안쪽)엔 손대지 않음');
+  assert.equal(m('코스피 4880선 붕괴, 4%대 급락', K(-5.9)), '코스피 4880선 붕괴, 4%대 급락', '지수 수준(선)은 % 아님');
+  assert.equal(m('코스피 4%대 급락', K(-5.9), Date.parse('2026-11-19T14:20:00+09:00')), '코스피 4%대 급락', '어제 분석은 그대로');
+  assert.equal(m('코스피 4%대 급락', K(-5.9), Date.parse('2026-11-20T08:40:00+09:00')), '코스피 4%대 급락', '오늘 09시 전 분석은 그대로(개장 전)');
+  assert.equal(m('코스피 4%대 급락', K(-5.9), null), '코스피 4%대 급락', '분석 시각을 모르면 그대로');
+  assert.equal(m('', K(-5)), ''); assert.equal(m('코스피 4%대 급락', [['', -5]]), '코스피 4%대 급락');
+  // 화면 배너 — 두 지수 등락으로 맞춰 그린다
+  const rb = appJs.slice(appJs.indexOf('function coreMag('), appJs.indexOf('const isNarrow = '));
+  const el = { innerHTML: '', querySelectorAll: () => [] };
+  const ctx = { $: () => el, state: { market: { indices: [] }, briefOpen: new Map() }, briefLook: () => ({ est: false, dirCls: 'down', cardCls: 'brief-down', arrow: '▼', label: '급락 핵심 이유' }),
+    fmtAiTime: () => '14:20', extLink: (l, t) => t, isNarrow: () => false, flowWhen: () => '', fmtFlow: String, dirClass: () => 'down', fmtPct: String, esc: (x) => String(x), EST_TIP: '' };
+  const g = vm.runInNewContext(rb + '; ({ renderBriefs })', ctx);
+  const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10), at = Date.parse(today + 'T09:30:00+09:00');
+  const br = (name, pct, summary) => ({ key: name, name, changePct: pct, reason: { ai: { summary, items: [{ title: '기사', link: 'https://news.example.com/1' }] }, aiAt: at } });
+  g.renderBriefs([br('코스피', -5.9, '미국 빅테크 급락 여파, 코스피 4%대 급락'), br('코스닥', -5.1, '코스피 4%대 급락에 코스닥도 3%대 하락')]);
+  assert.ok(el.innerHTML.includes('미국 빅테크 급락 여파, 코스피 5%대 급락'), '배너에 씀');
+  assert.ok(el.innerHTML.includes('코스피 5%대 급락에 코스닥도 5%대 하락'), '다른 지수 숫자도 그 지수 등락으로');
+});
 await test('시장 분위기 문구(98차): 가장 크게 움직인 지수 말 — ±2% 넘으면 급등·급락, ±0.3% 안쪽은 보합, 그 사이는 강세·약세(11/20 코스피 -4.36%가 "약세")', async () => {
   const word = (p) => src.computeMood([{ name: '코스피', symbol: '^KS11', changePct: p, marketStatus: 'OPEN' }], 20).summary.split(' · ')[0];
   assert.deepEqual([-4.36, -2, -1.99, -0.3, -0.29, 0, 0.29, 0.3, 1.09, 1.99, 2, 2.63].map(word), ['코스피 급락(-4.36%)', '코스피 급락(-2.00%)', '코스피 약세(-1.99%)', '코스피 약세(-0.30%)', '코스피 보합(-0.29%)', '코스피 보합(0.00%)',
@@ -3881,6 +3918,16 @@ await test('진단 끝말(86차): 5% 안쪽 움직임의 끝 "급등·급락(세
   assert.equal(src.toneTail('공급 계약 해지에 급락', -5), '공급 계약 해지에 급락', '5%부터는 그대로');
   assert.equal(src.toneTail('단기 급등에 따른 차익 실현으로 하락', -2.5), '단기 급등에 따른 차익 실현으로 하락', '가운데 말은 그대로');
   assert.equal(src.toneTail('수주 기대에 급등', NaN), '수주 기대에 급등', '등락을 모르면 그대로');
+  // 끝 'N%대 급락'의 숫자도 지금 등락(101차 — 11/20 SK텔레콤 -13.09%에 '…12%대 급락')
+  assert.equal(src.toneTail('앤트로픽 지분 가치 부각에도 시장 급락세와 재료 소진 심리가 겹치며 12%대 급락', -13.09), '앤트로픽 지분 가치 부각에도 시장 급락세와 재료 소진 심리가 겹치며 13%대 급락', "끝 'N%대 급락' 숫자도 지금 등락");
+  assert.equal(src.toneTail('코스닥 시장 급락에 따른 투매 심리 확산과 지속적인 주가 하락 추세로 인한 14%대 급락', -14.35), '코스닥 시장 급락에 따른 투매 심리 확산과 지속적인 주가 하락 추세로 인한 14%대 급락', '이미 맞으면 그대로');
+  assert.equal(src.toneTail('차익 실현 매물에 5%대 급락', -4.2), '차익 실현 매물에 4%대 하락', '숫자와 끝말 함께');
+  assert.equal(src.toneTail('규제 우려로 6%대 하락세', -7.8), '규제 우려로 7%대 하락세', "끝이 '…세'여도");
+  assert.equal(src.toneTail('외국인 매도에 코스피 5%대 급락', -7.3), '외국인 매도에 코스피 5%대 급락', '지수 뒤 숫자는 그대로');
+  assert.equal(src.toneTail('공급 우려로 장중 15%대 급락', -13), '공급 우려로 장중 15%대 급락', "'장중' 숫자는 그대로");
+  assert.equal(src.toneTail('수주 기대에 2%대 상승', 0.6), '수주 기대에 2%대 상승', '1% 안쪽이면 숫자 그대로');
+  assert.equal(src.toneTail('실적 호조에 12.5%대 급등', 9.1), '실적 호조에 12.5%대 급등', '소수 숫자는 그대로');
+  assert.equal(src.toneTail('실적 호조에 7%대 급등', NaN), '실적 호조에 7%대 급등', '등락을 모르면 숫자도 그대로');
   // 종합분석 — 삼성전자 +4.2%는 맞춤, +7.5%는 그대로
   const withHead = (headline) => () => json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ ...JSON.parse(geminiOk.candidates[0].content.parts[0].text), headline }) }] } }] });
   const r1 = workspace();
@@ -3916,7 +3963,7 @@ await test('진단 끝말 — 지금 등락(89차): 화면("왜 움직였나"·�
     fmtAiTime: () => '10:45', fmtNextAt: () => '', basisOf: () => '뉴스', WHY_MIN: 2 };
   const f = vm.runInNewContext([line('function cssId('), line('function esc('), block, ra, why].join('\n') + '; ({ renderAnalysis, whyOf, toneTail })', ctx);
   // 화면 규칙 = 봇 규칙
-  for (const [h, p] of [['…선보여 급등', 3.31], ['…공시에 급락', -4.59], ['…급락세', -2], ['…급등', 6.08], ['…급등', -5], ['단기 급등에 따른 하락', -3], ['…급등', NaN], ['', 1]])
+  for (const [h, p] of [['…선보여 급등', 3.31], ['…공시에 급락', -4.59], ['…급락세', -2], ['…급등', 6.08], ['…급등', -5], ['단기 급등에 따른 하락', -3], ['…급등', NaN], ['…겹치며 12%대 급락', -13.09], ['…5%대 급락', -4.2], ['…6%대 하락세', -7.8], ['코스피 5%대 급락', -7.3], ['장중 15%대 급락', -13], ['2%대 상승', 0.6], ['12.5%대 급등', 9.1], ['7%대 급등', NaN], ['', 1]])
     assert.equal(f.toneTail(h, p), src.toneTail(h, p), `화면 = 봇: ${h} ${p}`);
   // 왜 움직였나 · 카드 — 그날 진단(10:45 +6.08%에 만든 '…급등')은 지금 +3.31%면 '…상승'
   const q = { code: 'A', name: '샌즈랩', market: 'KR', ok: true, changePct: 3.31, asOf: '2026-11-19T11:20:00+09:00' };

@@ -908,7 +908,9 @@ export function headDir(h) {
 export const againstMove = (h, pct) => Number.isFinite(pct) && pct !== 0 && headDir(h) === -Math.sign(pct);
 export function toneTail(h, pct) {
   const s = String(h ?? '');
-  return Number.isFinite(pct) && Math.abs(pct) < 5 ? s.replace(/급(등|락)(세)?$/, (m, a, b) => (a === '등' ? '상승' : '하락') + (b || '')) : s;
+  // 끝 'N%대 급락'의 숫자도 지금 등락의 정수 자리로(101차 — 11/20 SK텔레콤 -13.09%에 '…재료 소진 심리가 겹치며 12%대 급락') · 지수·'장중'·'한때' 뒤 숫자·소수·1% 안쪽은 그대로
+  const t = Math.abs(pct) >= 1 ? s.replace(/(?<!(?:코스피|코스닥|나스닥|지수|장중|한때)\s?)(?<![\d.])\d{1,2}%대(\s*(?:급등|급락|상승|하락|강세|약세)세?)$/, (m, tail) => `${Math.floor(Math.abs(pct))}%대${tail}`) : s;
+  return Math.abs(pct) < 5 ? t.replace(/급(등|락)(세)?$/, (m, a, b) => (a === '등' ? '상승' : '하락') + (b || '')) : t;
 }
 // 시세의 장 상태 → AI 입력의 말(61차 한 줄 진단·66차 종합분석) — 장중 종목에 '마감했다'고 쓰지 않게
 const STATE_KO = { OPEN: '장중', CLOSE: '장 마감', PREOPEN: '개장 전' };
