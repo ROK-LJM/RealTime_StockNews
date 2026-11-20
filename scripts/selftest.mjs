@@ -1607,7 +1607,8 @@ await test('이유 고르기: 상품 상장 공지·방향이 반대인 기사 �
   assert.equal(pick(items, -3.65), items[4].title, "내린 날: '급등' 기사·오른 [특징주]는 빼고 나열 기사는 뒤로");
   assert.equal(pick([items[2], items[3]], -3.65), null, '방향이 반대인 기사뿐이면 이유 없음');
   assert.equal(pick([items[1], items[0]], 2.5), items[1].title, '나열 기사밖에 없으면 그것이라도');
-  assert.equal(pick([{ title: '[오늘의 증권가 콜] LS ELECTRIC, 유니드, 삼성바이오, LIG디펜스, 테스, 한화솔루션 등', pubMs: at(9) }, items[5]], 2.5), items[5].title, '쉼표로 여러 종목 나열 + 등 = 나열 기사');
+  assert.equal(pick([{ title: '[오늘의 증권가 콜] LS ELECTRIC, 유니드, 삼성바이오, LIG디펜스, 테스, 한화솔루션 등', pubMs: at(9) }, { title: 'LG엔솔, 자사주 소각에 급등', pubMs: at(8) }], 2.5), 'LG엔솔, 자사주 소각에 급등', '쉼표로 여러 종목 나열 + 등 = 나열 기사');
+  assert.equal(pick([items[5]], 16.1), null, '지난 거래일 [특징주]는 그날 거래 기사라 오늘 이유 아님(97차 보완)');
   assert.equal(pick([items[0], { title: 'SK하이닉스 주가 하락 중' }], -3), null, '상장 공지·시세 안내뿐이면 없음');
   assert.equal(pick(items, 0), items[2].title, '보합이면 방향 판단 없이 최신순(상장 공지·나열 기사 제외)');
   // 한 제목에 두 종목 — 그 종목 이름 바로 뒤의 말로 방향을 본다
@@ -1632,6 +1633,10 @@ await test('이유 고르기(97차): 거래일 전 기사가 그날의 주가 �
   assert.equal(both([{ title: '영업이익 259% 늘어난 대덕전자, 주가는 1.60% 조정', pubMs: Y }, { title: '대덕전자, 반도체 기판 수요 둔화 우려에 약세', pubMs: Y }], -10.5, '20261120', kst, ['대덕전자']),
     '대덕전자, 반도체 기판 수요 둔화 우려에 약세', '%가 없는 지난 기사는 그대로');
   assert.equal(both([{ title: '삼성전기 주가 8%대 급등…엔비디아 효과 이틀째', pubMs: Y }], 3, '20261120', kst, ['삼성전기']), null, '오른 날도 — 지난 거래일 8%대 급등');
+  assert.equal(both([{ title: '[특징주] 대덕전자 장중 7만원대…코스피200 편입 확정', pubMs: Y }], -11.4, '20261120', kst, ['대덕전자']), null, '지난 거래일 [특징주](그날 거래 기사)');
+  assert.equal(both([{ title: '대덕전자, 장중 반도체 기판 수요 기대에 강세', pubMs: Y }], 2.5, '20261120', kst, ['대덕전자']), null, "지난 거래일 '장중' 기사");
+  assert.equal(both([{ title: '[특징주] 대덕전자, 코스피200 편입 확정에 강세', pubMs: Y }], 2.5, '20261120', kst, ['대덕전자']), null, '지난 거래일 [특징주]만');
+  assert.equal(both([{ title: '[특징주] 대덕전자, 반도체 기판 투매에 급락', pubMs: D }], -11.4, '20261120', kst, ['대덕전자']), '[특징주] 대덕전자, 반도체 기판 투매에 급락', '그날 [특징주]는 그대로');
   assert.equal(both([{ title: '대덕전자 10%대 급락…반도체 기판주 투매', pubMs: D }], -10.5, '20261120', kst, ['대덕전자']), '대덕전자 10%대 급락…반도체 기판주 투매', '그날 기사는 그대로');
   assert.equal(both([{ title: '영업이익 259% 늘어난 대덕전자, 주가는 1.60% 조정', pubMs: Y }], -10.5, '', kst, ['대덕전자']), '영업이익 259% 늘어난 대덕전자, 주가는 1.60% 조정', '거래일을 모르면 그대로');
   // 미국 — 뉴욕 날짜로
@@ -1659,7 +1664,7 @@ await test('이유 고르기(24차): "…2.80% 조정"·"조정세"는 내림 �
   assert.equal(pick([it('반도체주 조정세 이어져')], -2), '반도체주 조정세 이어져');
   assert.equal(pick([it('삼성전자 목표가 상향 조정', 'pos')], -2), null, "'목표가 상향 조정'은 내림 말 아님 — 내린 날 호재 기사는 이유 아님");
   // 우선주 — 이름 바로 뒤 말로 방향(보통주 이름으로)
-  const q = { code: '005935', name: '삼성전자우', market: 'KR', ok: true, changePct: -3.1, asOf: new Date().toISOString() };
+  const q = { code: '005935', name: '삼성전자우', market: 'KR', ok: true, changePct: -3.1, asOf: '2026-11-05T15:30:00+09:00' }; // 기사와 같은 거래일(97차 보완 — 지난 [특징주]는 이유 아님)
   ctx.state.news['005935'] = { items: [it('반도체 업황 점검', 'neutral', 15), it('[특징주] 삼성전자 하락, SK하이닉스 상승', 'neutral', 13)] };
   assert.equal(f.whyOf(q).text, '[특징주] 삼성전자 하락, SK하이닉스 상승', '보통주 이름 뒤 내림 말 → 같은 방향 기사가 먼저');
 });

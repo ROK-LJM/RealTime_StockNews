@@ -638,7 +638,8 @@ const tickerAt = (t, n) => { const m = /^[A-Z][A-Z.\-]{0,9}$/.test(n || '') ? t.
 const moveWhy = (t, names) => (names || []).some((n) => { const i = tickerAt(t, n); return i >= 0 && MOVE_WHY_RE.test(t.slice(i)); });
 // 지난 거래일 시세 기사(97차) — 거래일 전 기사가 그날의 주가 움직임을 '…1.60% 조정'·'8%대 급등'·'Falls 1.7%'처럼 전한 것이면 오늘 움직임의 이유가 아니다
 // (11/20 대덕전자 -10.50%(코스피 -4.36%)의 '왜 움직였나'가 11/19 '영업이익 259% 늘어난 대덕전자, 주가는 1.60% 조정'이었다). 뉴스 목록엔 그대로, 봇·화면 같음
-export const PAST_MOVE_RE = /\d+(?:\.\d+)?%\s?대?\s?(?:상승|하락|급등|급락|강세|약세|조정|올라|오른|올랐|내려|내린|내렸|떨어|뛰었|빠졌|오름|내림)|\b(?:ris(?:e|es|ing)|rose|fall(?:s|ing)?|fell|jump(?:s|ed)?|drop(?:s|ped)?|gain(?:s|ed)?|slid(?:e|es|ing)?|sink(?:s|ing)?|sank|surg(?:e|es|ed)|climb(?:s|ed)?|tumbl(?:e|es|ed)|plung(?:e|es|ed)|soar(?:s|ed)?|slip(?:s|ped)?)\s+(?:by\s+)?[\d.]+%/i;
+// 그날 거래를 전한 [특징주]·'장중' 기사도 같다(97차 보완 — 그 뒤 대덕전자 -11.44%의 이유가 11/19 '[특징주] 대덕전자 장중 7만원대…코스피200 편입 확정')
+export const PAST_MOVE_RE = /\[특징주\]|장중|\d+(?:\.\d+)?%\s?대?\s?(?:상승|하락|급등|급락|강세|약세|조정|올라|오른|올랐|내려|내린|내렸|떨어|뛰었|빠졌|오름|내림)|\b(?:ris(?:e|es|ing)|rose|fall(?:s|ing)?|fell|jump(?:s|ed)?|drop(?:s|ped)?|gain(?:s|ed)?|slid(?:e|es|ing)?|sink(?:s|ing)?|sank|surg(?:e|es|ed)|climb(?:s|ed)?|tumbl(?:e|es|ed)|plung(?:e|es|ed)|soar(?:s|ed)?|slip(?:s|ped)?)\s+(?:by\s+)?[\d.]+%/i;
 export function pickReasonNews(items, pct, day, ymd, names = []) {
   const s = Math.sign(Number(pct) || 0);
   const dir = (it) => newsDir(it, names);

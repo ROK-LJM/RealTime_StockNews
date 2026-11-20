@@ -332,9 +332,11 @@ const MUTANTS = [
   // ---------- 97차 — 지난 거래일 시세 기사 ----------
   ["[이유] 지난 거래일 시세 기사도(봇)", S, "      && !(Number.isFinite(it.pubMs) && ymd(it.pubMs) < day && PAST_MOVE_RE.test(it.title)))", "      )"],
   ["[이유] 지난 거래일 시세 기사도(화면)", A, "      && !(Number.isFinite(it.pubMs) && ymd(it.pubMs) < day && PAST_MOVE_RE.test(it.title)))", "      )"],
+  ["[이유] 지난 [특징주] 놓침(봇)", S, "PAST_MOVE_RE = /\\[특징주\\]|장중|", "PAST_MOVE_RE = /장중|"],
+  ["[이유] 지난 '장중' 놓침(봇)", S, "PAST_MOVE_RE = /\\[특징주\\]|장중|", "PAST_MOVE_RE = /\\[특징주\\]|"],
   ["[이유] 그날 시세 기사도 뺌(봇)", S, "ymd(it.pubMs) < day && PAST_MOVE_RE.test(it.title)", "ymd(it.pubMs) <= day && PAST_MOVE_RE.test(it.title)"],
   ["[이유] 지난 시세 기사 영어 놓침(봇)", S, R`|\b(?:ris(?:e|es|ing)|rose|fall(?:s|ing)?|fell|jump(?:s|ed)?|drop(?:s|ped)?|gain(?:s|ed)?|slid(?:e|es|ing)?|sink(?:s|ing)?|sank|surg(?:e|es|ed)|climb(?:s|ed)?|tumbl(?:e|es|ed)|plung(?:e|es|ed)|soar(?:s|ed)?|slip(?:s|ped)?)\s+(?:by\s+)?[\d.]+%/i;`, '/i;'],
-  ["[이유] 지난 시세 기사 '%대' 놓침(봇)", S, R`const PAST_MOVE_RE = /\d+(?:\.\d+)?%\s?대?\s?(?:`, R`const PAST_MOVE_RE = /\d+(?:\.\d+)?%\s?(?:`],
+  ["[이유] 지난 시세 기사 '%대' 놓침(봇)", S, R`장중|\d+(?:\.\d+)?%\s?대?\s?(?:`, R`장중|\d+(?:\.\d+)?%\s?(?:`],
   // ---------- 96차 — 진단 끝 방향 ----------
   ["[진단 방향] 종합분석 반대도 저장", F, "if (a && againstMove(a.headline, q.changePct)) { console.log(`    종합분석 버림(${it.code} ${q.changePct}% — 방향 반대): ${a.headline}`); a = null; }", ""],
   ["[진단 방향] 저장 전 거르기 없음", F, "if (d && q && q.ok && againstMove(d.headline, q.changePct)) {", "if (false) {"],
