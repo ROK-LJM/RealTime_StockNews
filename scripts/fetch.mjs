@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis, aiStockBriefs, BRIEF_MAX, ANALYSIS_PV, aiThemes, themeHeads, themeOut, themeDue, themeClean, themeMorning, THEME_EARLY_AHEAD, calmExpected, aiExtBriefs, extMovers, extHeads, extDue, extRel, extSame, EXT_AHEAD, toneTail,
+  getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis, aiStockBriefs, BRIEF_MAX, ANALYSIS_PV, aiThemes, themeHeads, themeOut, themeDue, themeClean, themeMentions, themeMorning, THEME_EARLY_AHEAD, calmExpected, aiExtBriefs, extMovers, extHeads, extDue, extRel, extSame, EXT_AHEAD, toneTail,
   getSidecarNews, sidecarEvents, mergeMeasures,
   aiStatus, aiGate, aiRoom, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, pickReasonNews, strongNews, tagSentiment, krBaseName,
 } from './sources.mjs';
@@ -109,6 +109,9 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
     ...(stockList?.kr || []).filter((r) => Array.isArray(r) && r[0] && typeof r[2] === 'string').map((r) => [r[0], r[2]]),
     ...(stockList?.us || []).filter((r) => Array.isArray(r) && r[0] && typeof r[3] === 'string').map((r) => [r[0], r[3]]),
   ]);
+  // 미국 종목의 영문 회사명 — 뉴스 관련도(5)·큰 소식 관련 종목(6-2, 94차 — 다른 종목 기사 제목의 'Nvidia'·'Apple')에 쓴다
+  const usEn = new Map((stockList?.us || []).filter((r) => Array.isArray(r) && r[0]).map((r) => [r[0], r[2] || '']));
+  const withEn = (it) => (it.market === 'US' ? { ...it, en: usEn.get(it.code) || '' } : it);
   const quotesByCode = {}; // 종목별 등락률을 종합분석 대상 선별에 사용
   const history = {};      // 종합분석에서 추세 입력으로 재사용
   const investors = {};    // 종합분석에서 수급 입력으로 재사용
@@ -304,8 +307,6 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
   // 5) 종목별 뉴스 (순차 수집으로 과호출 방지) — 받기 실패(ok:false)면 직전 뉴스 유지
   //    미국 종목은 검색 목록(stocklist.json)의 영문 회사명을 함께 넘겨 'Tesla'·'Nvidia'처럼 영문 제목도 관련 기사로 인정한다.
   try {
-    const usEn = new Map((stockList?.us || []).filter((r) => Array.isArray(r) && r[0]).map((r) => [r[0], r[2] || '']));
-    const withEn = (it) => (it.market === 'US' ? { ...it, en: usEn.get(it.code) || '' } : it);
     // 뉴스 기간(43차) — 그 종목의 마지막 거래일(시세 시각의 그 시장 날짜)부터: 같은 날이면 2일, 하루 지날 때마다 1일씩(최대 5일).
     // 예전엔 늘 2일이라 일요일 저녁·월요일 아침(뉴욕은 일요일 저녁)에 마지막 등락이 난 금요일 장중 기사가 검색에서 빠졌다
     const newsDays = (it) => {
@@ -473,7 +474,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
   if (themes) try {
     const early = themeMorning(now) ? aiRoom(THEME_EARLY_AHEAD) : 0;
     if (themeDue(readJson('themes.json'), now, aiRoom(), early)) {
-      const heads = themeHeads(items, news, now);
+      const heads = themeHeads(items.map(withEn), news, now); // 미국 종목 영문명도(94차 — 제목에 나온 내 종목을 관련에)
       const got = await aiThemes(heads, now, aiRoom() >= 2 ? 0 : THEME_EARLY_AHEAD);
       if (got) {
         // 관련 종목이 많은 소식부터(87차 — 같으면 AI가 고른 순서): 11/18 첫 큰 소식은 한 종목 소식(삼성전기 공급 계약)이 맨 앞이었다
@@ -482,9 +483,10 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
       }
     } else {
       // 지난 큰 소식도 지금 규칙으로(93차 — 묶은 지 몇 시간씩 남는다): 이름 끝의 주가 움직임 말은 떼고 요약은 비움(themeClean, 이름이 비면 뺌).
-      // 시각(at)은 그대로(화면 '16:00'·36시간 숨김 기준), 바뀐 때만 쓴다
-      const prev = readJson('themes.json');
-      const kept = prev && Array.isArray(prev.items) ? prev.items.map((x) => ({ ...x, ...themeClean(x.title, x.summary) })).filter((x) => x.title) : null;
+      // 시각(at)은 그대로(화면 '16:00'·36시간 숨김 기준), 바뀐 때만 쓴다. 관련 종목엔 보이는 기사 제목에 나온 내 종목도 더함(94차 — 묶을 때와 같은 themeMentions)
+      const prev = readJson('themes.json'), its = items.map(withEn);
+      const named = (x) => { const codes = [...(Array.isArray(x.codes) ? x.codes : [])]; for (const r of Array.isArray(x.refs) ? x.refs : []) for (const it of its) if (!codes.includes(it.code) && themeMentions(r && r.t, it)) codes.push(it.code); return codes; };
+      const kept = prev && Array.isArray(prev.items) ? prev.items.map((x) => ({ ...x, ...themeClean(x.title, x.summary), codes: named(x) })).filter((x) => x.title) : null;
       if (kept && JSON.stringify(kept) !== JSON.stringify(prev.items)) write('themes.json', { ...prev, items: kept });
     }
   } catch (e) { console.error('  ✗ 큰 소식 실패 — themes.json 유지:', e.message); }

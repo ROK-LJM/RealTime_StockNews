@@ -1096,7 +1096,28 @@ export function themeHeads(items, news, now) {
       by.set(k, h);
     }
   }
+  // 제목에 나온 다른 내 종목도 관련으로(94차, 11/20 사용자 요청 — 07:00 '애플-삼성전자 DRAM 공급 계약'은 영어 기사가 애플 뉴스에만 있어 관련이 애플뿐이었다).
+  // 관련 기사 판정과 같은 열쇠말(이름·별칭·미국 영문 핵심 이름·티커)에 국내 종목 영어 이름(EN_ALIAS_KR)을 더한다 — 여러 종목 소식이면 순서도 앞으로
+  const keyed = (items || []).map((it) => [it, newsKeys(it)]);
+  for (const h of by.values()) for (const [it, keys] of keyed) if (!h.codes.includes(it.code) && themeMentions(h.t, it, keys)) { h.codes.push(it.code); h.names.push(it.name || it.code); }
   return [...by.values()].sort((a, b) => b.codes.length - a.codes.length || b.ms - a.ms).slice(0, THEME_HEADS);
+}
+// 국내 종목의 영어 이름(94차 — 큰 소식 관련 종목) — 검색 목록(stocklist.json)엔 국내 영문명이 없어 지금 보유 종목 중 영어 기사에 나올 만한 것만 적었다
+// (새로 넣은 국내 종목은 한글 이름·별칭으로만 찾는다). 'Samsung' 혼자는 삼성전자 — 계열사 이름이 이어지면(Samsung SDI·Electro-Mechanics·E&A·Biologics…) 아님.
+// LS ELECTRIC·YG PLUS처럼 이름이 로마자인 종목은 이름 그대로 찾힌다
+export const EN_ALIAS_KR = {
+  '005930': /\bSamsung(?:\s+Electronics)?\b(?!\s*(?:SDI|Electro|Biologics|Bioepis|C&T|E&A|Engineering|Heavy|Life|SDS|Securities|Fire|Card|Asset))/i,
+  '000660': /\bSK\s?hynix\b|\bhynix\b/i, '066575': /\bLG\s+Electronics\b/i, '440110': /\bFADU\b/i, '034020': /\bDoosan\s+Enerbility\b/i,
+  '009150': /\bSamsung\s+Electro-?\s?Mechanics\b|\bSEMCO\b/i, '329180': /\bHD\s+Hyundai\s+Heavy\b|\bHyundai\s+Heavy\s+Industries\b/i, '042660': /\bHanwha\s+Ocean\b/i,
+  '017670': /\bSK\s+Telecom\b/i, '028050': /\bSamsung\s+E&A\b/i, '009830': /\bHanwha\s+Solutions?\b|\bQ\s?cells\b/i, '222800': /\bSimmtech\b/i, '353200': /\bDaeduck\b/i,
+  '000720': /\bHyundai\s+(?:E&C|Engineering\s+&\s+Construction)/i, '042700': /\bHanmi\s+Semiconductor\b/i, '373220': /\bLG\s+Energy\s+Solution\b|\bLGES\b/i,
+  '053800': /\bAhnLab\b/i, '056080': /\bYujin\s+Robot\b/i, '005380': /\bHyundai\s+Motor\b/i, '079550': /\bLIG\s+(?:Nex1|Defense)\b/i, '012450': /\bHanwha\s+Aerospace\b/i,
+  '267260': /\bHD\s+Hyundai\s+Electric\b/i, '006400': /\bSamsung\s+SDI\b/i, '298040': /\bHyosung\s+Heavy\b/i, '010060': /\bOCI\s+Holdings\b/i,
+  '322000': /\bHD\s+Hyundai\s+Energy\s+Solutions?\b/i, '112610': /\bCS\s+Wind\b/i,
+};
+// 제목에 그 종목이 나오는가(94차) — 관련 기사 판정(isRelevantNews) 또는 국내 종목 영어 이름
+export function themeMentions(title, item, keys = newsKeys(item)) {
+  return isRelevantNews(title, item, keys) || (item?.market === 'KR' && !!EN_ALIAS_KR[item.code] && EN_ALIAS_KR[item.code].test(String(title ?? '')));
 }
 // AI가 사건별로 묶는다 — 기사가 3건 미만이면 부르지 않음. 반환 { items: [{ title, summary, refs: [기사 번호] }], model } 또는 null
 // ahead: 시간 배분보다 앞당겨 쓸 수 있는 횟수(88차 — 아침 큰 소식만 1, 평소 0)

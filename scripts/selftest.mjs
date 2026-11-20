@@ -3262,15 +3262,56 @@ await test('큰 소식(93차, 봇): 이름·요약은 사건만 — AI에 주가
   // 봇 — 묶을 때가 아닌 회차엔 저장된 큰 소식을 지금 규칙으로 정리(시각 그대로 · 이름이 비면 뺌) — 배포 전에 묶은 16:00 큰 소식이 다음 묶음까지 남지 않게
   const r = workspace(), t1 = T('2026-11-19T16:30:00+09:00');
   writeData(r, 'themes.json', { at: t1 - 30 * MIN, model: 'm', items: [
-    { title: '삼성전자·SK하이닉스, AI 투자 우려 속 약세', summary: 'AI 투자에 대한 우려가 지속되며 삼성전자와 SK하이닉스 주가가 약세를 보였습니다', codes: ['005930', '000660'], refs: [] },
+    { title: '삼성전자·SK하이닉스, AI 투자 우려 속 약세', summary: 'AI 투자에 대한 우려가 지속되며 삼성전자와 SK하이닉스 주가가 약세를 보였습니다', codes: ['005930', '000660'], refs: [{ t: "[특징주] 삼성전자·SK하이닉스, AI 투자 우려 여전.. '약세'", link: 'https://news.example.com/a', src: '글로벌이코노믹', ms: t1 - 5 * 60 * MIN }] },
     { title: '한화오션, 초대형 원유운반선 2척 수주', summary: '한화오션이 초대형 원유운반선 2척을 추가 수주했습니다', codes: ['042660'], refs: [] },
-    { title: 'SK하이닉스 급등에 삼성전자도 강세', summary: '', codes: ['000660'], refs: [] }] });
+    { title: 'SK하이닉스 급등에 삼성전자도 강세', summary: '', codes: ['000660'], refs: [] },
+    { title: '애플-삼성전자 DRAM 공급 계약', summary: '애플이 삼성전자와 장기 DRAM 공급 계약을 추진', codes: ['AAPL'], refs: [{ t: 'Apple Nears a Rare Long-Term DRAM Supply Deal With Samsung Electronics', link: 'https://news.example.com/d', src: 'Barchart.com', ms: t1 - 60 * MIN }] }] });
   NET.calls = []; NET.bodies = [];
   await pipeline(r, {}, t1, { refreshAll: false, themes: true });
   assert.equal(NET.bodies.filter((b, i) => isGemini(NET.calls[i]) && b.includes("'큰 소식'")).length, 0, '묶을 때가 아님(30분 전)');
   const th = read(r, 'themes.json');
   assert.equal(th.at, t1 - 30 * MIN, '시각 그대로');
-  assert.deepEqual(th.items.map((x) => [x.title, x.summary, x.codes.join(',')]), [['삼성전자·SK하이닉스, AI 투자 우려', '', '005930,000660'], ['한화오션, 초대형 원유운반선 2척 수주', '한화오션이 초대형 원유운반선 2척을 추가 수주했습니다', '042660']], JSON.stringify(th.items));
+  assert.deepEqual(th.items.map((x) => [x.title, x.summary, x.codes.join(',')]), [['삼성전자·SK하이닉스, AI 투자 우려', '', '005930,000660'], ['한화오션, 초대형 원유운반선 2척 수주', '한화오션이 초대형 원유운반선 2척을 추가 수주했습니다', '042660'],
+    ['애플-삼성전자 DRAM 공급 계약', '애플이 삼성전자와 장기 DRAM 공급 계약을 추진', 'AAPL,005930']], JSON.stringify(th.items) + ' — 저장된 것도 기사 제목에 나온 내 종목(94차)');
+});
+await test('큰 소식(94차, 봇): 기사 제목에 나온 다른 내 종목도 관련 — 이름·별칭·미국 영문 핵심 이름·국내 종목 영어 이름(Samsung·SK hynix …, 계열사 이름이 이어지면 아님) · AI 입력 괄호·순서에도 · 봇은 미국 영문명을 넘김', async () => {
+  src.resetState(); src.setAiBudget(null);
+  const now = T('2026-11-20T07:00:00+09:00');
+  const n = (title, h) => ({ title, pubMs: now - h * 3600e3, link: 'https://news.example.com/' + encodeURIComponent(title), source: '테스트일보' });
+  const items = [{ code: 'AAPL', name: '애플', market: 'US', en: 'Apple Inc.' }, { code: '005930', name: '삼성전자', market: 'KR' }, { code: '006400', name: '삼성SDI', market: 'KR' },
+    { code: '009150', name: '삼성전기', market: 'KR' }, { code: 'NVDA', name: '엔비디아', market: 'US', en: 'NVIDIA Corporation' }, { code: 'TSM', name: 'TSMC', market: 'US', en: 'Taiwan Semiconductor Manufacturing Company Ltd.' }];
+  // 11/20 07:00 실제 — '애플-삼성전자 DRAM 공급 계약'의 영어 기사는 애플 뉴스에만 있었다
+  const news = { AAPL: { items: [n('Apple Nears a Rare Long-Term DRAM Supply Deal With Samsung Electronics', 1)] },
+    TSM: { items: [n('TSMC and Samsung pause some chip shipments to China due to new US export rules: report', 2)] },
+    '006400': { items: [n('Samsung SDI wins battery order from GM', 3)] },
+    '009150': { items: [n('Samsung Electro-Mechanics supplies glass substrates to Nvidia', 4), n('삼성전기, 엔비디아에 기판 공급 확대', 5)] } };
+  const heads = src.themeHeads(items, news, now);
+  assert.deepEqual(heads.map((h) => [h.t.slice(0, 16), h.codes.join(','), h.names.join('·')]), [
+    ['Apple Nears a Ra', 'AAPL,005930', '애플·삼성전자'], ['TSMC and Samsung', 'TSM,005930', 'TSMC·삼성전자'], ['Samsung Electro-', '009150,NVDA', '삼성전기·엔비디아'],
+    ['삼성전기, 엔비디아에 기판 공', '009150,NVDA', '삼성전기·엔비디아'], ['Samsung SDI wins', '006400', '삼성SDI']], '제목에 나온 내 종목 더함 · Samsung SDI·Electro-Mechanics는 삼성전자 아님 · 여러 종목 소식 먼저');
+  // 제목에 이름이 없어도 같은 기사가 여러 종목 뉴스에 있으면 모두(78차 그대로)
+  assert.deepEqual(src.themeHeads([{ code: '005930', name: '삼성전자', market: 'KR' }, { code: '000660', name: 'SK하이닉스', market: 'KR' }],
+    { '005930': { items: [n('반도체 수출 규제 강화', 1)] }, '000660': { items: [n('반도체 수출 규제 강화', 1)] } }, now).map((h) => h.codes.join(',')), ['005930,000660'], '여러 종목 뉴스에 실린 기사');
+  for (const [t, code, yes] of [['SK hynix and Samsung lead memory rally', '000660', true], ['Samsung Biologics expands plant', '005930', false], ["Samsung's HBM4 passes Nvidia qualification", '005930', true],
+    ['Hanwha Qcells opens Georgia plant', '009830', true], ['Hanwha Ocean wins LNG carrier order', '042660', true], ['Samsung E&A wins UAE gas plant deal', '028050', true], ['Samsung E&A wins UAE gas plant deal', '005930', false]])
+    assert.equal(src.themeMentions(t, { code, name: '이름', market: 'KR' }), yes, `${code}: ${t}`);
+  // AI 입력 괄호에도
+  const reply = (o) => () => json({ candidates: [{ content: { parts: [{ text: JSON.stringify(o) }] } }] });
+  NET.routes = routes({ gemini: reply({ items: [{ title: '애플-삼성전자 DRAM 공급 계약', summary: '애플이 삼성전자와 장기 DRAM 공급 계약을 추진', refs: [1] }, { title: '수출 규제', refs: [2] }] }) });
+  NET.calls = []; NET.bodies = []; NET.blocked = [];
+  const got = await src.aiThemes(heads, now);
+  const prompt = JSON.parse(NET.bodies.find((b, i) => isGemini(NET.calls[i]))).contents[0].parts[0].text;
+  assert.ok(prompt.includes('[1] (애플·삼성전자) Apple Nears a Rare Long-Term DRAM Supply Deal With Samsung Electronics [11/20]'), prompt.slice(-600));
+  assert.deepEqual(src.themeOut(got.items[0], heads).codes, ['AAPL', '005930'], '관련 애플·삼성전자');
+  // 봇 — 미국 종목 영문명(검색 목록)을 넘겨 다른 종목 기사 제목의 'Apple'도 애플로
+  const t0 = T('2026-11-20T10:07:00+09:00');
+  const r = workspace();
+  writeData(r, 'stocklist.json', { v: 2, kr: [['005930', '삼성전자', 'KOSPI', 1], ['000660', 'SK하이닉스', 'KOSPI', 2]], us: [['AAPL', '애플', 'Apple Inc.', 'NASDAQ', 1]], meta: {} });
+  const m = (title, h) => ({ title, pubMs: t0 - h * 3600e3, link: 'https://news.example.com/' + encodeURIComponent(title), source: '테스트일보' });
+  writeData(r, 'news.json', { '005930': { ok: true, items: [m('Samsung wins Apple display order', 1), m('삼성전자 새 공장 착공', 2), m('삼성전자 노조 임금 협상 타결', 3)] } });
+  const themeReply = { candidates: [{ content: { parts: [{ text: JSON.stringify({ items: [{ title: '삼성전자-애플 디스플레이 공급', summary: '', refs: [1] }] }) }] } }] };
+  await pipeline(r, { gemini: () => json(NET.bodies.at(-1).includes("'큰 소식'") ? themeReply : geminiOk) }, t0, { refreshAll: false, themes: true });
+  assert.deepEqual(read(r, 'themes.json').items.map((x) => [x.title, x.codes.join(',')]), [['삼성전자-애플 디스플레이 공급', '005930,AAPL']], JSON.stringify(read(r, 'themes.json')));
 });
 await test('큰 소식(78차, 봇): 내 종목들의 최근 48시간 기사(원인 아닌 기사·시세 안내 빼고 같은 제목은 하나로 — 여러 종목에 걸린 것 먼저)를 AI가 묶음 · 엉뚱한 번호·빈 이름은 버리고 4개까지 · 관련 종목은 고른 기사가 걸린 종목 · 3시간 안엔 다시 안 함 · 한도 배분 몫이 없으면 안 부름', async () => {
   src.resetState(); src.setAiBudget(null);
