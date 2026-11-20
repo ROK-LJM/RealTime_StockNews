@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 import {
   getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis, aiStockBriefs, BRIEF_MAX, ANALYSIS_PV, aiThemes, themeHeads, themeOut, themeDue, themeClean, themeMentions, againstMove, themeMorning, THEME_EARLY_AHEAD, calmExpected, aiExtBriefs, extMovers, extHeads, extDue, extRel, extSame, EXT_AHEAD, toneTail,
   getSidecarNews, sidecarEvents, mergeMeasures,
-  aiStatus, aiGate, aiRoom, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, pickReasonNews, strongNews, tagSentiment, krBaseName,
+  aiStatus, aiGate, aiRoom, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, pickReasonNews, strongNews, weakTitle, tagSentiment, krBaseName,
 } from './sources.mjs';
 import { startBudget, toStored, totalUsed, capacity, inSession, isKrSession, nextAllowanceAt, closedCheckDay, usExtWindow, usAfterPostSameDay, krHours } from './aibudget.mjs';
 import { validateWatchlist, writeJsonAtomic, analysisSig, sigMove, nearSig, newsOnlySig, manifestOf } from './util.mjs';
@@ -549,23 +549,28 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
           const n = pickReasonNews((news[it.code]?.items || []).filter((x) => x && Number.isFinite(x.pubMs) && ymdIn(x.pubMs, tz) >= dayStart(1)),
             q.changePct, day, (ms) => ymdIn(ms, tz), names);
           // 시장 흐름(32차, 화면 '왜 움직였나'와 같은 기준) — 지수가 1% 넘게 움직인 날 같은 방향으로 지수보다 1%p 넘게 더 움직이지 않았으면
-          // 그날 방향을 말하는 기사가 아닌 한(방향 모를 기사·나열·전망 글) '코스피 -6.02% 흐름'을 이유로(정정·자회사 공시보다 앞)
+          // 그날 방향을 말하는 기사가 아닌 한(방향 모를 기사·나열·전망 글) '코스피 -6.02% 흐름'을 이유로(정정·자회사 공시보다 앞).
+          // 같은 방향으로 더 움직였으면(mkB) 기사가 나열·리포트·전망 글·물음 제목뿐이거나 없을 때 '코스피 -5.37%보다 7.84%p 더 하락'(99차, 화면과 같은 기준)
           const ix = idxOfQuote(q);
-          const mk = ix && Math.abs(ix.pct) >= 1 && Math.sign(q.changePct) === Math.sign(ix.pct) && Math.abs(q.changePct) < Math.abs(ix.pct) + 1 ? ix : null;
-          const mkWhy = mk ? { r: `${mk.name} ${mk.pct >= 0 ? '+' : ''}${mk.pct.toFixed(2)}% 흐름 — 종목만의 이유 기사 없음`, s: 'mkt' } : null;
+          const same = ix && Math.abs(ix.pct) >= 1 && Math.sign(q.changePct) === Math.sign(ix.pct);
+          const mk = same && Math.abs(q.changePct) < Math.abs(ix.pct) + 1 ? ix : null, mkB = same && !mk ? ix : null;
+          const sgnPct = (p) => `${p >= 0 ? '+' : ''}${p.toFixed(2)}%`;
+          const mkWhy = mk ? { r: `${mk.name} ${sgnPct(mk.pct)} 흐름 — 종목만의 이유 기사 없음`, s: 'mkt' }
+            : mkB ? { r: `${mkB.name} ${sgnPct(mkB.pct)}보다 ${Math.abs(q.changePct - mkB.pct).toFixed(2)}%p 더 ${q.changePct > 0 ? '상승' : '하락'} — 종목만의 이유 기사 없음`, s: 'mkt' } : null;
           // AI 진단 끝말은 그날 등락에 맞춰(89차 — 진단은 만들 때 등락으로 맞추는데 그 뒤 등락이 줄면 '+3.31% … 급등'처럼 어긋났다) — 회차마다 다시 써서 마감 등락이 기준
           const why = a && a.headline && Number.isFinite(a.at) && ymdIn(a.at, tz) >= day ? { r: toneTail(a.headline, q.changePct), s: 'ai' }
-            : d ? { r: `[${d.tag || '공시'}] ${d.title}`, s: 'disc' } : n && (!mk || strongNews(n, q.changePct, names)) ? { r: n.title, s: 'news' }
+            : d ? { r: `[${d.tag || '공시'}] ${d.title}`, s: 'disc' } : n && (mk ? strongNews(n, q.changePct, names) : !(mkB && weakTitle(n.title))) ? { r: n.title, s: 'news' }
             : mkWhy || (n ? { r: n.title, s: 'news' } : dMinor ? { r: `[${dMinor.tag || '공시'}] ${dMinor.title}`, s: 'disc' } : { r: '', s: '' });
           const old = i >= 0 ? list[i] : null;
           // 예전에 남긴 뉴스 이유도 지금 규칙으로 다시 본다 — 시세 안내·방향이 반대인 기사(내린 날의 호재 기사 등)면
           // 지킬 만한 이유가 아니다(더 나은 게 없으면 비운다). 호재·악재 태그는 제목만으로 정해져 다시 계산해도 같다
           const oldItem = old && { title: String(old.r ?? ''), sentiment: tagSentiment(old.r) };
           const oldNewsOk = old && old.s === 'news' && !!pickReasonNews([oldItem], q.changePct, day, (ms) => ymdIn(ms, tz), names)
-            && !(mk && !strongNews(oldItem, q.changePct, names)); // 시장 흐름 안이면 방향을 말하는 기사만 지킨다(32차)
+            && !(mk && !strongNews(oldItem, q.changePct, names)) // 시장 흐름 안이면 방향을 말하는 기사만 지킨다(32차)
+            && !(mkB && weakTitle(oldItem.title)); // 같은 방향으로 더 움직였으면 나열·전망 글·물음 제목은 안 지킨다(99차)
           // 예전에 남긴 공시 이유도 지금 규칙으로 — 방향이 반대인 공시면 지킬 이유가 아니다(30차)
           const oldDiscOk = !(old && old.s === 'disc' && discDir(String(old.r ?? '').replace(/^\[[^\]]*\]\s*/, '')) === -Math.sign(q.changePct));
-          const oldMktOk = !(old && old.s === 'mkt' && !mk); // 시장 흐름 이유는 지금도 시장 흐름 안일 때만(32차)
+          const oldMktOk = !(old && old.s === 'mkt' && !mk); // 시장 흐름 이유는 지금도 시장 흐름 안일 때만(32차 — 시장보다 더 움직이면 그 폭의 새 이유로, 99차)
           const oldRank = old && oldDiscOk && oldMktOk && !(old.s === 'news' && !oldNewsOk) ? rankOf(old) : 0;
           const keep = old && oldRank > rankOf(why);
           const entry = { d: day, p: Math.round(q.changePct * 100) / 100, r: cut(String(keep ? old.r : why.r)), s: keep ? old.s : why.s };

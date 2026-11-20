@@ -1511,13 +1511,24 @@ const PRICE_ONLY_YES = ['효성중공업 주가, 장중 114,000원 내린 1,682,
   'NVDA|NVIDIA Corp|Price:200.130|Chg%:-6.560',
   '[특징주] 대덕전자, 장중 16%대 급락세… 8만3100원 기록 : 기업주식정보', '[특징주] 심텍, 장중 15%대 급락하며 10만3500원선 기록 : 기업주식정보',
   '[특징주] 삼성전기 장중 11%대 급락 98만원선 거래 : 기업주식정보', 'LS ELECTRIC 주가, 11월 5일 장중 11.94% 하락 동일업종 동반 약세',
-  '[마감분석] 대덕전자 19.80% 급락 마감 7만9800원 기록 : 기업주식정보'];
+  '[마감분석] 대덕전자 19.80% 급락 마감 7만9800원 기록 : 기업주식정보',
+  // 99차 — 날짜 뒤가 시세 말뿐인 자동 기사·'…' 앞에 마감 말이 있는 [마감분석]·'장중 N원선 회복'(실제 10/20~11/19 제목 · 마쳐·종료·마감 없는 %는 꼴 하나씩)
+  '효성중공업 주가, 11월 19일 애프터마켓 1,772,000원대 상승 흐름', 'LG전자 주가, 11월 19일 애프터마켓 135,900원 1,100원 하락', '한화오션 주가, 11월 19일 애프터마켓 소폭 상승 흐름 44,900원',
+  '현대차 주가, 11월 19일 266,000원 기록하며 약보합세', '두산에너빌리티 주가, 11월 19일 장중 42,950원 0.23% 약보합세', 'LS ELECTRIC 주가, 11월 17일 애프터마켓 113,400원 -4.38% 하락',
+  '삼성SDI 주가, 11월 19일 장중 429,000원대 약세', '한화오션 주가, 11월 18일 애프터마켓 44,850원 0.00% 보합권', 'HD현대중공업 주가, 10월 28일 285,500원 6,000원 하락 장중 지속',
+  '한화오션 주가, 10월 28일 장중 52,200원 기록 업종 대비 약세', 'HD현대중공업 주가, 10월 20일 장중 5.64% 내림세 326,000원 기록', '한화오션 주가, 10월 20일 장중 60,400원 -5.92% 기록',
+  '[마감분석] 현대차 500원 내린 26만6500원 마감', '[마감분석] 삼성전기 약보합 마감 속 공시 일정 주목 : 기업주식정보', '[마감분석] 한화오션 5만3000원 보합 마감…실적 공시 속 관망 : 기업주식정보',
+  '[마감분석] 심텍 11만3500원에 거래 마쳐', '[마감분석] 현대차 27만7500원에 거래 종료', '[마감분석] 심텍 6%대 급등 9만9900원', 'HD현대일렉트릭 장중 40만원선 회복',
+  // 99차 — 잡포스트 자동 시세 기사 새 꼴(11/20 실제)
+  '삼성전기 12.99% 급락…장중 저가 76만8000원', '한화오션 7.11% 하락…장중 저가 4만1800원', '현대차 25만2500원으로 5.61% 하락…장중 저가 마감권', '삼성SDI 40만원선 이탈…7.12% 내려 장중 저가 마감권',
+  '효성중공업, 고가 1,908,000원·저가 1,790,000원 오가', '한화에어로스페이스, 고가 670,000원·저가 637,000원 오가', '3분기 실적 낸 SK텔레콤, 장중 고가 7만6800원', 'LG전자 장중 저가 16만800원…냉각 사업 확장 주시'];
 const PRICE_ONLY_NO = ['영업이익 추정치 웃돈 파두…주가는 장중 6.75% 하락', '삼성전기 주가 3.08% 상승…엔비디아 기판 생산능력 확대에 공급 수혜 기대',
   '호실적에 자사주 소각까지…삼성E&A 15% 상승세 [특징주]', '[장중수급포착] 대덕전자, 기관 8일 연속 순매수행진... 주가 +4.24%',
   '[개장시황] 삼성전기 5.05% 급등…코스피 차익매물에 하락 출발', 'Why Super Micro Computer Stock Popped Today', '수주 기대감에 장중 3%대 상승',
   '대덕전자, 장중 2.51% 하락…iM증권은 이익 전망 상향', '9개국 이상 거점 둔 한화에어로스페이스…주가 89만9000원으로 상승', '[특징주] SK텔레콤, 뚜렷한 공시 없이 장중 소폭 하락세 : 기업주식정보', '두산에너빌리티 장중 1.57% 하락해 6만2500원…원전 수주 지연 영향',
   "[특징주] 현대차·기아, 트럼프 자동차 정책 후퇴 기대.. '강세'", 'LG전자 5.99% 하락…AI 데이터센터 냉각 수주 전환 주목', '4일 한화오션 수주 2조…주가 2.60% 올라',
-  '[특징주] 씨에스윈드, 미국 베스타스와 797억원 공급계약', '효성중공업 177만원까지 밀려…전력기기 호황에도 13.62%↓', "[특징주] 美관세 완화 기대?…현대차·기아, 3%·5%대 각각 상승(종합)", '[마감분석] 반도체 수요 둔화 우려…대덕전자 급락'];
+  '[특징주] 씨에스윈드, 미국 베스타스와 797억원 공급계약', '효성중공업 177만원까지 밀려…전력기기 호황에도 13.62%↓', "[특징주] 美관세 완화 기대?…현대차·기아, 3%·5%대 각각 상승(종합)", '[마감분석] 반도체 수요 둔화 우려…대덕전자 급락',
+  '[마감분석] 반도체 수요 둔화 우려…대덕전자 급락 마감', '[마감분석] 현대차, 관세 우려에 약세 마감', '심텍, 호실적 뒤 차익 매물에 12.41% 급락', '대덕전자, 3분기 실적 호조에도 13.44% 급락', '실적 우려에 SK텔레콤, 장중 저가 7만원', 'LG전자 장중 저가 16만800원…실적 우려 반영', '삼성전자 주가, 11월 9일 장중 5% 상승…엔비디아 호재', '[속보] 두산에너빌리티 주가 장초반 9%대 껑충…VI 발동에 4만7000원선 돌파'];
 await test('시세 안내 기사: 날짜·가격만 있는 자동 기사·"주가 상승 중"·"장중 3%대 상승"은 이유에서 제외 · 이유가 붙은 제목은 유지 · 봇과 화면 판정이 같음', async () => {
   for (const t of PRICE_ONLY_YES) assert.equal(src.priceOnly(t), true, t);
   for (const t of PRICE_ONLY_NO) assert.equal(src.priceOnly(t), false, t);
@@ -1943,9 +1954,9 @@ await test('시장 대비(app.js): 국내 코스피·코스닥 · 미국 나스�
   const f = vm.runInNewContext(`${block}; ({ vsMarket })`, {});
   const idx = [{ symbol: '^KS11', changePct: -1.97 }, { symbol: '^KQ11', changePct: -1.85 }, { symbol: '^GSPC', changePct: 0.58 }, { symbol: '^IXIC', changePct: 1.05 }];
   const v = (q) => { const r = f.vsMarket({ ok: true, ...q }, idx); return r ? JSON.parse(JSON.stringify(r)) : null; };
-  assert.deepEqual(v({ market: 'KR', exch: 'KOSPI', changePct: -2.5 }), { sym: '^KS11', name: '코스피', pct: -1.97, diff: -0.53, follows: true, within: true });
-  assert.deepEqual(v({ market: 'KR', exch: 'KOSDAQ', changePct: 3 }), { sym: '^KQ11', name: '코스닥', pct: -1.85, diff: 4.85, follows: false, within: false });
-  assert.deepEqual(v({ market: 'US', exch: 'NASDAQ', changePct: 2.54 }), { sym: '^IXIC', name: '나스닥', pct: 1.05, diff: 1.49, follows: false, within: false }, '1%p 넘게 차이');
+  assert.deepEqual(v({ market: 'KR', exch: 'KOSPI', changePct: -2.5 }), { sym: '^KS11', name: '코스피', pct: -1.97, diff: -0.53, same: true, follows: true, within: true });
+  assert.deepEqual(v({ market: 'KR', exch: 'KOSDAQ', changePct: 3 }), { sym: '^KQ11', name: '코스닥', pct: -1.85, diff: 4.85, same: false, follows: false, within: false });
+  assert.deepEqual(v({ market: 'US', exch: 'NASDAQ', changePct: 2.54 }), { sym: '^IXIC', name: '나스닥', pct: 1.05, diff: 1.49, same: true, follows: false, within: false }, '1%p 넘게 차이(같은 방향 — same, 99차)');
   assert.equal(v({ market: 'US', exch: 'NYSE', changePct: 0.9 }).follows, false, '지수가 1% 안 움직인 날은 시장 따라 아님');
   assert.equal(v({ market: 'US', exch: 'NYSE', changePct: 0.9 }).name, 'S&P 500');
   assert.equal(v({ market: 'US', exch: 'NASDAQ ETF', changePct: 1 }).name, '나스닥');
@@ -1978,7 +1989,7 @@ await test('이유(31차): 시장보다 덜 움직인 종목도 방향 모를 �
   assert.ok(cell(-3.98).includes('HD건설기계, 수요 둔화 우려에 하락'), '같은 방향 기사는 그대로');
   news('');
   assert.ok(cell(-3.98).includes('흐름 — 종목만의 이유 기사 없음'), '이유가 없어도 시장보다 덜 움직였으면 시장 흐름');
-  assert.ok(cell(-7.5).includes('아직 이유 정보가 없어요'), '더 움직였는데 이유 없음');
+  assert.ok(cell(-7.5).includes('코스피 -6.19%보다 1.31%p 더 하락 — 종목만의 이유 기사 없음(AI 대기)'), '더 움직였는데 이유 없음 → 시장보다 더 움직인 폭(99차): ' + cell(-7.5));
   assert.ok(cell(-6.5).startsWith('<span class="src mkt"') && cell(-6.5).includes('시장 따라'), "1%p 안쪽이면 '시장 따라' 표시");
   // 지난 기사 날짜(30차)는 이유 칸에
   const y = Date.now() - 86400e3 - 600e3, kd = new Date(y + 9 * 3600e3);
@@ -2034,7 +2045,11 @@ await test('급등락 기록(32차): 시장보다 덜 움직인 날은 방향 �
   const r7 = ws();
   writeData(r7, 'moves.json', { '005930': [{ d: '20261015', p: -4, r: MK, s: 'mkt' }] });
   await pipeline(r7, { ...base, krPct: { '005930': -8, '000660': 0.3 }, news: newsOf('') });
-  assert.deepEqual([mv(r7).r, mv(r7).s], ['', ''], '시장보다 더 움직이게 되면 예전 시장 흐름 이유를 버림');
+  assert.deepEqual([mv(r7).r, mv(r7).s], ['코스피 -6.00%보다 2.00%p 더 하락 — 종목만의 이유 기사 없음', 'mkt'], '시장보다 더 움직이게 되면 예전 시장 흐름 이유 대신 그보다 더 움직인 폭(99차)');
+  const r8 = ws();
+  writeData(r8, 'moves.json', { '005930': [{ d: '20261015', p: -4, r: MK, s: 'mkt' }] });
+  await pipeline(r8, { ...base, idxPct: -0.5, krPct: { '005930': -4, '000660': 0.3 }, news: newsOf('') });
+  assert.deepEqual([mv(r8).r, mv(r8).s], ['', ''], '지수가 1% 안쪽으로 돌아오면 예전 시장 흐름 이유는 비움(더 나은 이유가 없어도)');
   // 화면 '지난 급등락' — 시장 흐름 이유는 흐린 글자(출처 표시 없음)
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
@@ -2187,6 +2202,71 @@ await test('시장 분위기 문구(98차): 가장 크게 움직인 지수 말 �
   const word = (p) => src.computeMood([{ name: '코스피', symbol: '^KS11', changePct: p, marketStatus: 'OPEN' }], 20).summary.split(' · ')[0];
   assert.deepEqual([-4.36, -2, -1.99, -0.3, -0.29, 0, 0.29, 0.3, 1.09, 1.99, 2, 2.63].map(word), ['코스피 급락(-4.36%)', '코스피 급락(-2.00%)', '코스피 약세(-1.99%)', '코스피 약세(-0.30%)', '코스피 보합(-0.29%)', '코스피 보합(0.00%)',
     '코스피 보합(0.29%)', '코스피 강세(0.30%)', '코스피 강세(1.09%)', '코스피 강세(1.99%)', '코스피 급등(2.00%)', '코스피 급등(2.63%)']);
+});
+await test('이유(99차): 지수와 같은 방향으로 더 움직인 종목은 이유 기사가 없거나 나열·전망 글·물음 제목뿐이면 "코스피 -5.37%보다 7.84%p 더 하락"(화면·급등락 기록) · AI 꺼 둔 종목은 "AI 꺼 둠" · "…나"로 끝나는 물음은 맨 뒤 · 가격 화살표·잭팟·호조·먹구름도 호재·악재 낱말', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const fmt = appJs.slice(appJs.indexOf('function fmtPct('), appJs.indexOf('function dirClass('));
+  const escFn = appJs.slice(appJs.indexOf('function esc('), appJs.indexOf('\n', appJs.indexOf('function esc(')));
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const why = appJs.slice(appJs.indexOf('function keyDiscToday('), appJs.indexOf('function tileHtml('));
+  const kstYmd = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const ctx = { state: { analysis: {}, news: {}, disc: {} }, kstYmd };
+  const f = vm.runInNewContext(fmt + '\n' + escFn + '\n' + block + '\n' + why + '; ({ whyCell, vsMarket, weakTitle })', ctx);
+  let ip = -5.37;
+  const q = (pct, name = '한화솔루션', ai) => ({ code: 'B', name, market: 'KR', exch: 'KOSPI', ok: true, changePct: pct, asOf: new Date().toISOString(), ...(ai === false ? { ai } : {}) });
+  const cell = (pct, name, ai) => { const x = q(pct, name, ai); return f.whyCell(x, f.vsMarket(x, [{ symbol: '^KS11', changePct: ip }])); };
+  const news = (title) => { ctx.state.news.B = { items: title ? [{ title, pubMs: Date.now() - 600e3, sentiment: { tone: 'neutral' } }] : [] }; };
+  // 실제 11/20 — 코스피 -5.37%에 한화솔루션 -6.59%의 이유가 Simply Wall St 물음 글, LS ELECTRIC -9.35%의 이유가 '…'잭팟' 터지나'였다
+  news('지금이 한화솔루션(KRX:009830)을 살펴볼 적기일까요?');
+  assert.ok(cell(-6.59).includes('코스피 -5.37%보다 1.22%p 더 하락 — 종목만의 이유 기사 없음(AI 대기)'), cell(-6.59));
+  assert.ok(cell(-6.59, '한화솔루션', false).includes('— 종목만의 이유 기사 없음(AI 꺼 둠)'), 'AI 꺼 둔 종목: ' + cell(-6.59, '한화솔루션', false));
+  news("\"없어서 못 판다\" 미국 전력망 슈퍼사이클… 효성중공업·LS ELECTRIC '잭팟' 터지나");
+  assert.ok(cell(-9.35, 'LS ELECTRIC').includes('코스피 -5.37%보다 3.98%p 더 하락'), "'…나'로 끝나는 물음 → 시장 흐름: " + cell(-9.35, 'LS ELECTRIC'));
+  news('한화솔루션, 마천1구역 입찰 불참');
+  assert.ok(cell(-6.59).includes('한화솔루션, 마천1구역 입찰 불참'), '방향 모를 기사(물음·나열 아님)는 그대로');
+  news('');
+  assert.ok(cell(-13.21, '대덕전자', false).includes('코스피 -5.37%보다 7.84%p 더 하락 — 종목만의 이유 기사 없음(AI 꺼 둠)'), '이유가 없을 때도: ' + cell(-13.21, '대덕전자', false));
+  assert.ok(cell(-5.0).includes('코스피 -5.37% 흐름 — 종목만의 이유 기사 없음') && !cell(-5.0).includes('AI'), '시장보다 덜 움직였으면 예전처럼(31차)');
+  ip = 2;
+  assert.ok(cell(5).includes('코스피 +2.00%보다 3.00%p 더 상승 — 종목만의 이유 기사 없음(AI 대기)'), '오른 날: ' + cell(5));
+  assert.ok(cell(-5).includes('아직 이유 정보가 없어요(뉴스·공시·AI 대기)'), '지수와 반대 방향이면 시장 흐름 아님');
+  ip = -0.5;
+  assert.ok(cell(-5).includes('아직 이유 정보가 없어요(뉴스·공시·AI 대기)') && cell(-5, 'x', false).includes('아직 이유 정보가 없어요(뉴스·공시 대기 · AI 꺼 둠)'), '지수가 1% 안쪽이면 예전처럼 · AI 꺼 둔 종목');
+  news('지금이 한화솔루션(KRX:009830)을 살펴볼 적기일까요?');
+  assert.ok(cell(-5).includes('살펴볼 적기일까요?'), '지수가 1% 안쪽이면 물음 글도 마지막 이유로 그대로');
+  // '…나'로 끝나는 물음 — 봇·화면 같게(실제 10/20~11/20 제목) · 증권사 출처 '-하나'·'늘어나'·가운데 물음은 아님
+  for (const [t, w] of [["\"없어서 못 판다\" 미국 전력망 슈퍼사이클… 효성중공업·LS ELECTRIC '잭팟' 터지나", true], ['SK하이닉스, 저점서 20% 반등…주가 재평가 본격화하나', true],
+    ['“삼전 31만원 vs 67만원·닉스 160만원 vs 470만원”…누구 말 믿어야 하나', true], ['"한화오션, 환율·일회성 비용에 3분기 실적 부진…목표가↓"-하나', false],
+    ['삼전·닉스 급락, 직원들 성과급 주식 수는 늘어나', false], ['한화솔루션, 부진 털고 부활하나...신재생에너지 수익성 개선에 3분기 흑자전환', false]]) {
+    assert.equal(src.weakTitle(t), w, '봇: ' + t); assert.equal(f.weakTitle(t), w, '화면: ' + t);
+  }
+  // 호재·악재 낱말 — 가격 화살표·잭팟·대박·호조·청신호·먹구름·직격탄·적신호(실제 10/20~11/20 제목)
+  for (const [t, l] of [['삼성E&A 6만2700원으로 2.18%↓…수주·주주환원 효과는 후속 확인', '중립'], ['LS ELECTRIC 10.25%↓…11만6500원서 전력기기 수급 시험', '악재'],
+    ['효성중공업 177만6000원…전력기기 기대에 1.72%↑', '호재'], ["\"없어서 못 판다\" 미국 전력망 슈퍼사이클… 효성중공업·LS ELECTRIC '잭팟' 터지나", '호재'],
+    ["[단독] DL이앤씨·두산에너빌 파트너 '엑스에너지' 대박 예고...아마존과 SMR 프로젝트 파트너십", '호재'], ['한화솔루션, 3분기 영업익 905억원…태양광 사업 호조', '호재'],
+    ['삼성전자·SK하이닉스 수급 청신호', '호재'], ['2.5조 현금화 나선 LG화학…LG엔솔 주가엔 ‘오버행’ 먹구름', '악재'],
+    ['“환율·비용 직격탄에 꺾인 3분기 실적…하지만 한화오션엔 ‘3년치 곳간’이 있다”', '악재'], ['현대차, 美 관세에 수익성 적신호', '악재']]) assert.equal(src.tagSentiment(t).label, l, t);
+  // 급등락 기록 — 같은 기준(코스피 -6%에 삼성전자 -8%)
+  const list = { v: 2, kr: [['005930', '삼성전자', 'KOSPI', 1], ['000660', 'SK하이닉스', 'KOSPI', 2]], us: [['AAPL', '애플', 'Apple Inc.', 'NASDAQ', 1]], meta: {} };
+  const item = (t) => '<item><title>' + t + ' - 테스트일보</title><link>https://news.example.com/1</link><pubDate>' + new Date(Date.now() - 600e3).toUTCString() + '</pubDate><source url="https://news.example.com">테스트일보</source></item>';
+  const newsOf = (tail) => (m, u) => text('<?xml version="1.0"?><rss><channel>' + (tail ? item(queryName(u) + tail) : '') + '</channel></rss>');
+  const base = { gemini: () => text('upstream error', 500), krAt: NOW_KR, idxPct: -6 };
+  const mv = (root) => read(root, 'moves.json')['005930'][0];
+  const ws = () => { const r = workspace(); writeData(r, 'stocklist.json', list); return r; };
+  const BEY = '코스피 -6.00%보다 2.00%p 더 하락 — 종목만의 이유 기사 없음';
+  for (const tail of [', 지금 살펴볼 적기일까요?', ', 미국에 공장 짓나']) {
+    const r = ws();
+    await pipeline(r, { ...base, krPct: { '005930': -8, '000660': 0.3 }, news: newsOf(tail) });
+    assert.deepEqual(mv(r), { d: '20261015', p: -8, r: BEY, s: 'mkt' }, '물음 제목뿐 → 시장보다 더 움직인 폭: ' + tail);
+  }
+  const r2 = ws();
+  writeData(r2, 'moves.json', { '005930': [{ d: '20261015', p: -7, r: '삼성전자, 미국에 공장 짓나', s: 'news' }] });
+  await pipeline(r2, { ...base, krPct: { '005930': -8, '000660': 0.3 }, news: newsOf('') });
+  assert.deepEqual([mv(r2).r, mv(r2).s], [BEY, 'mkt'], '예전 물음 제목 이유도 → 시장보다 더 움직인 폭');
+  const r3 = ws();
+  await pipeline(r3, { ...base, idxPct: 6, krPct: { '005930': 8, '000660': 0.3 }, news: newsOf('') });
+  assert.deepEqual([mv(r3).r, mv(r3).s], ['코스피 +6.00%보다 2.00%p 더 상승 — 종목만의 이유 기사 없음', 'mkt'], '오른 날');
 });
 await test('방향 낱말(36차): 휘청·무너·붕괴·밀려·껑충·뛰었 · 환율 강세·약세는 종목 방향 아님 · 여러 종목 제목은 이름이 든 절로 · [마감분석] "…% 내린 …원 마감"은 시세 · 봇·화면 같음', async () => {
   const vm = await import('node:vm');
@@ -2551,7 +2631,8 @@ await test('이유(47차): 미국 종목은 같은 방향 기사 중 티커 뒤�
   // 봇 급등락 기록도 — 더 최신인 같은 방향 기사보다 움직임 + 원인 제목
   const fresh = 'Apple (AAPL) wins record order from carrier', why = 'Apple (AAPL) Stock Rises 3% as iPhone Demand Beats Forecast';
   assert.deepEqual([src.tagSentiment(fresh).tone, src.tagSentiment(why).tone], ['pos', 'pos'], '전제: 둘 다 호재');
-  const item = (t, i) => '<item><title>' + t + ' - 테스트일보</title><link>https://news.example.com/y' + i + '</link><pubDate>' + RSS_PUB + '</pubDate><source url="https://news.example.com">테스트일보</source></item>';
+  // 기사 시각은 시세 시각(지금)과 같은 날로 — RSS_PUB(1시간 전)이면 미국 동부 자정~01시(한국 14~15시)에 전날 기사가 되어 97차 규칙으로 빠졌다(99차)
+  const item = (t, i) => '<item><title>' + t + ' - 테스트일보</title><link>https://news.example.com/y' + i + '</link><pubDate>' + new Date().toUTCString() + '</pubDate><source url="https://news.example.com">테스트일보</source></item>';
   const feed = (ts) => text('<?xml version="1.0"?><rss><channel>' + ts.map(item).join('') + '</channel></rss>');
   const root = workspace();
   await pipeline(root, { usPct: { AAPL: 3 }, gemini: () => text('upstream error', 500), news: (m, u) => (/AAPL/.test(new URL(u).searchParams.get('q')) ? feed([fresh, why, 'Apple AAPL supplier deal expands']) : text(rss('', queryName(u)))) });
@@ -3740,7 +3821,8 @@ await test('애프터마켓 이유(85차, 화면): "왜 움직였나"에 미국 
   const cell = (q) => f.extWhyCell(q, f.extOf(q));
   assert.ok(cell(NV).startsWith('<span class="src mkt" title="애프터마켓 — 정규장 종가 대비 +4.57%">애프터</span><span class="src" title="AI 애프터마켓 진단(정규장 마감 뒤 기사로)">AI</span>3분기 실적이 예상을 웃돌고 전망을 올려 상승'), cell(NV));
   assert.equal(f.extWhyOf(SM), null, '방향이 다른 진단은 안 씀');
-  assert.ok(cell(SM).includes('아직 이유 정보가 없어요'), '이유 없음: ' + cell(SM));
+  assert.ok(cell(SM).includes('아직 이유 정보가 없어요(마감 뒤 기사·AI 대기)'), '이유 없음: ' + cell(SM));
+  assert.ok(cell({ ...SM, ai: false }).includes('아직 이유 정보가 없어요(마감 뒤 기사 대기 · AI 꺼 둠)'), 'AI 꺼 둔 종목(99차): ' + cell({ ...SM, ai: false }));
   assert.equal(f.extWhyOf({ ...NV, asOf: '2026-11-18T21:00:00Z' }), null, '다른 날(다음 정규장) 것은 안 씀');
   assert.equal(f.extWhyOf({ ...NV, ext: { ...NV.ext, session: 'pre' } }), null, '프리마켓엔 안 씀');
   assert.equal(f.extWhyOf({ ...NV, marketStatus: 'OPEN' }), null, '장중엔 없음');
