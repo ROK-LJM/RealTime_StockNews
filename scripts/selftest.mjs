@@ -1617,6 +1617,28 @@ await test('이유 고르기: 상품 상장 공지·방향이 반대인 기사 �
   assert.equal(pick([{ title: '[특징주] 반도체 대형주 약세 전환…삼성전자, 외국인 매도 확대', pubMs: at(13) }, mixed[1]], -2.9, ['삼성전자']),
     '[특징주] 반도체 대형주 약세 전환…삼성전자, 외국인 매도 확대', '이름 바로 뒤에 방향 말이 없으면 제목 전체(약세)로');
 });
+await test('이유 고르기(97차): 거래일 전 기사가 그날의 주가 움직임을 전한 것(…1.60% 조정·8%대 급등·Falls 1.7%)이면 오늘 이유가 아님 · 그날 기사·%가 없는 지난 기사는 그대로 · 날짜를 모르면 그대로 · 봇과 화면 같음', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(`${block}; ({ pickReasonNews })`, {});
+  const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const et = (ms) => new Date(ms - 5 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const at = (s) => T(s);
+  const Y = at('2026-11-19T15:10:00+09:00'), D = at('2026-11-20T10:20:00+09:00');
+  const both = (list, pct, day, ymd, names) => { const a = src.pickReasonNews(list, pct, day, ymd, names), b = f.pickReasonNews(list, pct, day, ymd, names); assert.equal(b?.title ?? null, a?.title ?? null, '봇·화면 같음'); return a?.title ?? null; };
+  // 11/20 대덕전자 -10.50% — 11/19 '…주가는 1.60% 조정'은 오늘 이유가 아님
+  assert.equal(both([{ title: '영업이익 259% 늘어난 대덕전자, 주가는 1.60% 조정', pubMs: Y }], -10.5, '20261120', kst, ['대덕전자']), null, '지난 거래일 시세 기사');
+  assert.equal(both([{ title: '영업이익 259% 늘어난 대덕전자, 주가는 1.60% 조정', pubMs: Y }, { title: '대덕전자, 반도체 기판 수요 둔화 우려에 약세', pubMs: Y }], -10.5, '20261120', kst, ['대덕전자']),
+    '대덕전자, 반도체 기판 수요 둔화 우려에 약세', '%가 없는 지난 기사는 그대로');
+  assert.equal(both([{ title: '삼성전기 주가 8%대 급등…엔비디아 효과 이틀째', pubMs: Y }], 3, '20261120', kst, ['삼성전기']), null, '오른 날도 — 지난 거래일 8%대 급등');
+  assert.equal(both([{ title: '대덕전자 10%대 급락…반도체 기판주 투매', pubMs: D }], -10.5, '20261120', kst, ['대덕전자']), '대덕전자 10%대 급락…반도체 기판주 투매', '그날 기사는 그대로');
+  assert.equal(both([{ title: '영업이익 259% 늘어난 대덕전자, 주가는 1.60% 조정', pubMs: Y }], -10.5, '', kst, ['대덕전자']), '영업이익 259% 늘어난 대덕전자, 주가는 1.60% 조정', '거래일을 모르면 그대로');
+  // 미국 — 뉴욕 날짜로
+  assert.equal(both([{ title: "Amazon.com (NASDAQ:AMZN) Stock Falls 1.7% - Here's Why", pubMs: T('2026-11-18T20:30:00Z') }], -3.9, '20261119', et, ['아마존닷컴', 'AMZN']), null, '지난 거래일 Falls 1.7%');
+  assert.equal(both([{ title: 'Microsoft Stocks Rise 3.16% as Anthropic Commits $47.2 Billion Minimum to Azure', pubMs: T('2026-11-19T19:30:00Z') }], 3.2, '20261119', et, ['마이크로소프트', 'MSFT']),
+    'Microsoft Stocks Rise 3.16% as Anthropic Commits $47.2 Billion Minimum to Azure', '그날(뉴욕) 기사는 그대로');
+});
 await test('이유 고르기(24차): "…2.80% 조정"·"조정세"는 내림 말("목표가 상향 조정"은 아님) · 우선주는 기사 속 보통주 이름으로 방향(화면 "왜 움직였나") · 봇과 화면 같음', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
@@ -1805,8 +1827,11 @@ await test('이유(30차): 오늘 움직임과 방향이 반대인 공시(내린
   // 뉴스 이유가 그 종목 거래일 기사가 아니면 기사 날짜(실제 11/06 파두 -9.86%에 11/05 '파두 4.90% 하락…' 기사)
   ctx.state.disc.A = { items: [] };
   const y = Date.now() - 86400e3 - 600e3, kd = new Date(y + 9 * 3600e3);
+  // (97차부터 '가나 4.90% 하락…'처럼 그날 등락을 전한 지난 기사는 이유가 아님 — 날짜는 %가 없는 지난 기사로)
   ctx.state.news.A = { items: [{ title: '가나 4.90% 하락…신규 수주 이행 점검', pubMs: y }] };
-  assert.deepEqual([f.whyOf(q(-9.86)).text, f.whyOf(q(-9.86)).day], ['가나 4.90% 하락…신규 수주 이행 점검', (kd.getUTCMonth() + 1) + '/' + kd.getUTCDate()], '거래일 전 기사엔 날짜');
+  assert.equal(f.whyOf(q(-9.86)), null, '지난 거래일 시세 기사는 이유 아님(97차)');
+  ctx.state.news.A = { items: [{ title: '가나, 신규 수주 이행 차질 우려에 약세', pubMs: y }] };
+  assert.deepEqual([f.whyOf(q(-9.86)).text, f.whyOf(q(-9.86)).day], ['가나, 신규 수주 이행 차질 우려에 약세', (kd.getUTCMonth() + 1) + '/' + kd.getUTCDate()], '거래일 전 기사엔 날짜');
   ctx.state.news.A = { items: [{ title: '가나, 반도체주 폭락에 급락', pubMs: Date.now() - 60e3 }] };
   assert.equal(f.whyOf(q(-9.86)).day, undefined, '그날 기사엔 날짜 없음');
 });
@@ -2142,6 +2167,11 @@ await test('개장 전 예상 지수(35차): 08:55 전 값은 어제 종가·0%�
   assert.deepEqual(look(2, 'CLOSE'), { est: false, dirCls: 'up', cardCls: 'brief-up', arrow: '▲', label: '급등 핵심 이유' });
   assert.deepEqual(look(0.4, 'OPEN'), { est: false, dirCls: 'up', cardCls: 'brief-up', arrow: '▲', label: '오늘의 핵심' });
   assert.deepEqual(look(0, null), { est: false, dirCls: 'flat', cardCls: '', arrow: '–', label: '오늘의 핵심' });
+});
+await test('시장 분위기 문구(98차): 가장 크게 움직인 지수 말 — ±2% 넘으면 급등·급락, ±0.3% 안쪽은 보합, 그 사이는 강세·약세(11/20 코스피 -4.36%가 "약세")', async () => {
+  const word = (p) => src.computeMood([{ name: '코스피', symbol: '^KS11', changePct: p, marketStatus: 'OPEN' }], 20).summary.split(' · ')[0];
+  assert.deepEqual([-4.36, -2, -1.99, -0.3, -0.29, 0, 0.29, 0.3, 1.09, 1.99, 2, 2.63].map(word), ['코스피 급락(-4.36%)', '코스피 급락(-2.00%)', '코스피 약세(-1.99%)', '코스피 약세(-0.30%)', '코스피 보합(-0.29%)', '코스피 보합(0.00%)',
+    '코스피 보합(0.29%)', '코스피 강세(0.30%)', '코스피 강세(1.09%)', '코스피 강세(1.99%)', '코스피 급등(2.00%)', '코스피 급등(2.63%)']);
 });
 await test('방향 낱말(36차): 휘청·무너·붕괴·밀려·껑충·뛰었 · 환율 강세·약세는 종목 방향 아님 · 여러 종목 제목은 이름이 든 절로 · [마감분석] "…% 내린 …원 마감"은 시세 · 봇·화면 같음', async () => {
   const vm = await import('node:vm');
@@ -2807,6 +2837,61 @@ await test('한 줄 진단 묶음(60차, 봇): 그날 진단 없는 종목이 �
   await pipeline(r4, { krPct: pctOf(7), krAt: NOW_KR, gemini: briefReply, news: noIdx });
   assert.deepEqual(order(), ['batch:삼성전자,SK하이닉스,NAVER,현대차,LG화학'], '몫 1번 → 앞 5종목 묶음');
   assert.deepEqual(Object.keys(view(r4)).sort(), ['000660', '005380', '005930', '035420', '051910']);
+});
+await test('진단 끝 방향(96차): 오름·내림 말 중 끝나는 자리가 가장 뒤인 것이 진단의 방향 · 그때 등락과 반대면 버림(한 줄 진단 묶음·종합분석·애프터마켓 진단) · 저장된 진단도 지금 등락과 반대면 지움', async () => {
+  src.resetState(); src.setAiBudget(null);
+  // 실제 11/13~11/20 — 방향이 반대인 한 줄 진단 5건(진단 486건 중)
+  for (const [h, p] of [['미국 보안주 강세에 동반 상승 기대감으로 관심 집중', -5], ['데이터센터·AI 모듈러 사업 경쟁력 부각에 급등', -6], ['AI 슈퍼사이클 및 HBM 기술 강점으로 상승', -2],
+    ['뚜렷한 재료 없이 시장 흐름 따라 상승', -3], ['IBK투자증권의 긍정적 실적 전망에 급등', -2]])
+    assert.equal(src.againstMove(h, p), true, h);
+  for (const [h, p, d] of [['장중 상승분 반납', -3, -1], ['기술적 반등에 실패하며 약세', -3, -1], ['반등에 실패', -3, -1], ['장중 하락분 만회', 3, 1], ['목표가 상향 조정에 상승', 3, 1],
+    ['증권사 목표가 상향 조정', 3, 0], ['원화 강세 수혜 기대', -3, 0], ['코스피 급락에도 선방하며 상승', 2, 1], ['급등 뒤 차익 실현에 하락', -2, -1],
+    ['829억원 규모 풍력타워 공급 계약에도 불구하고 하락', -4, -1], ['실망스러운 매출 가이던스로 투자 심리 악화', -12, 0]]) {
+    assert.equal(src.headDir(h), d, h);
+    assert.equal(src.againstMove(h, p), false, h);
+  }
+  assert.equal(src.againstMove('실적 호조에 상승', 0), false, '등락 0');
+  assert.equal(src.againstMove('뚜렷한 재료 없음', 0), false, '등락 0 · 방향 말 없음');
+  // 봇 — 한 줄 진단 묶음(60차 ①과 같은 6종목 — 앞 셋 종합분석, 뒤 셋 묶음): +6%에 '…급락'은 버림
+  const LIST = [['005930', '삼성전자', 9], ['000660', 'SK하이닉스', 8], ['035420', 'NAVER', 7], ['005380', '현대차', 6], ['051910', 'LG화학', 5], ['035720', '카카오', 4]];
+  const H = { '005380': '데이터센터 경쟁력 부각에 급락', '051910': '배터리 수주 기대에 상승', '035720': '뚜렷한 재료 없이 시장 흐름 따라 상승' };
+  const promptOf = (b) => JSON.parse(b).contents[0].parts[0].text;
+  const reply = () => {
+    const body = NET.bodies.at(-1);
+    if (!body.includes('종목마다')) return json(geminiOk);
+    const its = [...promptOf(body).matchAll(/^\[(\d+)\] [^(\n]+\(한국 (\d{6})\)/gm)].map((m) => ({ no: +m[1], headline: H[m[2]] || '기타' }));
+    return json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ items: its }) }] } }] });
+  };
+  const r1 = workspace(LIST.map(([code, name]) => ({ code, market: 'KR', name })));
+  await pipeline(r1, { krPct: Object.fromEntries(LIST.map(([c, , p]) => [c, p])), krAt: NOW_KR, gemini: reply });
+  const a1 = read(r1, 'analysis.json');
+  assert.deepEqual([a1['005380'], a1['051910'] && a1['051910'].headline, a1['035720'] && a1['035720'].headline], [undefined, '배터리 수주 기대에 상승', '뚜렷한 재료 없이 시장 흐름 따라 상승'], JSON.stringify(a1));
+  // 종합분석 — +4.2%에 '…급락'은 버림
+  const bad = { candidates: [{ content: { parts: [{ text: JSON.stringify({ headline: '실적 우려에 급락', summary: 's', factors: ['f'], outlook: 'o' }) }] } }] };
+  const r2 = workspace();
+  writeData(r2, 'analysis.json', { '005930': { headline: '어제 진단', summary: '어제', model: 'model-primary', sig: '4|어제', at: NOW_KR - 1440 * MIN, pv: src.ANALYSIS_PV } });
+  await pipeline(r2, { krPct: { '005930': 4.2 }, krAt: NOW_KR, gemini: () => json(NET.bodies.at(-1).includes("'삼성전자'이(가)") ? bad : geminiOk) });
+  assert.equal(read(r2, 'analysis.json')['005930'].headline, '어제 진단', '종합분석도 버리고 직전 분석 유지');
+  // 저장된 진단 — AI 차례가 아니어도(몫 없음) 지금 등락과 반대면 지움, 같은 방향은 그대로
+  const r3 = workspace();
+  writeData(r3, 'analysis.json', { '005930': { headline: '미국 보안주 강세에 동반 상승 기대감으로 관심 집중', lite: true, model: 'm', sig: '-5|x', at: NOW_KR - 10 * MIN, pv: src.ANALYSIS_PV },
+    '000660': { headline: '반도체 업황 우려에 하락', lite: true, model: 'm', sig: '-4|x', at: NOW_KR - 10 * MIN, pv: src.ANALYSIS_PV } });
+  const b = bud.startBudget(null, NOW_KR), cap = Math.floor(bud.capacity(b, ['model-primary', 'model-fallback']) * b.fraction);
+  writeData(r3, 'status.json', statusSeed({ 'model-primary': Math.ceil(cap / 2), 'model-fallback': Math.floor(cap / 2) }));
+  await pipeline(r3, { krPct: { '005930': -4.2, '000660': -3.8 }, krAt: NOW_KR });
+  const a3 = read(r3, 'analysis.json');
+  assert.deepEqual([a3['005930'], a3['000660'] && a3['000660'].headline], [undefined, '반도체 업황 우려에 하락'], JSON.stringify(a3));
+  // 애프터마켓 진단(85차) — 시간외 등락(+)과 반대인 '…급락'은 버림
+  const S = (s) => T(s) / 1000, REG_CLOSE = '2026-10-15T20:00:00Z';
+  const closedQuote = (sym) => { const j = yahooChart(sym), now = Math.floor(Date.now() / 1000); Object.assign(j.chart.result[0].meta, { regularMarketTime: S(REG_CLOSE), currentTradingPeriod: { regular: { start: now - 7200, end: now - 3600 } } }); return j; };
+  const extChart = { chart: { result: [{ meta: { currentTradingPeriod: { regular: { start: S('2026-10-15T13:30:00Z'), end: S(REG_CLOSE) } } }, timestamp: [S('2026-10-15T19:55:00Z'), S('2026-10-15T21:55:00Z')], indicators: { quote: [{ close: [225, 235] }] } }] } };
+  const yahoo = (m, u) => { const sym = decodeURIComponent(m[1]); if (/interval=5m/.test(u)) return json(extChart); return json(sym === 'AAPL' ? closedQuote(sym) : yahooChart(sym)); };
+  const extBad = () => json(NET.bodies.at(-1).includes('애프터마켓(시간외 거래)') ? { candidates: [{ content: { parts: [{ text: JSON.stringify({ items: [{ no: 1, headline: '실적 우려에 급락' }] }) }] } }] } : geminiOk);
+  const r4 = workspace();
+  writeData(r4, 'news.json', { AAPL: { ok: true, items: [{ title: 'Apple beats estimates as iPhone sales jump', pubMs: T('2026-10-15T20:40:00Z'), link: 'https://news.example.com/beat', source: 'Reuters' }] }, '005930': { ok: true, items: [] }, '000660': { ok: true, items: [] } });
+  await pipeline(r4, { ...CALM, yahoo, gemini: extBad }, T('2026-10-15T22:07:00Z'), { refreshAll: false, extWhy: true });
+  assert.ok(read(r4, 'quotes.json').quotes.find((y) => y.code === 'AAPL').ext.changePct >= 2, '애프터마켓 +');
+  assert.equal(fs.existsSync(path.join(r4, 'docs', 'data', 'extwhy.json')), false, '시간외 등락과 반대 — 저장 안 함');
 });
 await test('한 줄 진단 묶음(60차, 화면): 카드는 "AI 간단" 배지와 진단 한 줄(펼침 없음 · 지난 거래일 것이면 주황 배지에 날짜) · "왜 움직였나" 출처도 "AI 간단" · 종합분석은 그대로', async () => {
   const vm = await import('node:vm');
@@ -3861,6 +3946,46 @@ await test('새로고침 버튼(91·92차): 누르면 아이콘이 돎(끝날 �
   assert.ok(css.includes('.rf-toast.show {') && (css.match(/--toast-ok:/g) || []).length === 3 && (css.match(/--toast-bad:/g) || []).length === 3, '보임·색 세 곳');
   const clockOnLoad = appJs.includes('state.checkedAt = Date.now();\r\n  renderClock();') || appJs.includes('state.checkedAt = Date.now();\n  renderClock();');
   assert.ok(appJs.includes("$('#refreshBtn')?.addEventListener('click', refreshNow);") && appJs.includes('if (full) await q;') && clockOnLoad, '버튼·끝까지 기다림·시세 받을 때 시계');
+});
+await test('넥스트레이드 애프터마켓(95차): 정규장 마감 뒤 30분처럼 시간외 가격이 없을 때 그날 마감 뒤 넥스트레이드 애프터마켓 체결가를 시간외 줄로(정규장 종가 대비) · 첫 회차·다음 회차 · 장 구분·거래량·체결 시각이 맞을 때만 · 30분 뒤 시간외 가격이 나오면 그것 · 카드 말풍선에 출처', async () => {
+  const at = (hm) => T('2026-10-15T' + hm + ':00+09:00');
+  const kr = (root) => read(root, 'quotes.json').quotes.find((q) => q.code === '005930');
+  const nxt = (o = {}) => ({ overMarketPriceInfo: { tradingSessionType: 'AFTER_MARKET', overMarketStatus: 'OPEN', overPrice: '69,800', fluctuationsRatio: '3.90', accumulatedTradingVolumeRaw: '12345', localTradedAt: '2026-10-15T15:44:00+09:00', ...o } });
+  const want = { session: 'post', src: 'nxt', price: 69800, change: -200, changePct: -0.29, at: at('15:44') };
+  // ① 마감 뒤 첫 회차(네이버 시각 15:30 — 종가 고정) · 넥스트레이드 애프터마켓 15:44 체결 69,800원 → 시간외 줄(정규장 종가 70,000원 대비 -0.29%)
+  const r1 = workspace();
+  await pipeline(r1, { idxStatus: 'CLOSE', krAt: at('15:30'), krExtra: { '005930': nxt() } }, at('15:45'));
+  assert.deepEqual([kr(r1).price, kr(r1).closeFix, kr(r1).ext], [70000, 1, want], JSON.stringify(kr(r1)));
+  // ② 다음 회차(직전 파일이 종가 고정 · 네이버 시각 그대로 15:30) — 정규장 종가를 지키고 시간외 줄은 넥스트레이드
+  const r2 = workspace();
+  writeData(r2, 'quotes.json', { quotes: [{ ...kr(r1), ext: undefined }] });
+  await pipeline(r2, { idxStatus: 'CLOSE', krAt: at('15:30'), krExtra: { '005930': nxt({ overPrice: '70,300', localTradedAt: '2026-10-15T15:52:00+09:00' }) } }, at('15:53'));
+  assert.deepEqual([kr(r2).price, kr(r2).changePct, kr(r2).ext], [70000, 4.2, { ...want, price: 70300, change: 300, changePct: 0.43, at: at('15:52') }], JSON.stringify(kr(r2)));
+  // ③ 맞지 않으면 없음 — 장 구분이 다름·거래량 없음·마감 전 체결·다른 날 체결·넥스트레이드 칸 없음
+  for (const [why, o] of [['장 구분', { tradingSessionType: 'REGULAR_MARKET' }], ['거래량', { accumulatedTradingVolumeRaw: '' }], ['마감 전 체결', { localTradedAt: '2026-10-15T15:20:00+09:00' }],
+    ['다른 날 체결', { localTradedAt: '2026-10-14T19:50:00+09:00' }]]) {
+    const r = workspace();
+    await pipeline(r, { idxStatus: 'CLOSE', krAt: at('15:30'), krExtra: { '005930': nxt(o) } }, at('15:45'));
+    assert.equal('ext' in kr(r), false, why);
+  }
+  const r3 = workspace();
+  await pipeline(r3, { idxStatus: 'CLOSE', krAt: at('15:30') }, at('15:45'));
+  assert.equal('ext' in kr(r3), false, '넥스트레이드 칸 없음(넥스트레이드 종목 아님)');
+  // ④ 30분 뒤 시간외 가격(네이버 17:00 71,000원)이 나오면 그것(넥스트레이드 값이 있어도)
+  const r4 = workspace();
+  writeData(r4, 'quotes.json', { quotes: [{ ...kr(r1), ext: undefined }] });
+  await pipeline(r4, { idxStatus: 'CLOSE', krAt: at('17:00'), krExtra: { '005930': { closePrice: '71,000', ...nxt({ localTradedAt: '2026-10-15T16:59:00+09:00' }) } } }, at('17:01'));
+  assert.deepEqual(kr(r4).ext, { session: 'post', price: 71000, change: 1000, changePct: 1.43, at: at('17:00') }, '시간외 가격 그대로');
+  // 화면 — 카드 시간외 줄은 '시간외' 그대로, 말풍선에 출처
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const body = appJs.slice(appJs.indexOf('function extRow('), appJs.indexOf('// 큰 등락 옆 \'정규장 종가\'(76차)'));
+  const stubs = 'const extOf = (q) => q.ext ? { ...q.ext, label: "시간외", short: "시간외" } : null; const fmtAiTime = () => "15:44"; const marketOf = () => "KR"; const extReason = () => null; const WHY_MIN = 2;'
+    + ' const dirClass = (v) => (v > 0 ? "up" : v < 0 ? "down" : "flat"); const fmtPrice = (o) => String(o.price); const fmtChange = (o) => String(o.change); const fmtPct = (v) => `${v}%`; const esc = (s) => String(s); const extLink = () => "";';
+  const g = vm.runInNewContext(stubs + body + '; ({ extRow })', {});
+  const row = g.extRow({ code: '005930', currency: 'KRW', ext: want });
+  assert.ok(row.includes('title="넥스트레이드 애프터마켓 체결가') && row.includes('<span class="ext-label">시간외</span>'), row);
+  assert.ok(g.extRow({ code: '005930', currency: 'KRW', ext: { ...want, src: undefined } }).includes('title="정규장 밖(시간외) 거래 가격 — 등락은 정규장 종가 대비"'), '네이버 시간외 가격은 예전 말풍선');
 });
 await test('시간외 시장 칸(80차): 국내 시세에 네이버 overMarketPriceInfo(넥스트레이드 프리·애프터마켓 등)를 그대로 남김 — 글자·숫자 칸은 그대로, 객체 칸은 name · 없으면 안 붙음', async () => {
   const over = { tradingSessionType: 'PRE_MARKET', overMarketStatus: 'OPEN', overPrice: '71,500', compareToPreviousClosePrice: '1,500', fluctuationsRatio: '2.14',

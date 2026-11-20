@@ -687,12 +687,16 @@ function newsDir(it, names) {
 const MOVE_WHY_RE = /\b(?:soar(?:s|ed|ing)?|jump(?:s|ed|ing)?|surg(?:e|es|ed|ing)|ris(?:e|es|ing)|rose|rall(?:y|ies|ied|ying)|climb(?:s|ed|ing)?|gain(?:s|ed|ing)?|spik(?:e|es|ed|ing)|rebound(?:s|ed|ing)?|pop(?:s|ped|ping)?|fall(?:s|ing)?|fell|drop(?:s|ped|ping)?|slid(?:e|es|ing)?|sink(?:s|ing)?|sank|plung(?:e|es|ed|ing)|tumbl(?:e|es|ed|ing)|slump(?:s|ed|ing)?|declin(?:e|es|ed|ing)|slip(?:s|ped|ping)?)\b(?:[^.?!]|\.\d)*?\b(?:after|as|on|amid|following)\b/i;
 const tickerAt = (t, n) => { const m = /^[A-Z][A-Z.\-]{0,9}$/.test(n || '') ? t.match(new RegExp('(?:^|[^A-Za-z])' + n.replace(/[.\-]/g, (c) => '\\' + c) + '(?:[^A-Za-z]|$)')) : null; return m ? m.index : -1; };
 const moveWhy = (t, names) => (names || []).some((n) => { const i = tickerAt(t, n); return i >= 0 && MOVE_WHY_RE.test(t.slice(i)); });
+// 지난 거래일 시세 기사(97차) — 거래일 전 기사가 그날의 주가 움직임을 '…1.60% 조정'·'8%대 급등'·'Falls 1.7%'처럼 전한 것이면 오늘 움직임의 이유가 아니다
+// (11/20 대덕전자 -10.50%(코스피 -4.36%)의 '왜 움직였나'가 11/19 '영업이익 259% 늘어난 대덕전자, 주가는 1.60% 조정'이었다). 뉴스 목록엔 그대로, 봇·화면 같음
+const PAST_MOVE_RE = /\d+(?:\.\d+)?%\s?대?\s?(?:상승|하락|급등|급락|강세|약세|조정|올라|오른|올랐|내려|내린|내렸|떨어|뛰었|빠졌|오름|내림)|\b(?:ris(?:e|es|ing)|rose|fall(?:s|ing)?|fell|jump(?:s|ed)?|drop(?:s|ped)?|gain(?:s|ed)?|slid(?:e|es|ing)?|sink(?:s|ing)?|sank|surg(?:e|es|ed)|climb(?:s|ed)?|tumbl(?:e|es|ed)|plung(?:e|es|ed)|soar(?:s|ed)?|slip(?:s|ped)?)\s+(?:by\s+)?[\d.]+%/i;
 function pickReasonNews(items, pct, day, ymd, names = []) {
   const s = Math.sign(Number(pct) || 0);
   const dir = (it) => newsDir(it, names);
   const tier = (it) => (/\[특징주\]/.test(it.title) && s && dir(it) === s && Number.isFinite(it.pubMs) && ymd(it.pubMs) === day ? 0
     : weakTitle(it.title) ? 3 : s && dir(it) === s ? (moveWhy(it.title, names) ? 1 : 1.5) : 2);
-  return (Array.isArray(items) ? items : []).filter((it) => it && it.title && !priceOnly(it.title) && !LISTING_RE.test(it.title) && !CSR_RE.test(it.title) && !(s && dir(it) === -s))
+  return (Array.isArray(items) ? items : []).filter((it) => it && it.title && !priceOnly(it.title) && !LISTING_RE.test(it.title) && !CSR_RE.test(it.title) && !(s && dir(it) === -s)
+      && !(Number.isFinite(it.pubMs) && ymd(it.pubMs) < day && PAST_MOVE_RE.test(it.title))) // 지난 거래일 시세 기사는 오늘 이유 아님(97차)
     .map((it, i) => [tier(it), i, it]).sort((a, b) => a[0] - b[0] || a[1] - b[1])[0]?.[2] || null;
 }
 // O1 시장 대비 — 종목마다 같은 시장 지수와 비교(국내 상장 시장별 코스피·코스닥, 미국 나스닥 상장은 나스닥 · 그 밖은 S&P 500).
@@ -1015,7 +1019,7 @@ function extRow(q) {
   const at = fmtAiTime(x.at);
   // 시간외 움직임의 이유(85차) — AI 애프터마켓 진단은 늘, 마감 뒤 기사는 시간외 등락이 ±2% 넘을 때만(작은 움직임에 기사를 이유처럼 붙이지 않게)
   const w = marketOf(q) === 'US' ? extReason(q) : null, wy = w && (w.src === 'AI' || Math.abs(x.changePct) >= WHY_MIN) ? w : null;
-  return `<div class="ext-row" title="정규장 밖(시간외) 거래 가격 — 등락은 정규장 종가 대비">
+  return `<div class="ext-row" title="${x.src === 'nxt' ? '넥스트레이드 애프터마켓 체결가(정규장 마감 뒤 시간외 가격이 나오기 전, 95차)' : '정규장 밖(시간외) 거래 가격'} — 등락은 정규장 종가 대비">
       <span class="ext-label">${x.label}</span> <b>${fmtPrice({ price: x.price, currency: q.currency })}</b>
       <span class="${dirClass(x.changePct)}-c">${arrow} ${fmtChange({ change: x.change, currency: q.currency })} (${fmtPct(x.changePct)})</span>${at ? ` <span class="muted">· ${esc(at)}</span>` : ''}</div>${wy ? `
     <div class="ext-why"><span class="src" title="${esc(wy.label)}">${wy.src}</span>${wy.item ? extLink(wy.item.link, wy.text) : esc(wy.text)}${wy.at ? ` <span class="muted">· ${esc(fmtAiTime(wy.at))}</span>` : ''}</div>` : ''}`;

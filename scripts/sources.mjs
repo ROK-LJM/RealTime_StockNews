@@ -271,7 +271,9 @@ export function computeMood(indices0, vix) {
   else { label = '극도의 탐욕'; tone = 'greed'; }
   const bits = [];
   const big = [...indices].sort((a, b) => Math.abs(b.changePct ?? 0) - Math.abs(a.changePct ?? 0))[0];
-  if (big && Number.isFinite(big.changePct)) bits.push(`${big.name} ${big.changePct >= 0 ? '강세' : '약세'}(${big.changePct.toFixed(2)}%)`);
+  // 지수 말(98차) — ±2% 넘으면 '급등·급락', ±0.3% 안쪽은 '보합'(11/20 코스피 -4.36%가 '코스피 약세(-4.36%)'로 보였다)
+  const word = (p) => (p >= 2 ? '급등' : p <= -2 ? '급락' : p >= 0.3 ? '강세' : p <= -0.3 ? '약세' : '보합');
+  if (big && Number.isFinite(big.changePct)) bits.push(`${big.name} ${word(big.changePct)}(${big.changePct.toFixed(2)}%)`);
   if (Number.isFinite(vix)) bits.push(vix >= 25 ? `VIX 급등(${vix.toFixed(1)})` : vix >= 20 ? `VIX 다소 높음(${vix.toFixed(1)})` : `VIX 안정(${vix.toFixed(1)})`);
   const risk = score >= 55 ? '위험선호(리스크온)' : score <= 45 ? '위험회피(리스크오프)' : '관망';
   return { score, label, tone, summary: `${bits.join(' · ')} → ${risk} 심리` };
@@ -634,12 +636,16 @@ export function strongNews(it, pct, names = []) {
 const MOVE_WHY_RE = /\b(?:soar(?:s|ed|ing)?|jump(?:s|ed|ing)?|surg(?:e|es|ed|ing)|ris(?:e|es|ing)|rose|rall(?:y|ies|ied|ying)|climb(?:s|ed|ing)?|gain(?:s|ed|ing)?|spik(?:e|es|ed|ing)|rebound(?:s|ed|ing)?|pop(?:s|ped|ping)?|fall(?:s|ing)?|fell|drop(?:s|ped|ping)?|slid(?:e|es|ing)?|sink(?:s|ing)?|sank|plung(?:e|es|ed|ing)|tumbl(?:e|es|ed|ing)|slump(?:s|ed|ing)?|declin(?:e|es|ed|ing)|slip(?:s|ped|ping)?)\b(?:[^.?!]|\.\d)*?\b(?:after|as|on|amid|following)\b/i;
 const tickerAt = (t, n) => { const m = /^[A-Z][A-Z.\-]{0,9}$/.test(n || '') ? t.match(new RegExp('(?:^|[^A-Za-z])' + n.replace(/[.\-]/g, (c) => '\\' + c) + '(?:[^A-Za-z]|$)')) : null; return m ? m.index : -1; };
 const moveWhy = (t, names) => (names || []).some((n) => { const i = tickerAt(t, n); return i >= 0 && MOVE_WHY_RE.test(t.slice(i)); });
+// 지난 거래일 시세 기사(97차) — 거래일 전 기사가 그날의 주가 움직임을 '…1.60% 조정'·'8%대 급등'·'Falls 1.7%'처럼 전한 것이면 오늘 움직임의 이유가 아니다
+// (11/20 대덕전자 -10.50%(코스피 -4.36%)의 '왜 움직였나'가 11/19 '영업이익 259% 늘어난 대덕전자, 주가는 1.60% 조정'이었다). 뉴스 목록엔 그대로, 봇·화면 같음
+export const PAST_MOVE_RE = /\d+(?:\.\d+)?%\s?대?\s?(?:상승|하락|급등|급락|강세|약세|조정|올라|오른|올랐|내려|내린|내렸|떨어|뛰었|빠졌|오름|내림)|\b(?:ris(?:e|es|ing)|rose|fall(?:s|ing)?|fell|jump(?:s|ed)?|drop(?:s|ped)?|gain(?:s|ed)?|slid(?:e|es|ing)?|sink(?:s|ing)?|sank|surg(?:e|es|ed)|climb(?:s|ed)?|tumbl(?:e|es|ed)|plung(?:e|es|ed)|soar(?:s|ed)?|slip(?:s|ped)?)\s+(?:by\s+)?[\d.]+%/i;
 export function pickReasonNews(items, pct, day, ymd, names = []) {
   const s = Math.sign(Number(pct) || 0);
   const dir = (it) => newsDir(it, names);
   const tier = (it) => (/\[특징주\]/.test(it.title) && s && dir(it) === s && Number.isFinite(it.pubMs) && ymd(it.pubMs) === day ? 0
     : weakTitle(it.title) ? 3 : s && dir(it) === s ? (moveWhy(it.title, names) ? 1 : 1.5) : 2);
-  return (Array.isArray(items) ? items : []).filter((it) => it && it.title && !priceOnly(it.title) && !LISTING_RE.test(it.title) && !CSR_RE.test(it.title) && !(s && dir(it) === -s))
+  return (Array.isArray(items) ? items : []).filter((it) => it && it.title && !priceOnly(it.title) && !LISTING_RE.test(it.title) && !CSR_RE.test(it.title) && !(s && dir(it) === -s)
+      && !(Number.isFinite(it.pubMs) && ymd(it.pubMs) < day && PAST_MOVE_RE.test(it.title))) // 지난 거래일 시세 기사는 오늘 이유 아님(97차)
     .map((it, i) => [tier(it), i, it]).sort((a, b) => a[0] - b[0] || a[1] - b[1])[0]?.[2] || null;
 }
 
@@ -875,6 +881,18 @@ export const STOCK_ANALYSIS_THRESHOLD = 2;
 const TONE_RULE = "등락 폭에 맞는 말을 써라 — ±5% 안쪽은 '상승·하락'(또는 강세·약세), 5%를 넘을 때만 '급등·급락'. '저가 매수세 유입'·'차익 실현 매물 출회'·'투자 심리 개선' 같은 막연한 말로 채우지 말고, 뉴스·공시·시장 흐름처럼 위에서 확인되는 사실을 근거로 써라.";
 // 진단 끝말을 등락 폭에 맞춘다(86차) — 위 지시가 있어도 5% 안쪽 움직임을 '…로 급등'처럼 끝맺는 진단이 나온다(11/18 엔비디아 애프터 +4.57% '…가이던스 제시로 급등'·
 // 안랩 +4.12% '…기대감에 안랩 급등'). 끝의 '급등(세)'·'급락(세)'만 '상승(세)'·'하락(세)'으로 — 가운데의 '단기 급등에 따른 하락' 같은 말은 그대로. 저장할 때 쓴다(fetch.mjs)
+// 진단 끝 방향(96차) — 마지막 오름·내림 말(끝나는 자리가 가장 뒤인 것). 'AI 간단' 묶음이 가끔 그날 방향과 반대로 끝맺었다(11/12~11/20 진단 486건 중 5건, 모두
+// 한 줄 진단 묶음 — 11/18 삼성E&A -6%에 '…경쟁력 부각에 급등'·11/20 안랩 -5%에 '미국 보안주 강세에 동반 상승 기대감으로 관심 집중'). 저장할 때 그때 등락과
+// 반대면 버린다(fetch.mjs — 다음 회차에 다시). '상승분 반납'·'반등 실패'는 내림, '하락분 만회'는 오름, 환율 강세·약세와 '상향·하향 조정'은 방향 아님
+const HEAD_UP = /상승|급등|(?<!(?:원화|달러|엔화|유로)\s?)강세|강보합|반등|오름|올라|올랐|껑충|치솟|뛰었|랠리|들썩|신고가|상한가|하락분\s?(?:을\s?)?(?:만회|회복)/g;
+const HEAD_DOWN = /하락|급락|(?<!(?:원화|달러|엔화|유로)\s?)약세|약보합|내림|내려|내렸|떨어|밀려|밀린|(?<!(?:상향|하향)\s?)조정|폭락|붕괴|추락|털썩|주저앉|하한가|신저가|상승분\s?(?:을\s?)?반납|반등\s?(?:에\s?)?(?:실패|무산)/g;
+export function headDir(h) {
+  const s = String(h ?? '');
+  let end = -1, dir = 0;
+  for (const [re, d] of [[HEAD_UP, 1], [HEAD_DOWN, -1]]) { re.lastIndex = 0; for (let m = re.exec(s); m; m = re.exec(s)) if (m.index + m[0].length > end) { end = m.index + m[0].length; dir = d; } }
+  return dir;
+}
+export const againstMove = (h, pct) => Number.isFinite(pct) && pct !== 0 && headDir(h) === -Math.sign(pct);
 export function toneTail(h, pct) {
   const s = String(h ?? '');
   return Number.isFinite(pct) && Math.abs(pct) < 5 ? s.replace(/급(등|락)(세)?$/, (m, a, b) => (a === '등' ? '상승' : '하락') + (b || '')) : s;

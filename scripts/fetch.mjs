@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis, aiStockBriefs, BRIEF_MAX, ANALYSIS_PV, aiThemes, themeHeads, themeOut, themeDue, themeClean, themeMentions, themeMorning, THEME_EARLY_AHEAD, calmExpected, aiExtBriefs, extMovers, extHeads, extDue, extRel, extSame, EXT_AHEAD, toneTail,
+  getMarket, getQuotes, getUsExt, getNews, getHistory, getStockInvestors, getIndexFlow, getIndexReason, aiStockAnalysis, aiStockBriefs, BRIEF_MAX, ANALYSIS_PV, aiThemes, themeHeads, themeOut, themeDue, themeClean, themeMentions, againstMove, themeMorning, THEME_EARLY_AHEAD, calmExpected, aiExtBriefs, extMovers, extHeads, extDue, extRel, extSame, EXT_AHEAD, toneTail,
   getSidecarNews, sidecarEvents, mergeMeasures,
   aiStatus, aiGate, aiRoom, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, pickReasonNews, strongNews, tagSentiment, krBaseName,
 } from './sources.mjs';
@@ -189,6 +189,16 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
         const kstMin = (ms) => { const d = new Date(ms + 9 * 3600e3); return d.getUTCHours() * 60 + d.getUTCMinutes(); };
         const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
         const REG = ['price', 'prevClose', 'change', 'changePct', 'open', 'high', 'low', 'volume', 'asOf'];
+        // 넥스트레이드 애프터마켓 체결가(95차, 11/20 사용자 요청) — 마감 뒤 30분(평소 15:30~16:00, 수능일 16:30~17:00)은 종가를 지키느라 시간외 가격이 없는데
+        // 넥스트레이드는 체결 중이다(11/19 16:50 삼성전자 넥스트레이드 196,400원·화면 시간외 줄 없음 — 그 뒤 시간외 줄은 넥스트레이드 값과 거의 같았다).
+        // 시간외 가격이 없을 때만, 그날 마감 뒤 애프터마켓 체결이 있었으면(장 구분 'AFTER_MARKET'·거래량 > 0) 그 가격 — 등락은 정규장 종가 대비, 화면은 '시간외' 그대로
+        const toNum = (v) => Number(String(v ?? '').replace(/,/g, ''));
+        const nxtAfter = (q, day, closeMin) => {
+          const o = q.over, price = o ? toNum(o.overPrice) : NaN, t = o ? Date.parse(o.localTradedAt) : NaN;
+          if (!o || o.tradingSessionType !== 'AFTER_MARKET' || !(price > 0) || !(toNum(o.accumulatedTradingVolumeRaw) > 0) || !Number.isFinite(t) || ymdIn(t, MARKET_TZ.KR) !== day || kstMin(t) < closeMin || !(q.price > 0)) return null;
+          const change = price - q.price;
+          return { session: 'post', src: 'nxt', price, change: Math.round(change * 100) / 100, changePct: Math.round((change / q.price) * 10000) / 100, at: t };
+        };
         let fixed = 0, after = 0;
         for (const q of quotes) {
           if (!q.ok || q.market !== 'KR' || !(q.price > 0) || q.marketStatus === 'PREOPEN') continue;
@@ -198,7 +208,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
           const day = ymdIn(at, MARKET_TZ.KR), p = prevKr.get(q.code), pAt = p ? +new Date(p.asOf) : NaN;
           let reg = null, fromPrev = false;
           if (p && p.closeFix && p.price > 0 && Number.isFinite(pAt) && ymdIn(pAt, MARKET_TZ.KR) === day) { reg = Object.fromEntries(REG.map((k) => [k, p[k]])); fromPrev = true; }
-          else if (kstMin(at) < krHours(at)[1] + 30) { q.closeFix = 1; fixed++; continue; } // 시간외 단일가 전 — 이 값이 정규장 종가
+          else if (kstMin(at) < krHours(at)[1] + 30) { q.closeFix = 1; fixed++; const nx = nxtAfter(q, day, krHours(at)[1]); if (nx) { q.ext = nx; after++; } continue; } // 시간외 단일가 전 — 이 값이 정규장 종가(시간외 줄은 넥스트레이드 애프터마켓, 95차)
           else {
             const h = hist[q.code], n = Array.isArray(h?.closes) && Array.isArray(h?.dates) ? Math.min(h.closes.length, h.dates.length) : 0;
             const c = n ? h.closes[n - 1] : NaN, cAt = n ? h.dates[n - 1] : NaN;
@@ -216,7 +226,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
             const change = afterPrice - q.price;
             q.ext = { session: 'post', price: afterPrice, change: Math.round(change * 100) / 100, changePct: Math.round((change / q.price) * 10000) / 100, at };
             after++;
-          }
+          } else { const nx = nxtAfter(q, day, krHours(at)[1]); if (nx) { q.ext = nx; after++; } } // 시간외 가격이 아직 없으면 넥스트레이드 애프터마켓(95차)
         }
         if (fixed || after) console.log(`  · 국내 정규장 뒤: 종가 표시 ${fixed}종목 · 시간외 가격 ${after}종목`);
       }
@@ -424,7 +434,8 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
       }
       calls++;
       try {
-        const a = await aiStockAnalysis({ quote: q, news: news[it.code], flow: investors[it.code], history: history[it.code], disclosures: disclosures[it.code], schedule: scheduleOf(it), market: benchOfQuote(q), now });
+        let a = await aiStockAnalysis({ quote: q, news: news[it.code], flow: investors[it.code], history: history[it.code], disclosures: disclosures[it.code], schedule: scheduleOf(it), market: benchOfQuote(q), now });
+        if (a && againstMove(a.headline, q.changePct)) { console.log(`    종합분석 버림(${it.code} ${q.changePct}% — 방향 반대): ${a.headline}`); a = null; } // 96차 — 직전 분석 유지, 다음 회차에 다시
         if (a) a.headline = toneTail(a.headline, q.changePct); // 끝말을 등락 폭에 맞춤(86차 — 5% 안쪽의 끝 '급등'은 '상승')
         if (a) analysis[it.code] = { ...a, sig, at: now, pv: ANALYSIS_PV };
         else if (prev[it.code]) analysis[it.code] = prev[it.code]; // 일시적 실패 시 기존 분석 유지
@@ -441,6 +452,8 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
       if (q && q.ok && freshOf(it, q) && prev[it.code].pv === ANALYSIS_PV) { analysis[it.code] = prev[it.code]; kept++; }
     }
     console.log(`  · 종합분석 대상 ${movers.length}건 — 신규 호출 ${calls}건${briefed ? `(한 줄 진단 묶음 1번 — ${briefed}종목)` : ''}, 다음 회차로 미룸 ${deferred + waited}건${waited ? `(한도 배분 대기 ${waited})` : ''}${kept ? ` · 2% 아래로 내려간 그날 진단 ${kept}건 유지` : ''}`);
+    // 지금 등락과 반대 방향으로 끝맺은 진단은 남기지 않는다(96차 — 저장된 것도: 11/20 안랩 -4.16%에 '…동반 상승 기대감으로 관심 집중'). 없으면 다음 회차에 다시
+    for (const [c, d] of Object.entries(analysis)) { const q = quotesByCode[c]; if (d && q && q.ok && againstMove(d.headline, q.changePct)) { console.log(`    진단 버림(${c} ${q.changePct}% — 방향 반대): ${d.headline}`); delete analysis[c]; } }
     write('analysis.json', analysis);
   } catch (e) { console.error('  ✗ 종합분석 실패 — analysis.json 유지:', e.message); }
 
@@ -455,7 +468,7 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
       const day = ymdIn(closeMs, 'America/New_York'), heads = extHeads(items, news, closeMs, now), prevX = readJson('extwhy.json');
       if (extDue(prevX, xm, heads, day, now) && aiRoom(EXT_AHEAD) >= 1) {
         const got = await aiExtBriefs(xm, heads, now);
-        const done = got ? xm.filter((m) => got[m.it.code]) : [];
+        const done = got ? xm.filter((m) => got[m.it.code] && !againstMove(got[m.it.code].headline, m.q.ext.changePct)) : []; // 시간외 등락과 반대 방향 진단은 버림(96차)
         if (done.length) {
           const same = extSame(prevX, day, now);
           const out = { day, sess: 'post', at: now, model: got[done[0].it.code].model, n: (same ? prevX.n || 0 : 0) + 1, hn: extRel(xm, heads), items: same ? { ...prevX.items } : {} };
