@@ -2250,6 +2250,8 @@ await test('개장 전 예상 지수(35차): 08:55 전 값은 어제 종가·0%�
   assert.deepEqual(look(0, 'PREOPEN'), { est: false, dirCls: 'flat', cardCls: '', arrow: '–', label: '지난 장 핵심' }, '개장 전 0%');
   assert.deepEqual(look(-2, 'OPEN'), { est: false, dirCls: 'down', cardCls: 'brief-down', arrow: '▼', label: '급락 핵심 이유' });
   assert.deepEqual(look(2, 'CLOSE'), { est: false, dirCls: 'up', cardCls: 'brief-up', arrow: '▲', label: '급등 핵심 이유' });
+  assert.deepEqual(look(-1.55, 'OPEN'), { est: false, dirCls: 'down', cardCls: 'brief-down', arrow: '▼', label: '하락 핵심 이유' }, '±1~2%는 하락·상승(106차 — 98차 분위기 문구와 같은 기준)');
+  assert.deepEqual(look(1.2, 'OPEN'), { est: false, dirCls: 'up', cardCls: 'brief-up', arrow: '▲', label: '상승 핵심 이유' });
   assert.deepEqual(look(0.4, 'OPEN'), { est: false, dirCls: 'up', cardCls: 'brief-up', arrow: '▲', label: '오늘의 핵심' });
   assert.deepEqual(look(0, null), { est: false, dirCls: 'flat', cardCls: '', arrow: '–', label: '오늘의 핵심' });
 });
@@ -2272,6 +2274,11 @@ await test('지수 핵심 폭(100차): AI 핵심 속 두 지수 이름 바로 �
   assert.equal(m('코스피가 장중 4%대까지 밀렸다가 낙폭을 줄였다', K(-2.5)), '코스피가 장중 4%대까지 밀렸다가 낙폭을 줄였다', '이름과 떨어진 숫자는 그대로');
   assert.equal(m('전날 코스피 4%대 급락에 이어 코스닥도 3%대 하락', [['코스피', -1.5], ['코스닥', -2.2]]), '전날 코스피 4%대 급락에 이어 코스닥도 2%대 하락', '전날 숫자는 그대로 · 다른 지수도 제 등락으로');
   assert.equal(m('코스피 4%대·코스닥 3%대 급락', [['코스피', -5.9], ['코스닥', -5.1]]), '코스피 5%대·코스닥 5%대 급락', '두 지수 모두');
+  // 2% 안쪽이면 이름 바로 뒤의 '급락·급등(세)'은 '하락·상승(세)'(106차 — 11/25 코스닥 -1.55%에 '…코스닥이 1%대 급락세')
+  assert.equal(m('투심 악화와 수급 이탈이 지속되며 코스닥이 1%대 급락세를 보이고 있다', [['코스닥', -1.55]]), '투심 악화와 수급 이탈이 지속되며 코스닥이 1%대 하락세를 보이고 있다', "2% 안쪽 '급락세' → '하락세'");
+  assert.equal(m('투심 악화로 코스닥이 1%대 급락세', [['코스닥', -2.3]]), '투심 악화로 코스닥이 2%대 급락세', "2% 넘으면 '급락' 그대로(숫자만)");
+  assert.equal(m('외국인 매수에 코스피 급등', K(1.3)), '외국인 매수에 코스피 상승', "'급등' → '상승'");
+  assert.equal(m('나스닥 급락 여파에 코스닥 1%대 하락', [['코스닥', -1.2]]), '나스닥 급락 여파에 코스닥 1%대 하락', '다른 지수의 급락은 그대로');
   assert.equal(m('코스피 1%대 상승 출발 뒤 보합권', K(0.5)), '코스피 1%대 상승 출발 뒤 보합권', '보합(±1% 안쪽)엔 손대지 않음');
   assert.equal(m('코스피 4880선 붕괴, 4%대 급락', K(-5.9)), '코스피 4880선 붕괴, 4%대 급락', '지수 수준(선)은 % 아님');
   assert.equal(m('코스피 4%대 급락', K(-5.9), Date.parse('2026-11-19T14:20:00+09:00')), '코스피 4%대 급락', '어제 분석은 그대로');

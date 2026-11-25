@@ -349,6 +349,14 @@ const MUTANTS = [
   ["[지수 핵심 폭] 개장 전 분석도 맞춤", A, " || kst(aiAt).slice(11, 16) < '09:00') return s;", ") return s;"],
   ["[지수 핵심 폭] 화면에 안 씀", A, "${esc(coreMag(ai.summary, mags, b.reason.aiAt))}", "${esc(ai.summary)}"],
   ["[지수 핵심 폭] 다른 지수 안 맞춤", A, "  const mags = briefs.map((x) => [x.name, x.changePct]);", "  const mags = briefs.slice(0, 1).map((x) => [x.name, x.changePct]);"],
+  // ---------- 106차 — 지수 말 ±2% 기준(배너 꼬리표·AI 핵심 급락 말) ----------
+  ["[지수 핵심 폭] 2% 안쪽 급락 말 안 바꿈", A, "return Math.abs(pct) >= 2 ? u : u.replace(", "return u; u.replace("],
+  ["[지수 핵심 폭] 2% 넘어도 급락 말 바꿈", A, "return Math.abs(pct) >= 2 ? u : ", "return false ? u : "],
+  ["[지수 핵심 폭] 급등은 안 바꿈", A, "${d === '락' ? '하락' : '상승'}", "${d === '락' ? '하락' : '급등'}"],
+  ["[지수 핵심 폭] 급락 말 숫자 뒤 안 봄", A, "((?:\\\\d{1,2}(?:\\\\.\\\\d+)?%대?\\\\s*)?)급(락|등)", "()급(락|등)"],
+  ["[지수 핵심 폭] 급락세의 세 떨어짐", A, "${se || ''}", ""],
+  ["[배너] 1~2% 하락도 급락 꼬리표", A, "pct <= -2 ? '급락 핵심 이유' : pct <= -1 ?", "pct <= -1 ? '급락 핵심 이유' : pct <= -1 ?"],
+  ["[배너] 1~2% 상승도 급등 꼬리표", A, "pct >= 2 ? '급등 핵심 이유' : pct >= 1 ?", "pct >= 1 ? '급등 핵심 이유' : pct >= 1 ?"],
   // ---------- 105차 — 이름 뺀 시세 말: [특징주] 꼬리표·'…없이'를 떼고, 시세 말 더 ----------
   ["[시세틀] 이름 뺀 시세 말 — [특징주] 꼬리표 안 뗌(봇)", S, ".replace(/^\\[특징주\\]\\s*/, '')", ""],
   ["[시세틀] 이름 뺀 시세 말 — [특징주] 꼬리표 안 뗌(화면)", A, ".replace(/^\\[특징주\\]\\s*/, '')", ""],
@@ -543,7 +551,7 @@ const MUTANTS = [
   ["[예상] 봇이 되돌리지 않음", F, "market.indices = calmExpected(market.indices, now);", ""],
   ["[예상] 개장 전에도 이유 찾기", F, "pre ? prevReason : getIndexReason(nm, changePct, prevReason, now, open)", "getIndexReason(nm, changePct, prevReason, now, open)"],
   ["[예상] 장이 열려도 지난 이유", F, "const pre = idx?.marketStatus === 'PREOPEN' && prevReason;", "const pre = prevReason;"],
-  ["[예상] 화면 지난 장 핵심 없음", A, "label: pre ? '지난 장 핵심' : pct <= -1", "label: pct <= -1"],
+  ["[예상] 화면 지난 장 핵심 없음", A, "label: pre ? '지난 장 핵심' : pct <= -2", "label: pct <= -2"],
   ["[예상] 화면 예상값 색칠", A, "const dirCls = pre || !pct ? 'flat'", "const dirCls = !pct ? 'flat'"],
   // ---------- 36차 — 방향 낱말 ----------
   ["[방향] 내림 낱말 못 읽음(봇)", S, "|휘청|무너|붕괴|곤두박질|주저앉|미끄러|뒷걸음|고꾸라|털썩|빠졌|밀려(?!들)|밀린", ""],

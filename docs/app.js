@@ -358,8 +358,11 @@ function coreMag(text, idx, aiAt, now = Date.now()) {
   return (idx || []).reduce((t, [name, pct]) => {
     if (!name || !Number.isFinite(pct) || Math.abs(pct) < 1) return t;
     const n = Math.floor(Math.abs(pct)), nm = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return t.replace(new RegExp(`(?<!(?:전날|전일|어제|간밤)\\s?)(${nm}(?:\\s?지수)?(?:가|이|는|은|도)?\\s*)(\\d{1,2}(?:\\.\\d+)?)%(대|\\s?(?:넘게|넘는|넘어|이상))?`, 'g'),
+    const head = `(?<!(?:전날|전일|어제|간밤)\\s?)(${nm}(?:\\s?지수)?(?:가|이|는|은|도)?\\s*)`;
+    const u = t.replace(new RegExp(`${head}(\\d{1,2}(?:\\.\\d+)?)%(대|\\s?(?:넘게|넘는|넘어|이상))?`, 'g'),
       (m, pre, num, tail) => (tail === '대' ? `${pre}${n}%대` : tail ? `${pre}${n}%${tail}` : num.includes('.') ? `${pre}${Math.abs(pct).toFixed(2)}%` : m));
+    // 2% 안쪽이면 이름 바로 뒤(숫자까지)의 '급락·급등(세)'은 '하락·상승(세)'로(106차 — 11/25 코스닥 -1.55%에 '…코스닥이 1%대 급락세를 보이고 있다' · 98차 분위기 문구·배너 꼬리표와 같은 기준)
+    return Math.abs(pct) >= 2 ? u : u.replace(new RegExp(`${head}((?:\\d{1,2}(?:\\.\\d+)?%대?\\s*)?)급(락|등)(세)?`, 'g'), (m, pre, num, d, se) => `${pre}${num}${d === '락' ? '하락' : '상승'}${se || ''}`);
   }, s);
 }
 function renderBriefs(briefs) {
@@ -568,7 +571,7 @@ function briefLook(pct, idx) {
   const pre = !!(idx && idx.marketStatus === 'PREOPEN');
   const dirCls = pre || !pct ? 'flat' : pct < 0 ? 'down' : 'up';
   return { est: expIdx(idx), dirCls, cardCls: dirCls === 'flat' ? '' : `brief-${dirCls}`, arrow: pct > 0 ? '▲' : pct < 0 ? '▼' : '–',
-    label: pre ? '지난 장 핵심' : pct <= -1 ? '급락 핵심 이유' : pct >= 1 ? '급등 핵심 이유' : '오늘의 핵심' };
+    label: pre ? '지난 장 핵심' : pct <= -2 ? '급락 핵심 이유' : pct <= -1 ? '하락 핵심 이유' : pct >= 2 ? '급등 핵심 이유' : pct >= 1 ? '상승 핵심 이유' : '오늘의 핵심' }; // ±2% 넘어야 급락·급등(106차 — 98차 분위기 문구와 같은 기준)
 }
 // 같은 시장 지수(market.json의 기호) — '한눈에' 시장 머리에 내 종목 평균과 나란히(예상 지수면 exp)
 const BENCH = { KR: [['^KS11', '코스피'], ['^KQ11', '코스닥']], US: [['^GSPC', 'S&P 500'], ['^IXIC', '나스닥']] };
