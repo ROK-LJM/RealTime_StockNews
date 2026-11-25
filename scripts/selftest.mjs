@@ -2910,6 +2910,26 @@ await test('AI 입력(56차): 종합분석에 넘기는 뉴스에서 원인이 �
   assert.ok(body.includes('유진로봇, 물류 로봇 대규모 공급 계약'), '보통 기사는 넘김');
   assert.ok(!body.includes('산학협력') && !body.includes('우수상'), '원인이 아닌 기사는 뺌: ' + body.slice(0, 600));
 });
+await test('AI 입력(104차): 거래일 전에 그날 시세를 전한 기사(…6.49% 상승·원전주 동반 강세·장 초반·불기둥)는 종합분석·한 줄 진단에 넘기지 않음 · 그날 기사·시세 말 없는 지난 기사는 그대로', async () => {
+  NET.routes = routes(); NET.calls = []; NET.bodies = []; NET.blocked = [];
+  const it = (title, iso) => ({ title, pubMs: T(iso), source: '테스트일보', sentiment: src.tagSentiment(title) });
+  const items = [it('두산에너빌리티 5%대 급락…원전주 차익 매물', '2026-11-25T10:20:00+09:00'), it('두산에너빌리티 주가 껑충, 연속 하락 딛고 반등…25일 향방은?', '2026-11-25T00:17:00+09:00'),
+    it('두산에너빌리티, 체코 원전 후속 협상 지연', '2026-11-24T18:00:00+09:00'), it("금양그린파워 주가 '불기둥'…두산에너빌리티·효성중공업도 원전주 견인", '2026-11-24T15:23:00+09:00'),
+    it('원전·가스터빈 수주잔고 부각…두산에너빌리티 6.49% 상승', '2026-11-24T13:33:00+09:00'), it('두산에너빌리티·우리기술·한전기술 등 원자력발전주 동반 강세…장 초반 상승세 눈길', '2026-11-24T09:20:00+09:00')];
+  const quote = { ok: true, code: '034020', market: 'KR', name: '두산에너빌리티', price: 40000, changePct: -5.13, high: 42000, low: 39800, asOf: '2026-11-25T10:30:00+09:00' };
+  await src.aiStockAnalysis({ quote, news: { ok: true, items }, flow: null, history: null, disclosures: null, schedule: [], now: T('2026-11-25T10:31:00+09:00') });
+  const body = NET.bodies.find((b, i) => isGemini(NET.calls[i])) || '';
+  assert.ok(body.includes('5%대 급락…원전주 차익 매물') && body.includes('25일 향방은') && body.includes('체코 원전 후속 협상 지연'), '그날 기사·시세 말 없는 지난 기사는 넘김: ' + body.slice(0, 900));
+  assert.ok(!body.includes("'불기둥'") && !body.includes('6.49% 상승') && !body.includes('원자력발전주 동반 강세'), '거래일 전 시세 기사는 뺌');
+  // 한 줄 진단 묶음 — 최신 3건을 고르기 전에 뺀다(빼지 않으면 11/24 시세 기사가 3건 안에 든다)
+  src.resetState(); src.setAiBudget(null);
+  NET.routes = routes({ gemini: () => json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ items: [{ no: 1, headline: '원전주 차익 매물에 급락' }] }) }] } }] }) }); NET.calls = []; NET.bodies = []; NET.blocked = [];
+  const recent = [items[0], items[3], items[4], items[5], items[2]];
+  await src.aiStockBriefs([{ quote, news: { items: recent } }, { quote: { ...quote, code: '267260', name: 'HD현대일렉트릭', changePct: -4.38 }, news: { items: [] } }], T('2026-11-25T10:31:00+09:00'));
+  const b2 = NET.bodies.find((b, i) => isGemini(NET.calls[i])) || '';
+  assert.ok(b2.includes('5%대 급락…원전주 차익 매물') && b2.includes('체코 원전 후속 협상 지연'), '한 줄 진단 — 그날·지난 원인 기사: ' + b2.slice(0, 900));
+  assert.ok(!b2.includes("'불기둥'") && !b2.includes('6.49% 상승') && !b2.includes('원자력발전주 동반 강세'), '한 줄 진단 — 거래일 전 시세 기사는 뺌');
+});
 await test('AI 지시(57차): 등락 폭에 맞는 말(±5% 안쪽은 상승·하락, 넘을 때만 급등·급락) · 재료가 없으면 막연한 말로 채우지 않기', async () => {
   NET.routes = routes(); NET.calls = []; NET.bodies = []; NET.blocked = [];
   const quote = { ok: true, code: 'TSM', market: 'US', name: 'TSMC', currency: 'USD', price: 300, changePct: 2.02, high: 305, low: 295, asOf: '2026-11-10T16:00:00-05:00' };

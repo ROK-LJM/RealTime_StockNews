@@ -349,6 +349,11 @@ const MUTANTS = [
   ["[지수 핵심 폭] 개장 전 분석도 맞춤", A, " || kst(aiAt).slice(11, 16) < '09:00') return s;", ") return s;"],
   ["[지수 핵심 폭] 화면에 안 씀", A, "${esc(coreMag(ai.summary, mags, b.reason.aiAt))}", "${esc(ai.summary)}"],
   ["[지수 핵심 폭] 다른 지수 안 맞춤", A, "  const mags = briefs.map((x) => [x.name, x.changePct]);", "  const mags = briefs.slice(0, 1).map((x) => [x.name, x.changePct]);"],
+  // ---------- 104차 — AI 입력에서 거래일 전 시세 기사 뺌 ----------
+  ["[AI 입력] 지난 시세 기사 넘김(종합)", S, " && !pastMove(it, tz, tradeDay)).slice(0, 6);", ").slice(0, 6);"],
+  ["[AI 입력] 지난 시세 기사 넘김(간단)", S, " && !pastMove(it, tz, day)).sort(", ").sort("],
+  ["[AI 입력] 그날 시세 기사도 뺌", S, "ymdIn(it.pubMs, tz) < day && PAST_MOVE_RE.test(it.title);", "ymdIn(it.pubMs, tz) <= day && PAST_MOVE_RE.test(it.title);"],
+  ["[AI 입력] 지난 기사 모두 뺌", S, "ymdIn(it.pubMs, tz) < day && PAST_MOVE_RE.test(it.title);", "ymdIn(it.pubMs, tz) < day;"],
   // ---------- 103차 — 스포츠 기사·뚜렷한 공시 없이·지난 불기둥·[종목분석] ----------
   ["[원인 아님] 스포츠 기사도 이유(봇)", S, ".source + String.raw`|우승|\\[(?:사진|포토)\\]|` + SPORTS_RE.source);", ".source + String.raw`|우승|\\[(?:사진|포토)\\]`);"],
   ["[원인 아님] 스포츠 기사도 이유(화면)", A, ".source + String.raw`|우승|\\[(?:사진|포토)\\]|` + SPORTS_RE.source);", ".source + String.raw`|우승|\\[(?:사진|포토)\\]`);"],
@@ -700,7 +705,7 @@ const MUTANTS = [
   ["[AI 유지] 판 다른 진단도 남김", F, " && freshOf(it, q) && prev[it.code].pv === ANALYSIS_PV)", " && freshOf(it, q))"],
   ["[AI 유지] AI 끈 종목도 남김", F, "if (analysis[it.code] || it.ai === false) continue;", "if (analysis[it.code]) continue;"],
   // ---------- 56차 — AI 입력 원인 아닌 기사 ----------
-  ["[AI 입력] 원인 아닌 기사도 넘김", S, ".filter((it) => it && it.title && !CSR_RE.test(it.title) && !priceOnly(it.title)).slice(0, 6)", ".filter((it) => it && it.title && !priceOnly(it.title)).slice(0, 6)"],
+  ["[AI 입력] 원인 아닌 기사도 넘김", S, ".filter((it) => it && it.title && !CSR_RE.test(it.title) && !priceOnly(it.title) && !pastMove(it, tz, tradeDay)).slice(0, 6)", ".filter((it) => it && it.title && !priceOnly(it.title) && !pastMove(it, tz, tradeDay)).slice(0, 6)"],
   // ---------- 57차 — AI 지시 강도 ----------
   ["[AI 지시] 등락 폭 말 기준 없음", S, "5%를 넘을 때만 '급등·급락'", "언제든 '급등·급락'"],
   ["[AI 지시] 막연한 말 허용", S, "막연한 말로 채우지 말고", "막연한 말로 채워도 되고"],
@@ -722,8 +727,8 @@ const MUTANTS = [
   ["[AI 간단] 이번 회차 한 줄 진단 덮어씀", F, "if (analysis[it.code]) continue; // 이번 회차", "// 이번 회차"],
   ["[AI 간단] 묶음 상한", S, "export const BRIEF_MAX = 5;", "export const BRIEF_MAX = 7;"],
   ["[AI 간단] 한 종목도 묶음", S, "if (!GEMINI_KEY || rows.length < 2) return null;", "if (!GEMINI_KEY || rows.length < 1) return null;"],
-  ["[AI 간단] 원인 아닌 기사도", S, "it.title && !CSR_RE.test(it.title) && !priceOnly(it.title)).sort(", "it.title && !priceOnly(it.title)).sort("],
-  ["[AI 간단] 시세 안내도", S, "!CSR_RE.test(it.title) && !priceOnly(it.title)).sort(", "!CSR_RE.test(it.title)).sort("],
+  ["[AI 간단] 원인 아닌 기사도", S, "it.title && !CSR_RE.test(it.title) && !priceOnly(it.title) && !pastMove(it, tz, day)).sort(", "it.title && !priceOnly(it.title) && !pastMove(it, tz, day)).sort("],
+  ["[AI 간단] 시세 안내도", S, "!CSR_RE.test(it.title) && !priceOnly(it.title) && !pastMove(it, tz, day)).sort(", "!CSR_RE.test(it.title) && !pastMove(it, tz, day)).sort("],
   ["[AI 간단] 최신순 아님", S, ".sort((a, b) => pub(b) - pub(a))", ""],
   ["[AI 간단] 장 상태 없음", S, "${when ? `(${when})` : ''}", ""],
   ["[AI 간단] 재료 없을 때 지시 없음", S, "'뚜렷한 재료 없이 시장 흐름 따라 상승'처럼 재료가 없다고 써라", "그럴듯한 이유를 써라"],
@@ -795,7 +800,7 @@ const MUTANTS = [
   ["[AI 지시] 지난 공시도 재료로", S, "discs.some((d) => String(d.date || '') === today)", "discs.some((d) => !!d)"],
   ["[AI 지시] 배경지식 지금 연·월 틀림", S, "${d.getUTCMonth() + 1}월", "${d.getUTCMonth()}월"],
   ["[AI 간단] 배경지식 금지 안 넘김", S, "`${outsideRule(now)}\\n` + // 배경지식 금지(70차", "// 배경지식 금지(70차"],
-  ["[AI 입력] 시세 안내도 넘김", S, "!CSR_RE.test(it.title) && !priceOnly(it.title)).slice(0, 6)", "!CSR_RE.test(it.title)).slice(0, 6)"],
+  ["[AI 입력] 시세 안내도 넘김", S, "!CSR_RE.test(it.title) && !priceOnly(it.title) && !pastMove(it, tz, tradeDay)).slice(0, 6)", "!CSR_RE.test(it.title) && !pastMove(it, tz, tradeDay)).slice(0, 6)"],
   // ---------- 71차 — 장중 등락만 조금 바뀐 재분석 건너뛰기 ----------
   ["[AI 재분석] 장중 등락 조금 바뀌어도 다시", F, " || (open && nearSig(p.sig, sig))", ""],
   ["[AI 재분석] 장 밖에도 등락 조금은 그대로", F, "(open && nearSig(p.sig, sig))", "nearSig(p.sig, sig)"],

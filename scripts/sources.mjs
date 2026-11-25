@@ -666,6 +666,9 @@ const moveWhy = (t, names) => (names || []).some((n) => { const i = tickerAt(t, 
 // 지난 기사는 오늘 움직임과 방향이 같을 때만(방향을 모르면 아님 — 그 다음엔 11/19 '두산퓨얼셀·대덕전자·효성 코스피200 편입…내달 11일 반영'이 -10.73%의 이유였다).
 // 그날 거래를 전한 말: [특징주]·[마감분석]·장중·장 초반·애프터마켓·프리마켓·시간외·'주가 약세'·'…% 하락'·'2.18%↓'·'7만7600원 약세'·'500원 내린'(11/19 기사들)·
 // '불기둥'·'상한가'·'하한가'(103차 — 11/25 한화에어로스페이스 +2.55%의 이유가 11/24 '…효성중공업까지 '불기둥'…도 급등')
+// 거래일 전에 그날 시세를 전한 기사(아래 PAST_MOVE_RE)는 AI 입력(종합분석·한 줄 진단)에서도 뺀다(104차 — 11/25 두산에너빌리티 -5.13%에 AI 간단 '원전주 동반 상승 속에서
+// 급락': 입력이 11/24 '…원자력발전주 동반 강세…'·'…6.49% 상승'·'…'불기둥'…원전주 견인'뿐이었다). day는 그 시장의 거래일(yyyymmdd) · 시세 말이 없는 지난 기사는 그대로
+const pastMove = (it, tz, day) => Number.isFinite(it.pubMs) && ymdIn(it.pubMs, tz) < day && PAST_MOVE_RE.test(it.title);
 export const PAST_MOVE_RE = /\[특징주\]|\[마감분석\]|장중|장\s?초반|애프터마켓|프리마켓|시간외|불기둥|상한가|하한가|주가[가는]?\s?(?:약세|강세|상승|하락|급등|급락|보합)|\d+(?:\.\d+)?%\s?대?\s?(?:상승|하락|급등|급락|강세|약세|조정|올라|오른|올랐|내려|내린|내렸|떨어|뛰었|빠졌|오름|내림|↑|↓)|\d[\d,]*원\s?(?:대\s?)?(?:으로\s?)?(?:약세|강세|상승|하락|급등|급락|마감|내려|올라|내린|오른)|\b(?:ris(?:e|es|ing)|rose|fall(?:s|ing)?|fell|jump(?:s|ed)?|drop(?:s|ped)?|gain(?:s|ed)?|slid(?:e|es|ing)?|sink(?:s|ing)?|sank|surg(?:e|es|ed)|climb(?:s|ed)?|tumbl(?:e|es|ed)|plung(?:e|es|ed)|soar(?:s|ed)?|slip(?:s|ped)?)\s+(?:by\s+)?[\d.]+%/i;
 export function pickReasonNews(items, pct, day, ymd, names = []) {
   const s = Math.sign(Number(pct) || 0);
@@ -982,7 +985,7 @@ export async function aiStockAnalysis({ quote, news, flow, history, disclosures,
   // 원인이 아닌 기사(사회공헌·채용·사내 행사·산학협력·수상·관람·인버스 상품 등 — '왜 움직였나'와 같은 CSR_RE)는 AI에도 넘기지 않는다(56차 —
   // 11/11 유진로봇 '…인재 양성 협력 부각으로 상승세'·안랩 '…디지털포렌식 우수상 소식과 함께…'처럼 AI가 원인으로 썼다). 뉴스 목록 표시는 그대로
   // 시세만 알려 주는 기사(priceOnly — '…원 기록한 …, 거래대금 …')도 뺀다(70차, 한 줄 진단 묶음과 같음 — 원인이 아니고, 이것뿐이면 재료 없는 날로 본다)
-  const newsIn = (news?.items || []).filter((it) => it && it.title && !CSR_RE.test(it.title) && !priceOnly(it.title)).slice(0, 6);
+  const newsIn = (news?.items || []).filter((it) => it && it.title && !CSR_RE.test(it.title) && !priceOnly(it.title) && !pastMove(it, tz, tradeDay)).slice(0, 6); // 거래일 전 시세 기사도 뺌(104차)
   const heads = newsIn.map((it, i) => `${i + 1}. ${datedTitle(it, tz)}`).join('\n') || '(수집된 뉴스 없음)';
   // 시장 흐름(30차) — 같은 시장 지수(호출부가 화면 '시장 대비'와 같은 규칙으로 고름)와 그날 시장 조치. 지수가 1% 넘게 움직인 날엔 시장 몫과 종목 몫을 나눠 보게 한다
   const mk = market && market.name && Number.isFinite(market.pct) ? market : null;
@@ -1084,7 +1087,8 @@ export async function aiStockBriefs(list, now = Date.now()) {
     // 원인이 아닌 기사(CSR_RE, 56차)와 시세만 알려 주는 기사(priceOnly)는 빼고 최신 3건(기사 날짜 붙임) · 국내는 오늘 접수한 공시 2건까지
     // (61차 — 11/13 LS ELECTRIC은 앞 3건이 지난 기사·시세 안내라 오늘 기사가 밀렸다)
     const pub = (it) => (Number.isFinite(it.pubMs) ? it.pubMs : 0);
-    const heads = (news?.items || []).filter((it) => it && it.title && !CSR_RE.test(it.title) && !priceOnly(it.title)).sort((a, b) => pub(b) - pub(a)).slice(0, 3).map((it) => datedTitle(it, tz));
+    const day = ymdIn(Number.isFinite(qt) ? qt : now, tz); // 그 종목 거래일 — 거래일 전 시세 기사는 뺌(104차)
+    const heads = (news?.items || []).filter((it) => it && it.title && !CSR_RE.test(it.title) && !priceOnly(it.title) && !pastMove(it, tz, day)).sort((a, b) => pub(b) - pub(a)).slice(0, 3).map((it) => datedTitle(it, tz));
     const discs = us ? [] : (disclosures?.items || []).filter((d) => d && d.title && String(d.date) === today).slice(0, 2).map((d) => `[${d.tag || '기타'}] ${d.title}`);
     const when = STATE_KO[q.marketStatus] || ''; // 장중 종목에 '마감했다'고 쓰지 않게(61차)
     return `[${i + 1}] ${q.name || q.code}(${us ? '미국' : '한국'} ${q.code}) · ${mdOf(ymdIn(Number.isFinite(qt) ? qt : now, tz))} 거래일 ${sgn(q.changePct ?? 0)}%${when ? `(${when})` : ''}`
