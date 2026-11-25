@@ -349,6 +349,18 @@ const MUTANTS = [
   ["[지수 핵심 폭] 개장 전 분석도 맞춤", A, " || kst(aiAt).slice(11, 16) < '09:00') return s;", ") return s;"],
   ["[지수 핵심 폭] 화면에 안 씀", A, "${esc(coreMag(ai.summary, mags, b.reason.aiAt))}", "${esc(ai.summary)}"],
   ["[지수 핵심 폭] 다른 지수 안 맞춤", A, "  const mags = briefs.map((x) => [x.name, x.changePct]);", "  const mags = briefs.slice(0, 1).map((x) => [x.name, x.changePct]);"],
+  // ---------- 110차 — 영어 방향 낱말 ----------
+  ["[영어 방향] retreats 놓침", S, "'retreat', 'retreats', 'retreated', ", ""],
+  ["[영어 방향] dips 놓침", S, "'dips', 'dipped', ", ""],
+  ["[영어 방향] plummet 놓침", S, "'plummet', 'plummets', 'plummeted', ", ""],
+  ["[영어 방향] loses·sheds 놓침", S, "'loses', 'sheds', ", ""],
+  ["[영어 방향] move lower 놓침", S, "'move lower', 'moves lower', ", ""],
+  ["[영어 방향] pops 놓침", S, "'pops', 'popped', ", ""],
+  ["[영어 방향] higher 놓침", S, "'move higher', 'moves higher', 'trading higher', ", ""],
+  ["[영어 방향] 이름씨 dip도 악재", S, "'dips', 'dipped', ", "'dip', 'dips', 'dipped', "],
+  ["[영어 방향] turn lower도 악재", S, "'move lower', 'moves lower', ", "'turn lower', 'move lower', 'moves lower', "],
+  ["[영어 방향] 미국 Dips·Retreats 움직임 아님(봇)", S, "|dip(?:s|ped)|retreat(?:s|ed)?", ""],
+  ["[영어 방향] 미국 Dips·Retreats 움직임 아님(화면)", A, "|dip(?:s|ped)|retreat(?:s|ed)?", ""],
   // ---------- 109차 — 아침 큰 소식은 미국 마감 전 것이면 ----------
   ["[아침 큰 소식] 다시 12시간 기준", S, " || prev.at < usClose;", " || now - prev.at >= 12 * 3600e3;"],
   ["[아침 큰 소식] 마감 시각 05시", S, "THEME_MORNING_FROM_H = 6;", "THEME_MORNING_FROM_H = 5;"],

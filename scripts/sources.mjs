@@ -288,12 +288,17 @@ const NEG = ['급락', '폭락', '하락', '약세', '적자', '손실', '소송
   'downgrade', 'lawsuit', 'miss', 'plunge', 'fall', 'falls', 'drop', 'cut', 'cuts', 'warning', 'recall', 'probe', 'decline', 'loss', 'weak', 'slump', 'sink', 'tumble', 'bearish', 'selloff',
   // 영어 활용형(31차) — 'Stock Slides'·'Shares Slip'·'Stock Sinks'·'Plunges'를 중립으로 보던 것(미국 종목 이유·호재/악재 집계)
   'plunges', 'plunged', 'drops', 'dropped', 'sinks', 'sank', 'tumbles', 'tumbled', 'declines', 'declined', 'slide', 'slides', 'slid', 'sliding', 'slip', 'slips', 'slipped',
-  'fell', 'falling', 'slumps', 'slumped', 'tanks', 'tanked', 'downgraded', 'downgrades', 'misses', 'missed', 'sell-off', 'rout'];
+  'fell', 'falling', 'slumps', 'slumped', 'tanks', 'tanked', 'downgraded', 'downgrades', 'misses', 'missed', 'sell-off', 'rout',
+  // 110차 — 'TSM retreats over 4% as … chip export restrictions weigh'·'TSMC Stock (TSM) Dips After Hackers Ransom …'·'Nvidia Stock Loses Key Support'·'Amazon Stock Moves Lower'을
+  // 중립으로 보던 것(10/20~11/25 영어 제목 3,800여 건 중 태그가 바뀌는 것 58건 — 거의 그 종목이 오르내렸다는 제목). 'buy the dip'처럼 이름씨 dip은 사는 쪽 의견 글이라 뺀다 · 'turn lower cash burn'처럼 뜻이 갈리는 'turn lower'도 뺀다
+  'retreat', 'retreats', 'retreated', 'dips', 'dipped', 'plummet', 'plummets', 'plummeted', 'loses', 'sheds', 'move lower', 'moves lower', 'trading lower', 'edges lower', 'close lower', 'closes lower'];
 const POS = ['급등', '폭등', '상승', '강세', '흑자', '호실적', '수주', '계약', '신고가', '인수', '합병', '자사주', '배당', '상향', '매수', '돌파', '신제품', '승인', '호재', '사상최대', '최대실적', '확대', '성장', '상한가', '훈풍', '껑충', '불기둥', '훨훨', '랠리', '쾌재', '들썩', '높여', '높인', '높였', '수혜',
   // 99차 — '…LS ELECTRIC '잭팟' 터지나'·'…AI 서버용 MLCC '잭팟''·'실적 호조'를 중립으로 보던 것 · 가격 화살표('…전력기기 기대에 1.72%↑')
   '잭팟', '대박', '호조', '청신호', '↑',
   'surge', 'jump', 'soar', 'beat', 'beats', 'upgrade', 'record', 'deal', 'approval', 'approved', 'contract', 'buyback', 'rally', 'gain', 'gains', 'strong', 'bullish', 'rise', 'rises', 'tops',
-  'surges', 'surged', 'jumps', 'jumped', 'soars', 'soared', 'rallies', 'rallied', 'rose', 'climb', 'climbs', 'climbed', 'spikes', 'spiked', 'upgraded', 'upgrades', 'rebound', 'rebounds', 'rebounded', 'skyrockets'];
+  'surges', 'surged', 'jumps', 'jumped', 'soars', 'soared', 'rallies', 'rallied', 'rose', 'climb', 'climbs', 'climbed', 'spikes', 'spiked', 'upgraded', 'upgrades', 'rebound', 'rebounds', 'rebounded', 'skyrockets',
+  // 110차 — 'Microsoft pops as Q1 results, guidance top estimates'·'Why Is SMCI Stock Trading Higher on Thursday?'·'Nvidia Edges Higher As Jensen Huang Reportedly Mulls Return'
+  'pops', 'popped', 'move higher', 'moves higher', 'trading higher', 'edges higher', 'close higher', 'closes higher'];
 
 // 영문 키워드는 단어 경계로 매칭(예: "mission"이 "miss"로 오탐되지 않도록), 한글은 부분일치
 function kwHit(raw, low, w) {
@@ -664,7 +669,7 @@ export function strongNews(it, pct, names = []) {
 // 미국 종목의 '움직임 + 원인' 제목 — 티커 뒤에 오름·내림 말과 after/as/on/amid/following이 이어지면('Amazon (AMZN) and Meta (META) Soar After JPMorgan Hails…'·
 // 'Nvidia Stock (NVDA) Rises 2.8% as Chip Stocks Rebound') 같은 방향 기사 안에서 먼저 쓴다(47차). 티커 앞의 말은 다른 회사 얘기일 수 있어 보지 않는다
 // ('TSMC rises on report … for Nvidia'·'IREN stock plunges 18% as Microsoft …'). 국내 종목은 이름에 영문 티커가 없어 해당 없음
-const MOVE_WHY_RE = /\b(?:soar(?:s|ed|ing)?|jump(?:s|ed|ing)?|surg(?:e|es|ed|ing)|ris(?:e|es|ing)|rose|rall(?:y|ies|ied|ying)|climb(?:s|ed|ing)?|gain(?:s|ed|ing)?|spik(?:e|es|ed|ing)|rebound(?:s|ed|ing)?|pop(?:s|ped|ping)?|fall(?:s|ing)?|fell|drop(?:s|ped|ping)?|slid(?:e|es|ing)?|sink(?:s|ing)?|sank|plung(?:e|es|ed|ing)|tumbl(?:e|es|ed|ing)|slump(?:s|ed|ing)?|declin(?:e|es|ed|ing)|slip(?:s|ped|ping)?)\b(?:[^.?!]|\.\d)*?\b(?:after|as|on|amid|following)\b/i;
+const MOVE_WHY_RE = /\b(?:soar(?:s|ed|ing)?|jump(?:s|ed|ing)?|surg(?:e|es|ed|ing)|ris(?:e|es|ing)|rose|rall(?:y|ies|ied|ying)|climb(?:s|ed|ing)?|gain(?:s|ed|ing)?|spik(?:e|es|ed|ing)|rebound(?:s|ed|ing)?|pop(?:s|ped|ping)?|fall(?:s|ing)?|fell|drop(?:s|ped|ping)?|slid(?:e|es|ing)?|sink(?:s|ing)?|sank|plung(?:e|es|ed|ing)|tumbl(?:e|es|ed|ing)|slump(?:s|ed|ing)?|declin(?:e|es|ed|ing)|slip(?:s|ped|ping)?|dip(?:s|ped)|retreat(?:s|ed)?|plummet(?:s|ed)?)\b(?:[^.?!]|\.\d)*?\b(?:after|as|on|amid|following)\b/i;
 const tickerAt = (t, n) => { const m = /^[A-Z][A-Z.\-]{0,9}$/.test(n || '') ? t.match(new RegExp('(?:^|[^A-Za-z])' + n.replace(/[.\-]/g, (c) => '\\' + c) + '(?:[^A-Za-z]|$)')) : null; return m ? m.index : -1; };
 const moveWhy = (t, names) => (names || []).some((n) => { const i = tickerAt(t, n); return i >= 0 && MOVE_WHY_RE.test(t.slice(i)); });
 // 지난 거래일 시세 기사(97차) — 거래일 전 기사가 그날의 주가 움직임을 '…1.60% 조정'·'8%대 급등'·'Falls 1.7%'처럼 전한 것이면 오늘 움직임의 이유가 아니다

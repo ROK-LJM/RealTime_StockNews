@@ -2754,6 +2754,30 @@ await test('이유(47차): 미국 종목은 같은 방향 기사 중 티커 뒤�
   const rec = (read(root, 'moves.json').AAPL || []).find((x) => x.s === 'news');
   assert.equal(rec && rec.r, why, JSON.stringify(read(root, 'moves.json').AAPL));
 });
+await test('호재·악재(110차): 영어 retreats·dips·dipped·plummet·loses·sheds·move(s) lower는 악재, pops·popped·move(s)·trading higher는 호재 · 이름씨 dip("buy the dip")·"turn lower"는 아님 · 미국 티커 뒤 "Dips·Retreats … after/as"도 움직임 + 원인(봇·화면 같음)', async () => {
+  const tone = (t) => src.tagSentiment(t).tone;
+  for (const t of ['TSM retreats over 4% as stock trades below key moving averages and chip export restrictions weigh', 'TSMC Stock (TSM) Dips After Hackers Ransom Employee Data for Bitcoin',
+    'Nvidia Stock Loses Key Support, Enters Bear Market as Earnings Loom', 'Nvidia Just Dipped Below $200 for the First Time Since August', 'Super Micro, Dell, Everpure, and Diebold Nixdorf shares plummet, what you need to know',
+    'Microsoft Stocks Move Lower as $1 Billion Anthropic Bet Precedes Ignite']) assert.equal(tone(t), 'neg', t);
+  for (const t of ['Microsoft pops as Q1 results, guidance top estimates (MSFT:NASDAQ)', 'Why Is SMCI Stock Trading Higher on Thursday?', "Amazon Stock Moves Higher: What's Going On?", 'Why Super Micro Computer Stock Popped Today'])
+    assert.equal(tone(t), 'pos', t);
+  for (const t of ['Is It Time To Buy The Dip On Nvidia Stock?', 'Can Plug Power (NASDAQ:PLUG) Turn Lower Cash Burn Into EBITDAS?', 'With Jensen Huang Back as CEO, Is It More Likely That Nvidia Will Rebound to $243.37 or Plummet to $100?'])
+    assert.equal(tone(t), 'neutral', t);
+  // 이유 — 내린 날 티커 뒤 'Dips … After'·'Retreats as'가 움직임 + 원인(47차 규칙)으로 먼저 · 봇·화면 같음
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(block + '; ({ pickReasonNews })', {});
+  const ny = (ms) => new Date(ms - 5 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const it = (title) => ({ title, pubMs: T('2026-11-24T15:00:00-05:00'), sentiment: src.tagSentiment(title) });
+  for (const [list, pct, names, want] of [
+    [[it('TSMC shares fall in broad chip selloff'), it('TSMC Stock (TSM) Dips After Hackers Ransom Employee Data for Bitcoin')], -3.96, ['TSMC', 'TSM'], 'TSMC Stock (TSM) Dips After Hackers Ransom Employee Data for Bitcoin'],
+    [[it('Nvidia shares fall in broad chip selloff'), it('NVDA Stock Retreats as Google TPUs and Nvidia Debt Risk Challenge the Growth Outlook')], -2.5, ['엔비디아', 'NVDA'], 'NVDA Stock Retreats as Google TPUs and Nvidia Debt Risk Challenge the Growth Outlook'],
+  ]) {
+    const a = src.pickReasonNews(list, pct, '20261124', ny, names), b = f.pickReasonNews(list, pct, '20261124', ny, names);
+    assert.equal(a && a.title, want, '봇'); assert.equal(b && b.title, want, '화면');
+  }
+});
 await test('뉴스(48차): 미국 13F 보유 변동 공시("… $AMZN Shares Sold by … LLC")는 받을 때 빼고 이유로도 안 씀 · 캐시태그 없는 보통 기사는 그대로 · 봇·화면 같음', async () => {
   const real = ['Apple Inc. $AAPL Stock: Axxcess Wealth Management LLC Lowers Stake', '2,311 Amazon.com, Inc. $AMZN Shares Sold by Gibson Capital LLC', 'Madrona Financial Services LLC Acquires 6,973 Shares of Amazon.com, Inc. $AMZN',
     'Amazon.com, Inc. $AMZN Stock Holdings Lessened by Sterling Capital Management LLC', 'NVIDIA Corporation $NVDA Stock Acquired by Fortitude Family Office LLC', 'Taiwan Semiconductor Manufacturing Company Ltd. $TSM Stock: University of Texas Texas AM Investment Management Co. Boosts Position'];
