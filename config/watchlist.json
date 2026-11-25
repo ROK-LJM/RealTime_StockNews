@@ -40,6 +40,8 @@
     { "code": "010060", "market": "KR", "name": "OCI홀딩스" },
     { "code": "322000", "market": "KR", "name": "HD현대에너지솔루션" },
     { "code": "112610", "market": "KR", "name": "씨에스윈드" },
-    { "code": "037270", "market": "KR", "name": "YG PLUS", "ai": false }
+    { "code": "037270", "market": "KR", "name": "YG PLUS", "ai": false },
+    { "code": "051900", "market": "KR", "name": "LG생활건강" },
+    { "code": "278470", "market": "KR", "name": "에이피알" }
   ]
 }
