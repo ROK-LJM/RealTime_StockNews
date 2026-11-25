@@ -227,7 +227,7 @@ export async function getMarket() {
   }));
   const indices = [...krIdx, ...usIdx].filter(Boolean);
   const vix = indices.find((i) => i.symbol === '^VIX');
-  const mood = computeMood(indices.filter((i) => i.symbol !== '^VIX'), vix?.price);
+  const mood = computeMood(indices.filter((i) => i.symbol !== '^VIX'), vix?.price, vix?.changePct);
 
   // 환율 (원/달러, 원/100엔) — 야후 무료 환율
   const fxDefs = [['KRW=X', '원/달러', 1], ['JPYKRW=X', '원/100엔', 100]];
@@ -255,7 +255,7 @@ export function calmExpected(indices, now = Date.now()) {
   return (indices || []).map((i) => (i && i.marketStatus === 'PREOPEN' && i.changePct && Number.isFinite(i.price) && Number.isFinite(i.change)
     ? { ...i, price: Math.round((i.price - i.change) * 100) / 100, change: 0, changePct: 0 } : i));
 }
-export function computeMood(indices0, vix) {
+export function computeMood(indices0, vix, vixPct) {
   let score = 50;
   // 개장 전 예상 지수는 분위기에 넣지 않는다(08:50 코스피 -21.86%에 점수가 43 → 13으로 떨어졌다 9시에 40으로) — 어제 종가와 같은 0%로 본다
   const indices = indices0.map((i) => (i && i.marketStatus === 'PREOPEN' ? { ...i, changePct: 0 } : i));
@@ -274,7 +274,9 @@ export function computeMood(indices0, vix) {
   // 지수 말(98차) — ±2% 넘으면 '급등·급락', ±0.3% 안쪽은 '보합'(11/20 코스피 -4.36%가 '코스피 약세(-4.36%)'로 보였다)
   const word = (p) => (p >= 2 ? '급등' : p <= -2 ? '급락' : p >= 0.3 ? '강세' : p <= -0.3 ? '약세' : '보합');
   if (big && Number.isFinite(big.changePct)) bits.push(`${big.name} ${word(big.changePct)}(${big.changePct.toFixed(2)}%)`);
-  if (Number.isFinite(vix)) bits.push(vix >= 25 ? `VIX 급등(${vix.toFixed(1)})` : vix >= 20 ? `VIX 다소 높음(${vix.toFixed(1)})` : `VIX 안정(${vix.toFixed(1)})`);
+  // VIX 말(108차) — 높이는 수준 말(25 이상 '높음' · 20 이상 '다소 높음' · 그 아래 '안정'), 그날 10% 넘게 오르내렸을 때만 '급등·급락'
+  // (25 이상을 늘 '급등'이라 해 11/24 VIX -25.83%에도 'VIX 급등(26.6)' — 10/20~11/25 한 시간 표본 840여 개 중 89개가 VIX가 내린 때의 '급등')
+  if (Number.isFinite(vix)) bits.push(`VIX ${vixPct >= 10 ? '급등' : vixPct <= -10 ? '급락' : vix >= 25 ? '높음' : vix >= 20 ? '다소 높음' : '안정'}(${vix.toFixed(1)})`);
   const risk = score >= 55 ? '위험선호(리스크온)' : score <= 45 ? '위험회피(리스크오프)' : '관망';
   return { score, label, tone, summary: `${bits.join(' · ')} → ${risk} 심리` };
 }

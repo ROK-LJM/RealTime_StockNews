@@ -1156,8 +1156,8 @@ await test('개장 직후 집중 갱신(burst.mjs): 국내 시세·코스피·�
   const q0 = { quotes: [pre('005930', '삼성전자', { ai: false }), pre('000660', 'SK하이닉스'), aapl], closed: { US: '2026-11-04' } };
   writeData(root, 'quotes.json', q0);
   const idx = (name, symbol, currency, price, changePct, marketStatus) => ({ name, symbol, currency, price, change: 0, changePct, marketStatus });
-  const m0 = { indices: [idx('코스피', '^KS11', 'KRW', 2650, 0, 'PREOPEN'), idx('코스닥', '^KQ11', 'KRW', 700, 0, 'PREOPEN'), idx('S&P 500', '^GSPC', 'USD', 7000, 1, 'CLOSE'), idx('VIX', '^VIX', 'USD', 17, 2, 'CLOSE')],
-    vix: idx('VIX', '^VIX', 'USD', 17, 2, 'CLOSE'), mood: { score: 50, label: '중립', tone: 'neutral', summary: '어제' }, forex: [{ name: '원/달러', symbol: 'KRW=X', price: 1340 }],
+  const m0 = { indices: [idx('코스피', '^KS11', 'KRW', 2650, 0, 'PREOPEN'), idx('코스닥', '^KQ11', 'KRW', 700, 0, 'PREOPEN'), idx('S&P 500', '^GSPC', 'USD', 7000, 1, 'CLOSE'), idx('VIX', '^VIX', 'USD', 17, 12, 'CLOSE')],
+    vix: idx('VIX', '^VIX', 'USD', 17, 12, 'CLOSE'), mood: { score: 50, label: '중립', tone: 'neutral', summary: '어제' }, forex: [{ name: '원/달러', symbol: 'KRW=X', price: 1340 }],
     briefs: [{ key: 'KOSPI', name: '코스피', changePct: 0, price: 2650, flow: { f: 1 }, reason: { dir: 'flat' } }, { key: 'KOSDAQ', name: '코스닥', changePct: 0, price: 700, flow: null, reason: null }] };
   writeData(root, 'market.json', m0);
   writeData(root, 'news.json', { keep: 1 });
@@ -1186,7 +1186,8 @@ await test('개장 직후 집중 갱신(burst.mjs): 국내 시세·코스피·�
   assert.deepEqual(m1.indices.slice(2), m0.indices.slice(2), '미국 지수·VIX 그대로');
   assert.deepEqual(m1.briefs[0], { ...m0.briefs[0], changePct: -1.8, price: 2600 }, '브리핑은 등락·지수만');
   assert.deepEqual(m1.briefs[1], m0.briefs[1]);
-  assert.deepEqual(m1.mood, src.computeMood(m1.indices.filter((i) => i.symbol !== '^VIX'), 17), '분위기 다시 계산');
+  assert.deepEqual(m1.mood, src.computeMood(m1.indices.filter((i) => i.symbol !== '^VIX'), 17, 12), '분위기 다시 계산');
+  assert.ok(m1.mood.summary.includes(' · VIX 급등(17.0) → '), 'VIX 등락도 넘김(108차)');
   assert.notDeepEqual(m1.mood, m0.mood);
   assert.deepEqual(m1.forex, m0.forex); assert.deepEqual(m1.vix, m0.vix);
   const man = read(root, 'manifest.json').files;
@@ -2306,6 +2307,16 @@ await test('시장 분위기 문구(98차): 가장 크게 움직인 지수 말 �
   const word = (p) => src.computeMood([{ name: '코스피', symbol: '^KS11', changePct: p, marketStatus: 'OPEN' }], 20).summary.split(' · ')[0];
   assert.deepEqual([-4.36, -2, -1.99, -0.3, -0.29, 0, 0.29, 0.3, 1.09, 1.99, 2, 2.63].map(word), ['코스피 급락(-4.36%)', '코스피 급락(-2.00%)', '코스피 약세(-1.99%)', '코스피 약세(-0.30%)', '코스피 보합(-0.29%)', '코스피 보합(0.00%)',
     '코스피 보합(0.29%)', '코스피 강세(0.30%)', '코스피 강세(1.09%)', '코스피 강세(1.99%)', '코스피 급등(2.00%)', '코스피 급등(2.63%)']);
+});
+await test('시장 분위기 VIX 말(108차): 높이는 수준 말(25 이상 높음·20 이상 다소 높음·그 아래 안정) · 그날 ±10% 넘게 움직였을 때만 급등·급락(11/24 VIX -25.83%에 "VIX 급등(26.6)"이었다)', async () => {
+  const vix = (v, p) => src.computeMood([{ name: '코스피', symbol: '^KS11', changePct: -5.58, marketStatus: 'OPEN' }], v, p).summary.split(' · ')[1].split(' → ')[0];
+  assert.deepEqual([[26.36, -0.98], [26.62, -25.83], [29.41, 10.48], [25, 9.99], [24.9, -9.99], [22, -10], [20, undefined], [19.9, 3.58], [18.31, 10], [17.49, -10.12], [17, null]].map(([v, p]) => vix(v, p)),
+    ['VIX 높음(26.4)', 'VIX 급락(26.6)', 'VIX 급등(29.4)', 'VIX 높음(25.0)', 'VIX 다소 높음(24.9)', 'VIX 급락(22.0)', 'VIX 다소 높음(20.0)', 'VIX 안정(19.9)', 'VIX 급등(18.3)', 'VIX 급락(17.5)', 'VIX 안정(17.0)']);
+  // 봇 시장 파일 — 야후 VIX 등락도 넘긴다(가짜 VIX 20.3이 -25%)
+  const root = workspace();
+  await pipeline(root, { usPct: { '^VIX': -25 } });
+  const m = read(root, 'market.json');
+  assert.ok(m.mood.summary.includes(' · VIX 급락(20.3) → '), m.mood.summary);
 });
 await test('이유(99차): 지수와 같은 방향으로 더 움직인 종목은 이유 기사가 없거나 나열·전망 글·물음 제목뿐이면 "코스피 -5.37%보다 7.84%p 더 하락"(화면·급등락 기록) · AI 꺼 둔 종목은 "AI 꺼 둠" · "…나"로 끝나는 물음은 맨 뒤 · 가격 화살표·잭팟·호조·먹구름도 호재·악재 낱말', async () => {
   const vm = await import('node:vm');

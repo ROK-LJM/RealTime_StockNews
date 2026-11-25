@@ -60,7 +60,7 @@ export function mergeKrIndices(prev, kr) {
   const bySym = new Map((kr || []).filter((i) => i && BRIEF_KEY[i.symbol] && Number.isFinite(i.price) && Number.isFinite(i.changePct)).map((i) => [i.symbol, i]));
   if (!bySym.size || !Array.isArray(prev?.indices)) return null;
   const indices = prev.indices.map((i) => (i && bySym.has(i.symbol) ? { ...i, ...bySym.get(i.symbol) } : i));
-  const out = { ...prev, indices, mood: computeMood(indices.filter((i) => i && i.symbol !== '^VIX'), prev.vix?.price) };
+  const out = { ...prev, indices, mood: computeMood(indices.filter((i) => i && i.symbol !== '^VIX'), prev.vix?.price, prev.vix?.changePct) };
   if (Array.isArray(prev.briefs)) out.briefs = prev.briefs.map((b) => {
     const sym = Object.keys(BRIEF_KEY).find((s) => BRIEF_KEY[s] === b?.key), i = sym && bySym.get(sym);
     return i ? { ...b, changePct: i.changePct, price: i.price } : b;

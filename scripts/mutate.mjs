@@ -214,7 +214,7 @@ const MUTANTS = [
   ["[개장] 지수 야후 지연 값으로 대신함", BU, "getKrIndices(false)", "getKrIndices()"],
   ["[개장] 종목 야후 지연 값으로 대신함", S, "catch (e) { return { code, market: 'KR', name: it.name || code, ok: false, error: String(e.message || e) }; }", "catch (e) { return getQuote({ ...it, market: 'KR' }); }"],
   ["[개장] 내 별칭 잃음", S, "...(it.name ? { name: it.name } : {}) };", "};"],
-  ["[개장] 분위기 안 맞춤", BU, "mood: computeMood(indices.filter((i) => i && i.symbol !== '^VIX'), prev.vix?.price) };", "mood: prev.mood };"],
+  ["[개장] 분위기 안 맞춤", BU, "mood: computeMood(indices.filter((i) => i && i.symbol !== '^VIX'), prev.vix?.price, prev.vix?.changePct) };", "mood: prev.mood };"],
   ["[개장] 브리핑 등락 안 맞춤", BU, "return i ? { ...b, changePct: i.changePct, price: i.price } : b;", "return b;"],
   ["[개장] 지문 안 고침", BU, "writeJsonAtomic(path.join(dataDir, 'manifest.json'), manifestOf(dataDir));", ""],
   ["[개장] 시세 실패해도 씀", BU, "if (!n) return '시세 받기 실패';", ""],
@@ -349,6 +349,14 @@ const MUTANTS = [
   ["[지수 핵심 폭] 개장 전 분석도 맞춤", A, " || kst(aiAt).slice(11, 16) < '09:00') return s;", ") return s;"],
   ["[지수 핵심 폭] 화면에 안 씀", A, "${esc(coreMag(ai.summary, mags, b.reason.aiAt))}", "${esc(ai.summary)}"],
   ["[지수 핵심 폭] 다른 지수 안 맞춤", A, "  const mags = briefs.map((x) => [x.name, x.changePct]);", "  const mags = briefs.slice(0, 1).map((x) => [x.name, x.changePct]);"],
+  // ---------- 108차 — VIX 말 ----------
+  ["[분위기] VIX 25 이상 다시 급등", S, "vix >= 25 ? '높음'", "vix >= 25 ? '급등'"],
+  ["[분위기] VIX 급등 기준 없앰", S, "vixPct >= 10 ? '급등' : ", ""],
+  ["[분위기] VIX 급락 기준 없앰", S, "vixPct <= -10 ? '급락' : ", ""],
+  ["[분위기] VIX 10% 딱 맞으면 급등 아님", S, "vixPct >= 10 ?", "vixPct > 10 ?"],
+  ["[분위기] VIX -10% 딱 맞으면 급락 아님", S, "vixPct <= -10 ?", "vixPct < -10 ?"],
+  ["[분위기] VIX 등락 안 넘김(시장)", S, "vix?.price, vix?.changePct);", "vix?.price);"],
+  ["[분위기] VIX 등락 안 넘김(개장)", BU, "prev.vix?.price, prev.vix?.changePct) };", "prev.vix?.price) };"],
   // ---------- 107차 — [속보] 꼬리표·VI 발동·저평가론 ----------
   ["[시세틀] 이름 뺀 시세 말 — [속보] 꼬리표 안 뗌(봇)", S, "(?:특징주|속보)\\]", "(?:특징주)\\]"],
   ["[시세틀] 이름 뺀 시세 말 — [속보] 꼬리표 안 뗌(화면)", A, "(?:특징주|속보)\\]", "(?:특징주)\\]"],
