@@ -3594,6 +3594,31 @@ await test('뉴스(93차): 미국 시세 페이지·내부자 거래 자동 기�
   const titles = (read(root, 'news.json').AAPL?.items || []).map((x) => x.title);
   assert.deepEqual(titles.sort(), ['AAPL shares rise on iPhone demand', 'Apple (AAPL) wins EU approval for new chip plant'], titles.join(' / '));
 });
+await test('뉴스(113차): 미국 내부자 거래 자동 기사의 또 다른 꼴(Stock Titan·Investing.com)도 받을 때 뺌 — 직함 앞 낱말·VP·chief·counsel·proposes selling·(Nasdaq: 티커)·withheld for taxes·Form 144·Employee plan·stock awards gave·N-unit stock award · 보통 기사는 그대로', async () => {
+  const real = ['Solely to cover taxes, Plug Power (PLUG) CFO proposes selling shares valued at $66,477.', 'Three stock awards gave Douglas Herrington 15,905 Amazon (AMZN) shares. He later sold 6,362 shares.',
+    'Amazon (AMZN) VP Shelley Reynolds sold 2,343 shares in 10 trades under a preset plan.', 'Microsoft (MSFT) marketing chief sells shares at $531 each.', 'Apple (AAPL) legal chief sells shares at $325.75 under a preset trading plan.',
+    'Apple (AAPL) counsel sells 2,399 shares under a preset trading plan.', 'After a $2.39M sale, Microsoft (Nasdaq: MSFT) officer proposes selling more shares.',
+    'Of 3,000 shares acquired from a stock grant at Super Micro Computer (SMCI), 1,527 were withheld for taxes.', 'A stock award converted into 5,000 shares at Super Micro Computer (SMCI), which withheld 2,544 for taxes.',
+    'The CEO’s spouse received 5,000 Super Micro Computer (SMCI) shares, with 2,698 withheld for taxes.', 'Super Micro Computer (SMCI) accounting chief had shares withheld at $27.79 for taxes, not market sales.',
+    'Form 144 PLUG POWER INC For: 24 November By Investing.com', 'Employee plan buys 43 shares for TSMC (TSM) VP and 6 for his family member.',
+    'A 9,000-unit stock award at Super Micro Computer (SMCI) vests in two stages, subject to continued service.',
+    // 꼴마다 하나씩만 걸리는 표본(위 실제 제목은 두 꼴에 함께 걸리기도 한다)
+    'Two stock awards gave Andy Jassy 10,000 Amazon (AMZN) shares.', 'A director received 4,000 Apple (AAPL) shares. She later sold 1,200 shares.'];
+  for (const t of real) assert.equal(src.INSIDER_RE.test(t), true, '내부자 거래: ' + t);
+  for (const t of ['Supermicro Files New Form 4 as Shares Slip Nearly 2%', 'Rep. Pete Sessions Sells Shares of Amazon.com, Inc. (NASDAQ:AMZN)', 'Can Elon Musk sell his SpaceX stock on December 8? No, his shares stay locked until June 12, 2027',
+    "Binance’s Yi He says revenue can cover hack losses without selling SpaceX shares", 'Elon Musk’s 2018 stock award vests after court ruling', 'Apple (AAPL) Puts Tim Cook At The Center Of A Surprise CEO Search',
+    'Nvidia (NVDA) chief Jensen Huang says Blackwell demand stays strong', 'Microsoft (Nasdaq: MSFT) unveils new Copilot features at Ignite'])
+    assert.equal(src.INSIDER_RE.test(t), false, '보통 기사: ' + t);
+  // 봇 — 받을 때 뺀다
+  const item = (t, i) => '<item><title>' + t + ' - Stock Titan</title><link>https://news.example.com/h' + i + '</link><pubDate>' + RSS_PUB + '</pubDate><source url="https://news.example.com">Stock Titan</source></item>';
+  const feed = (ts) => text('<?xml version="1.0"?><rss><channel>' + ts.map(item).join('') + '</channel></rss>');
+  const root = workspace();
+  await pipeline(root, { news: (m, u) => (/AAPL/.test(new URL(u).searchParams.get('q'))
+    ? feed(['Apple (AAPL) counsel sells 2,399 shares under a preset trading plan.', 'Apple (AAPL) legal chief sells shares at $325.75 under a preset trading plan.', 'Apple (AAPL) wins EU approval for new chip plant', 'AAPL shares rise on iPhone demand'])
+    : text(rss('', queryName(u)))) });
+  const titles = (read(root, 'news.json').AAPL?.items || []).map((x) => x.title);
+  assert.deepEqual(titles.sort(), ['AAPL shares rise on iPhone demand', 'Apple (AAPL) wins EU approval for new chip plant'], titles.join(' / '));
+});
 await test('큰 소식(93차, 봇): 이름·요약은 사건만 — AI에 주가 등락·수준을 쓰지 말라는 지시 · 그래도 남은 움직임 말은 이름 끝에서 떼고(가운데 남으면 그 소식은 버림) 요약은 비움 · 11/18·19 실제 큰 소식 12건', async () => {
   src.resetState(); src.setAiBudget(null);
   // [이름, 요약, 정리된 이름, 요약 남김] — 11/18 16:00 '…두산에너빌리티 주가가 상승 전환했다'는 그날 -5.12% 마감, 11/19 16:00 '…AI 투자 우려 속 약세'는 그때 +0.51%·+3.15%

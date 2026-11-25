@@ -349,6 +349,17 @@ const MUTANTS = [
   ["[지수 핵심 폭] 개장 전 분석도 맞춤", A, " || kst(aiAt).slice(11, 16) < '09:00') return s;", ") return s;"],
   ["[지수 핵심 폭] 화면에 안 씀", A, "${esc(coreMag(ai.summary, mags, b.reason.aiAt))}", "${esc(ai.summary)}"],
   ["[지수 핵심 폭] 다른 지수 안 맞춤", A, "  const mags = briefs.map((x) => [x.name, x.changePct]);", "  const mags = briefs.slice(0, 1).map((x) => [x.name, x.changePct]);"],
+  // ---------- 113차 — 내부자 거래 자동 기사 다른 꼴 ----------
+  ["[내부자] 직함 앞 낱말 안 봄", S, "(?:[a-z]+\\s+)?(?:EVP|SVP|VP|", "(?:EVP|SVP|VP|"],
+  ["[내부자] VP·chief·counsel 놓침", S, "(?:EVP|SVP|VP|CEO|CFO|COO|CTO|CSO|CAO|CLO|CMO|director|executive|officer|insider|president|chair\\w*|chief|(?:general\\s+)?counsel)\\b", "(?:EVP|SVP|CEO|CFO|COO|CTO|director|executive|officer|insider|president|chair\\w*|general\\s+counsel)\\b"],
+  ["[내부자] proposes selling 놓침", S, "|propos(?:es|ed)?\\s+(?:to\\s+sell|selling))\\b", ")\\b"],
+  ["[내부자] (Nasdaq: 티커) 놓침", S, "\\((?:[A-Z]+:\\s?)?", "\\((?:[A-Z]+:)?"],
+  ["[내부자] withheld for taxes 놓침", S, "|\\bwithh[oe]ld\\b.{0,30}?\\bfor\\s+taxes\\b", ""],
+  ["[내부자] Form 144 놓침", S, "|^Form\\s+(?:144|4)\\b", ""],
+  ["[내부자] Employee plan 놓침", S, "|^Employee\\s+(?:stock\\s+)?plan\\s+(?:buys|bought|purchases?)\\b", ""],
+  ["[내부자] stock awards gave 놓침", S, "|\\bstock\\s+awards?\\s+(?:gave|converted\\s+into)\\b", ""],
+  ["[내부자] N-unit stock award 놓침", S, "|\\b[\\d,]+-unit\\s+stock\\s+award\\b", ""],
+  ["[내부자] later sold 놓침", S, "|\\b(?:he|she)\\s+later\\s+(?:sold|bought)\\s+[\\d,]+\\s+shares\\b", ""],
   // ---------- 112차 — 진단 문장 끝 떼기 ----------
   ["[끝맺음] 문장 끝 안 뗌(봇)", S, "  const s = plainEnd(h);", "  const s = String(h ?? '');"],
   ["[끝맺음] 문장 끝 안 뗌(화면)", A, "  const s = plainEnd(h);", "  const s = String(h ?? '');"],
@@ -903,7 +914,7 @@ const MUTANTS = [
   ["[자동 기사] 내부자 거래 받을 때 안 뺌", S, " && !INSIDER_RE.test(it.title)", ""],
   ["[자동 기사] 내부자 원천징수 놓침", S, "|withh[oe]lds?\\b)|", ")|"],
   ["[자동 기사] 내부자 주식 수 안 봄", S, "(?:.{0,40}?\\b(?:shares?|stock\\s+awards?|common\\s+stock)\\b|\\s+\\d{1,3}(?:,\\d{3})+)", ""],
-  ["[자동 기사] 내부자 거래 말 없어도 뺌", S, "\\b(?:sells?|sold|buys?|bought|holds?|converts?|acquires?|exercises?|gifts?|gave\\s+away|delivers?|withh[oe]lds?)\\b(?:", "\\b\\w+\\b(?:"],
+  ["[자동 기사] 내부자 거래 말 없어도 뺌", S, "\\b(?:sells?|sold|buys?|bought|holds?|converts?|acquires?|exercises?|gifts?|gave\\s+away|delivers?|withh[oe]lds?|propos(?:es|ed)?\\s+(?:to\\s+sell|selling))\\b(?:", "\\b\\w+\\b(?:"],
   // ---------- 78차 — 큰 소식 ----------
   ["[큰 소식] 48시간 넘은 기사도", S, "now - n.pubMs > 48 * 3600e3 || ", ""],
   ["[큰 소식] 원인 아닌 기사도", S, "if (CSR_RE.test(n.title) || priceOnly(n.title)) continue;", "if (priceOnly(n.title)) continue;"],
@@ -1134,9 +1145,9 @@ const MUTANTS = [
   ["[자동 기사] 시세 페이지 'And' 놓침", S, R`analysis)\s*(?:[,&]|\band\b)\s*(?:and\s+)?`, R`analysis)\s*[,&]\s*(?:and\s+)?`],
   ["[자동 기사] 시세 페이지 'Chart Analysis' 놓침", S, R`|history|chart\s+analysis|analysis)\b`, R`|history|analysis)\b`],
   ["[자동 기사] Reuters 시세 페이지 놓침", S, R`|\|\s*stock\s+price\s*&\s*latest\s+news\s*$/i;`, R`/i;`],
-  ["[자동 기사] 내부자 거래소 붙은 티커 놓침", S, R`/\((?:[A-Z]+:)?[A-Z]{1,5}(?:\.[A-Z]{1,2})?\)\s+(?:Stock:\s+)?`, R`/\([A-Z]{1,5}(?:\.[A-Z]{1,2})?\)\s+(?:Stock:\s+)?`],
-  ["[자동 기사] 내부자 티커 뒤 거래소 놓침", S, R`/\((?:[A-Z]+:)?[A-Z]{1,5}(?:\.[A-Z]{1,2})?\)`, R`/\((?:[A-Z]+:)?[A-Z]{1,5}\)`],
-  ["[자동 기사] 내부자 'Stock:' 놓침", S, R`\)\s+(?:Stock:\s+)?(?:(?:EVP`, R`\)\s+(?:(?:EVP`],
+  ["[자동 기사] 내부자 거래소 붙은 티커 놓침", S, "/\\((?:[A-Z]+:\\s?)?[A-Z]{1,5}(?:\\.[A-Z]{1,2})?\\)\\s+(?:Stock:\\s+)?", "/\\([A-Z]{1,5}(?:\\.[A-Z]{1,2})?\\)\\s+(?:Stock:\\s+)?"],
+  ["[자동 기사] 내부자 티커 뒤 거래소 놓침", S, "/\\((?:[A-Z]+:\\s?)?[A-Z]{1,5}(?:\\.[A-Z]{1,2})?\\)", "/\\((?:[A-Z]+:\\s?)?[A-Z]{1,5}\\)"],
+  ["[자동 기사] 내부자 'Stock:' 놓침", S, "\\)\\s+(?:Stock:\\s+)?(?:(?:[a-z]+\\s+)?(?:EVP", "\\)\\s+(?:(?:[a-z]+\\s+)?(?:EVP"],
   ["[자동 기사] 내부자 gave away 놓침", S, R`|gifts?|gave\s+away|delivers?`, R`|gifts?|delivers?`],
   ["[자동 기사] 내부자 Common Stock 놓침", S, R`|stock\s+awards?|common\s+stock)\b`, R`|stock\s+awards?)\b`],
   ["[자동 기사] 내부자 'At $… apiece' 놓침", S, R`|^At\s+\$[\d.,]+\s+(?:apiece|a\s+share|per\s+share|each),.{0,60}\b(?:sold|bought|sells|buys)\s+[\d,]+\s+shares\b`, ''],
@@ -1147,7 +1158,7 @@ const MUTANTS = [
   ["[자동 기사] 내부자 금액 앞 직함 안 봄", S, R`|\b(?:director|officer|insider|CEO|CFO|COO|CTO|CSO|CAO|CLO|CMO|EVP|SVP|VP|president|chair\w*|general\s+counsel)\b[^$]{0,60}\b(?:buys|sells|bought|sold)\s+\$\d`, R`|\b(?:buys|sells|bought|sold)\s+\$\d`],
   ["[자동 기사] 내부자 'CSO' 직함 놓침", S, R`|CEO|CFO|COO|CTO|CSO|CAO|CLO|CMO|EVP|SVP|VP|president`, R`|CEO|CFO|COO|CTO|CAO|CLO|CMO|EVP|SVP|VP|president`],
   ["[자동 기사] 내부자 'in stock'(티커 없음) 놓침", S, R`(?:in|of|worth\s+of)\s+(?:[A-Z]{1,5}\s+)?(?:shares|stock)\b`, R`(?:in|of|worth\s+of)\s+[A-Z]{1,5}\s+(?:shares|stock)\b`],
-  ["[자동 기사] 내부자 'Insider trades:' 놓침", S, R`|^Insider\s+trades?:/i;`, R`/i;`],
+  ["[자동 기사] 내부자 'Insider trades:' 놓침", S, "|^Insider\\s+trades?:|\\bwithh[oe]ld", "|\\bwithh[oe]ld"],
 ];
 
 const args = process.argv.slice(2);
