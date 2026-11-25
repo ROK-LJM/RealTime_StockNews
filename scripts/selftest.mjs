@@ -3665,14 +3665,16 @@ await test('큰 소식(78차, 봇): 내 종목들의 최근 48시간 기사(원�
   assert.equal(src.themeDue({ at: now - 180 * MIN }, now, 10), true, '3시간 지남');
   assert.equal(src.themeDue({ at: now + 60 * MIN }, now, 10), true, '시계가 거꾸로');
   assert.equal(src.themeDue({ seed: 1 }, now, Infinity), true, '형식이 다른 직전 파일 · 리셋 전 1시간(몫 무한)');
-  // 아침 큰 소식(88차) — 평일 07:00~08:59 · 12시간 넘음 · 1번 앞당긴 몫
+  // 아침 큰 소식(88차) — 평일 07:00~08:59 · 직전 것이 그날 06:00(미국 정규장 마감) 전 것(109차) · 1번 앞당긴 몫
   const kst = (s) => T(s + '+09:00');
   assert.deepEqual(['2026-11-13T06:59:00', '2026-11-13T07:00:00', '2026-11-13T08:59:00', '2026-11-13T09:00:00', '2026-11-14T07:30:00', '2026-11-16T07:30:00'].map((s) => src.themeMorning(kst(s))),
     [false, true, true, false, false, true], '평일 아침 7·8시만(토요일 아님 · 월요일)');
   const m = kst('2026-11-13T07:30:00');
   assert.equal(src.themeDue({ at: m - 15 * 3600e3 }, m, 0, 1), true, '아침 · 15시간 지남 · 앞당긴 몫 1번');
   assert.equal(src.themeDue({ at: m - 15 * 3600e3 }, m, 0, 0), false, '앞당긴 몫도 없음');
-  assert.equal(src.themeDue({ at: m - 11 * 3600e3 }, m, 0, 1), false, '12시간 안');
+  // 109차 — 밤사이(01:35) 묶은 것도 미국 마감 전 것이면 다시(11/25 미국 반도체 급락이 빠진 '젠슨 황 복귀…훈풍'이 국내 급락장 내내 떠 있었다) · 06:00 뒤에 묶었으면 그대로
+  assert.deepEqual(['2026-11-13T01:35:00', '2026-11-13T05:59:00', '2026-11-13T06:00:00', '2026-11-13T06:21:00', '2026-11-12T20:30:00'].map((s) => src.themeDue({ at: kst(s) }, m, 0, 1)),
+    [true, true, false, false, true], '그날 06:00 전에 묶은 것만');
   assert.equal(src.themeDue(null, m, 0, 1), true, '직전 것 없음');
   assert.equal(src.themeDue({ at: m + 60 * MIN }, m, 0, 1), true, '시계가 거꾸로');
   assert.equal(src.themeDue({ at: kst('2026-11-13T10:00:00') - 15 * 3600e3 }, kst('2026-11-13T10:00:00'), 0, 1), false, '아침이 아님');

@@ -1129,15 +1129,18 @@ export async function aiStockBriefs(list, now = Date.now()) {
 // 흩어져 다른 기사에 묻혔다. 내 종목들의 최근 이틀 기사 제목을 AI가 사건별로 묶고(최대 4개), 관련 종목은 AI가 아니라 고른 기사가 걸린 종목으로 정한다
 export const THEME_MAX = 4, THEME_HEADS = 70, THEME_REFRESH_MS = 3 * 3600e3;
 // 아침 큰 소식(88차) — 몫이 2번 넘게 남는 때는 사실상 리셋 전 1시간(한국 16시)뿐이라 하루 한 번, 밤사이 미국 소식(실적 발표 등)은 다음 날 16시에야 묶였다
-// (11/18 첫 큰 소식 16:00). 평일 한국 07:00~08:59(국내 장 열기 전)에 마지막 큰 소식이 12시간 넘었으면 시간 배분보다 1번 앞당겨 부른다 — 하루 한 번
-export const THEME_EARLY_AHEAD = 1, THEME_MORNING_GAP_MS = 12 * 3600e3;
+// (11/18 첫 큰 소식 16:00). 평일 한국 07:00~08:59(국내 장 열기 전)에 마지막 큰 소식이 그날 06:00(미국 정규장 마감) 전에 묶은 것이면 시간 배분보다 1번 앞당겨 부른다 — 하루 한 번
+// (109차 — 예전엔 12시간 넘었을 때만이라 밤사이(01:35) 묶은 큰 소식은 아침에 다시 묶지 않아, 미국 장 후반·마감 소식(11/24 엔비디아 -5.86%·반도체 급락)이 빠진 채
+// 11/25 국내 급락장(코스피 -5.6%) 내내 '젠슨 황 복귀…훈풍'이 떠 있었다. 미국 서머타임엔 마감이 05:00이라 05~06시에 묶은 것도 한 번 더 묶는다 — 하루 한 번뿐)
+export const THEME_EARLY_AHEAD = 1, THEME_MORNING_FROM_H = 6;
 export function themeMorning(now) { const d = new Date(now + 9 * 3600e3), h = d.getUTCHours(), w = d.getUTCDay(); return w >= 1 && w <= 5 && h >= 7 && h < 9; }
 // 새로 묶을 때인가 — 직전 것이 없거나 3시간 지났고(시계가 거꾸로 가도 다시), 무료 한도 배분 몫이 2번 넘게 남을 때(1번은 종목 분석에 남긴다).
-// 또는 아침(themeMorning)에 12시간 넘었고 1번 앞당긴 몫(early — 호출부가 aiRoom(THEME_EARLY_AHEAD))이 있을 때(88차)
+// 또는 아침(themeMorning)에 직전 것이 그날 06:00 전 것이고(109차) 1번 앞당긴 몫(early — 호출부가 aiRoom(THEME_EARLY_AHEAD))이 있을 때(88차)
 export function themeDue(prev, now, room, early = 0) {
   const stale = !prev || !Number.isFinite(prev.at) || now - prev.at >= THEME_REFRESH_MS || now < prev.at;
   if (stale && room >= 2) return true;
-  const old = !prev || !Number.isFinite(prev.at) || now < prev.at || now - prev.at >= THEME_MORNING_GAP_MS;
+  const k = now + 9 * 3600e3, usClose = k - (k % 86400e3) + (THEME_MORNING_FROM_H - 9) * 3600e3; // 그날(한국) 06:00
+  const old = !prev || !Number.isFinite(prev.at) || now < prev.at || prev.at < usClose;
   return old && early >= 1 && themeMorning(now);
 }
 // 입력 기사 — 종목마다 최근 48시간 기사에서 원인 아닌 기사(CSR)·시세 안내(priceOnly)를 빼고, 같은 제목은 하나로(걸린 종목을 모음).

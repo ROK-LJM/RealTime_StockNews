@@ -349,6 +349,11 @@ const MUTANTS = [
   ["[지수 핵심 폭] 개장 전 분석도 맞춤", A, " || kst(aiAt).slice(11, 16) < '09:00') return s;", ") return s;"],
   ["[지수 핵심 폭] 화면에 안 씀", A, "${esc(coreMag(ai.summary, mags, b.reason.aiAt))}", "${esc(ai.summary)}"],
   ["[지수 핵심 폭] 다른 지수 안 맞춤", A, "  const mags = briefs.map((x) => [x.name, x.changePct]);", "  const mags = briefs.slice(0, 1).map((x) => [x.name, x.changePct]);"],
+  // ---------- 109차 — 아침 큰 소식은 미국 마감 전 것이면 ----------
+  ["[아침 큰 소식] 다시 12시간 기준", S, " || prev.at < usClose;", " || now - prev.at >= 12 * 3600e3;"],
+  ["[아침 큰 소식] 마감 시각 05시", S, "THEME_MORNING_FROM_H = 6;", "THEME_MORNING_FROM_H = 5;"],
+  ["[아침 큰 소식] 마감 시각 한국 날짜 아님", S, "usClose = k - (k % 86400e3) + ", "usClose = now - (now % 86400e3) + "],
+  ["[아침 큰 소식] 06시 딱 맞으면 다시", S, " || prev.at < usClose;", " || prev.at <= usClose;"],
   // ---------- 108차 — VIX 말 ----------
   ["[분위기] VIX 25 이상 다시 급등", S, "vix >= 25 ? '높음'", "vix >= 25 ? '급등'"],
   ["[분위기] VIX 급등 기준 없앰", S, "vixPct >= 10 ? '급등' : ", ""],
@@ -934,8 +939,8 @@ const MUTANTS = [
   // ---------- 88차 — 아침 큰 소식 ----------
   ["[아침 큰 소식] 아침 칸 안 봄", S, "return old && early >= 1 && themeMorning(now);", "return old && early >= 1;"],
   ["[아침 큰 소식] 앞당긴 몫 안 봄", S, "return old && early >= 1 && themeMorning(now);", "return old && themeMorning(now);"],
-  ["[아침 큰 소식] 12시간 안 봄", S, "|| now - prev.at >= THEME_MORNING_GAP_MS;", "|| true;"],
-  ["[아침 큰 소식] 시계 거꾸로 무시", S, " || now < prev.at || now - prev.at >= THEME_MORNING_GAP_MS;", " || now - prev.at >= THEME_MORNING_GAP_MS;"],
+  ["[아침 큰 소식] 06시 뒤에 묶은 것도 다시", S, " || prev.at < usClose;", " || true;"],
+  ["[아침 큰 소식] 시계 거꾸로 무시", S, " || now < prev.at || prev.at < usClose;", " || prev.at < usClose;"],
   ["[아침 큰 소식] 주말도", S, "return w >= 1 && w <= 5 && h >= 7 && h < 9;", "return h >= 7 && h < 9;"],
   ["[아침 큰 소식] 9시 넘어도", S, "h >= 7 && h < 9;", "h >= 7 && h < 24;"],
   ["[아침 큰 소식] 7시 전에도", S, "h >= 7 && h < 9;", "h >= 0 && h < 9;"],
