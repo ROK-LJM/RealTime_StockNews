@@ -42,6 +42,8 @@
     { "code": "112610", "market": "KR", "name": "씨에스윈드" },
     { "code": "037270", "market": "KR", "name": "YG PLUS", "ai": false },
     { "code": "051900", "market": "KR", "name": "LG생활건강" },
-    { "code": "278470", "market": "KR", "name": "에이피알" }
+    { "code": "278470", "market": "KR", "name": "에이피알" },
+    { "code": "406820", "market": "KR", "name": "뷰티스킨" },
+    { "code": "123690", "market": "KR", "name": "한국화장품" }
   ]
 }
