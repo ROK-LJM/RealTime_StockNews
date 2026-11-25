@@ -2116,6 +2116,8 @@ await test('급등락 기록(32차): 시장보다 덜 움직인 날은 방향 �
   // 지난 급등락의 74차 전 AI 진단 문장 끝도 뗌(112차) · 기사 제목은 그대로
   g.renderMoves({ code: 'A', market: 'KR', ok: true, asOf: new Date().toISOString() }, [{ d: '20261110', p: -2.2, r: '앤트로픽의 오피스 도구 출시로 경쟁 심화 우려가 부각되며 하락했습니다.', s: 'ai' }, { d: '20261109', p: 3, r: '가나, 장중 신고가 기록했다', s: 'news' }]);
   assert.ok(el.innerHTML.includes('<span class="src">AI</span>앤트로픽의 오피스 도구 출시로 경쟁 심화 우려가 부각되며 하락</span>') && el.innerHTML.includes('<span class="src">뉴스</span>가나, 장중 신고가 기록했다</span>'), el.innerHTML);
+  g.renderMoves({ code: 'A', market: 'KR', ok: true, asOf: new Date().toISOString() }, [{ d: '20261123', p: -2.52, r: '코스피 서킷브레이커 수준의 급락과 프로그램 매도세에 하락', s: 'ai' }]);
+  assert.ok(el.innerHTML.includes('<span class="src">AI</span>코스피 급락과 프로그램 매도세에 하락</span>'), '지난 급등락의 부풀린 말도 뗌(114차): ' + el.innerHTML);
   // 시세 안내 — 끝에 '기록'·'마감'이 붙어도(실제 11/05 OCI홀딩스 급등락 기록 이유)
   for (const t of ['OCI홀딩스 주가, 11월 5일 204,000원 2.00% 상승 기록', 'LG전자 주가, 11월 5일 142,800원 2.39% 하락 마감']) { assert.equal(src.priceOnly(t), true, '봇: ' + t); assert.equal(g.priceOnly(t), true, '화면: ' + t); }
   for (const t of ['삼성SDI 50만8000원으로 6.79%↓…ESS 성장과 조정 압력 교차', 'OCI홀딩스 주가, 11월 5일 204,000원 2.00% 상승 기록 경신에 신고가']) { assert.equal(src.priceOnly(t), false, '봇: ' + t); assert.equal(g.priceOnly(t), false, '화면: ' + t); }
@@ -3422,6 +3424,11 @@ await test('AI 지시(70차): 위에 없는 사건을 배경지식으로 원인 
   const NOMAT = '이 종목만의 뉴스·오늘 공시가 없다';
   let b = await bodyOf([], []);
   assert.ok(b.includes('배경지식으로 끌어와 원인으로 쓰지 말 것') && b.includes('지금(2026년 11월)'), '배경지식 금지 · 지금 연·월: ' + b.slice(0, 1500));
+  assert.ok(!b.includes('서킷브레이커'), '시장 줄이 없으면 시장 조치 지시도 없음(114차)');
+  NET.routes = routes(); NET.calls = []; NET.bodies = []; NET.blocked = [];
+  await src.aiStockAnalysis({ quote, news: { ok: true, items: [] }, flow: null, history: null, disclosures: { ok: true, items: [] }, schedule: [], market: { name: '코스피', pct: -6.16, events: ['매도 사이드카 09:02'] }, now: T('2026-11-13T16:05:00+09:00') });
+  const bm = NET.bodies.find((x, i) => isGemini(NET.calls[i])) || '';
+  assert.ok(bm.includes('(오늘 매도 사이드카 09:02)') && bm.includes("적혀 있지 않은 서킷브레이커를 쓰거나 '서킷브레이커급'처럼 부풀리지 말 것"), '국내 종목의 시장 줄이 있으면 적혀 있지 않은 시장 조치 금지(114차): ' + bm.slice(0, 1800));
   assert.ok(b.includes(NOMAT) && b.includes("'뚜렷한 재료 없이 하락'") && b.includes('1~2개도 된다'), '뉴스·공시가 없으면 재료가 없다고 · 요인도 확인되는 것만');
   b = await bodyOf([it('HD현대에너지솔루션, 태양광 모듈 대규모 수주')], []);
   assert.ok(!b.includes(NOMAT) && b.includes('배경지식으로 끌어와'), '뉴스가 있으면 재료 없음 지시는 없음 · 배경지식 금지는 늘');
@@ -3439,6 +3446,12 @@ await test('AI 지시(70차): 위에 없는 사건을 배경지식으로 원인 
   const raw = NET.bodies.find((x, i) => isGemini(NET.calls[i])) || '{}';
   const prompt = JSON.parse(raw).contents?.[0]?.parts?.[0]?.text || '';
   assert.ok(prompt.includes('배경지식으로 끌어와 원인으로 쓰지 말 것') && prompt.includes('지금(2026년 11월)'), '한 줄 진단 묶음도: ' + prompt.slice(0, 900));
+  assert.ok(!prompt.includes('서킷브레이커'), '한 줄 진단 묶음 — 시장이 없으면 시장 조치 지시도 없음(114차)');
+  NET.calls = []; NET.bodies = [];
+  const rowM = (code, pct) => ({ ...row(code, pct), market: { name: '코스피', pct: -6.16, events: ['매도 사이드카 09:02'] } });
+  await src.aiStockBriefs([rowM('000001', 3), rowM('000002', -3)], T('2026-11-13T10:00:00+09:00'));
+  const pm = JSON.parse(NET.bodies.find((x, i) => isGemini(NET.calls[i])) || '{}').contents?.[0]?.parts?.[0]?.text || '';
+  assert.ok(pm.includes("적혀 있지 않은 서킷브레이커를 쓰거나 '서킷브레이커급'처럼 부풀리지 말 것"), '한 줄 진단 묶음도 국내 종목의 시장이 있으면 시장 조치 금지(114차): ' + pm.slice(0, 900));
 });
 await test('AI 재분석(71차): 장중 등락만 조금 바뀌면(방향·5% 선·뉴스·수급·공시 그대로, 차이 max(2%p, 직전의 30%) 안쪽) 직전 분석 그대로 · 많이 바뀌면 다시 · 장이 끝나면 마감 등락 구간이 다를 때 한 번 다시', async () => {
   assert.equal(util.nearSig('12|f|뉴스', '13|f|뉴스'), true, '12→13');
@@ -4131,6 +4144,12 @@ await test('진단 끝말(86차): 5% 안쪽 움직임의 끝 "급등·급락(세
     ['장중 반등을 시도했지만 회복하지 못했다', -3, '장중 반등을 시도했지만 회복하지 못했다'], // '…못했다'는 그대로
     ['아시아 공급망의 부진한 전망이 투자 심리를 위축시켰습니다.', -2.4, '아시아 공급망의 부진한 전망이 투자 심리를 위축시켰습니다.'], // 떼면 말이 안 되는 끝
     ['Q3 beat했다', 3, 'Q3 beat했다'], // 한글 낱말 뒤가 아니면 그대로
+    // 114차 — 사이드카만 난 날의 '서킷브레이커급'·'…수준의'·'…동반' 부풀린 말은 뗌(11/25 SK하이닉스·11/23 SK하이닉스·11/20 LIG디펜스앤에어로스페이스) · 조치를 말하는 '서킷브레이커 발동'은 그대로
+    ['코스피 서킷브레이커급 폭락과 엔비디아 반락 여파로 11%대 급락', -11.05, '코스피 폭락과 엔비디아 반락 여파로 11%대 급락'],
+    ['코스피 서킷브레이커 수준의 급락과 프로그램 매도세에 하락', -2.52, '코스피 급락과 프로그램 매도세에 하락'],
+    ['코스피 서킷브레이커 동반 급락 속 입찰제한 소송 불확실성과 거래중단 공시 여파로 하락', -6.2, '코스피 동반 급락 속 입찰제한 소송 불확실성과 거래중단 공시 여파로 하락'],
+    ['코스피가 서킷브레이커 수준으로 밀리며 동반 급락', -7.1, '코스피가 밀리며 동반 급락'],
+    ['코스피 서킷브레이커 발동에 따른 투매로 급락', -9, '코스피 서킷브레이커 발동에 따른 투매로 급락'],
   ]) assert.equal(src.toneTail(h, p), want, h);
   // 종합분석 — 삼성전자 +4.2%는 맞춤, +7.5%는 그대로
   const withHead = (headline) => () => json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ ...JSON.parse(geminiOk.candidates[0].content.parts[0].text), headline }) }] } }] });
@@ -4168,7 +4187,8 @@ await test('진단 끝말 — 지금 등락(89차): 화면("왜 움직였나"·�
   const f = vm.runInNewContext([line('function cssId('), line('function esc('), block, ra, why].join('\n') + '; ({ renderAnalysis, whyOf, toneTail })', ctx);
   // 화면 규칙 = 봇 규칙
   for (const [h, p] of [['…선보여 급등', 3.31], ['…공시에 급락', -4.59], ['…급락세', -2], ['…급등', 6.08], ['…급등', -5], ['단기 급등에 따른 하락', -3], ['…급등', NaN], ['…겹치며 12%대 급락', -13.09], ['…5%대 급락', -4.2], ['…6%대 하락세', -7.8], ['코스피 5%대 급락', -7.3], ['장중 15%대 급락', -13], ['2%대 상승', 0.6], ['12.5%대 급등', 9.1], ['7%대 급등', NaN], ['', 1], ['월가 목표주가 하향 조정에 하락 마감했다', -2.07], ['…시장 대비 초과 상승했습니다.', 11.97], ['실적 호조에 급등했습니다', 3], ['…하락세를 보였습니다.', -3], ['…약세를 보이고 있습니다', -3],
-    ['…크게 위축되었습니다.', -4], ['…원선이 붕괴됐다', -6], ['…지속되고 있습니다.', -2.5], ['…맞물린 결과입니다.', -6.6], ['회복하지 못했다', -3], ['…위축시켰습니다.', -2.4]])
+    ['…크게 위축되었습니다.', -4], ['…원선이 붕괴됐다', -6], ['…지속되고 있습니다.', -2.5], ['…맞물린 결과입니다.', -6.6], ['회복하지 못했다', -3], ['…위축시켰습니다.', -2.4],
+    ['코스피 서킷브레이커급 폭락과 반락 여파로 11%대 급락', -11.05], ['코스피 서킷브레이커 수준의 급락에 하락', -2.5], ['코스피 서킷브레이커 동반 급락 속 하락', -6.2], ['서킷브레이커 발동에 따른 투매로 급락', -9]])
     assert.equal(f.toneTail(h, p), src.toneTail(h, p), `화면 = 봇: ${h} ${p}`);
   // 왜 움직였나 · 카드 — 그날 진단(10:45 +6.08%에 만든 '…급등')은 지금 +3.31%면 '…상승'
   const q = { code: 'A', name: '샌즈랩', market: 'KR', ok: true, changePct: 3.31, asOf: '2026-11-19T11:20:00+09:00' };
