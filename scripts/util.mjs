@@ -89,6 +89,12 @@ export function analysisSig(q, news, flow, disc) {
 }
 // 시그니처의 등락 구간(맨 앞 1% 버킷) — 종목·지수 시그니처 모두 이 형식으로 시작한다
 export const sigMove = (sig) => String(sig ?? '').split('|')[0];
+// 앞 평일(YYYYMMDD) — 토·일을 건너뛴다(111차 급등락 기록의 지난 공시 창 · 공휴일은 모름 — 연휴 다음 날엔 연휴 전 공시를 이유로 못 씀)
+export function prevWeekday(ymd) {
+  const t = Date.UTC(+ymd.slice(0, 4), +ymd.slice(4, 6) - 1, +ymd.slice(6, 8));
+  for (let k = 1; k <= 3; k++) { const d = new Date(t - k * 86400e3), w = d.getUTCDay(); if (w !== 0 && w !== 6) return d.toISOString().slice(0, 10).replace(/-/g, ''); }
+  return ymd;
+}
 // 기사만 바뀌었나(81차, 장중 재분석 간격) — 등락은 조금만(nearSig와 같은 기준), 수급·공시는 그대로이고 기사 제목만 다름(시그니처 꼴: 등락|수급|기사…[|d:공시]).
 // 11/14 밤 엔비디아는 젠슨 황 사임 기사가 쏟아져 새 기사마다 다시 분석 — 하룻밤 16번(하루 몫 60번의 4분의 1). 지난 7일 시뮬레이션: 1시간 간격이면 304번 중 29번(10%)
 export function newsOnlySig(a, b) {

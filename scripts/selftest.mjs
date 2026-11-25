@@ -1897,6 +1897,41 @@ await test('급등락 기록(30차): 그날 움직임과 방향이 반대인 공
     assert.deepEqual(read(r3, 'moves.json')['005930'][0], { d: '20261015', p: -4.2, r: '삼성전자, 반도체 업황 우려에 급락', s: 'news' }, '예전 규칙으로 남긴 반대 방향 공시 이유 → 뉴스로');
   });
 });
+await test('급등락 기록(111차): 지난 공시는 앞 평일 것까지만(월요일엔 금요일까지) — 이틀 전 합병 결정 공시는 오늘 이유가 아님 · 예전에 남긴 오늘 공시 이유도 그 창 밖이면 바꿈 · [첨부추가]는 정정 공시처럼 원래 공시 뒤(봇·화면 같음)', async () => {
+  assert.deepEqual(['20261015', '20261012', '20261013', '20261011', '20261017'].map((d) => util.prevWeekday(d)), ['20261014', '20261009', '20261012', '20261009', '20261016'], '목→수 · 월→금 · 화→월 · 일→금 · 토→금');
+  await withDartKey(async () => {
+    const item = (t) => '<item><title>' + t + ' - 테스트일보</title><link>https://news.example.com/1</link><pubDate>' + new Date(Date.now() - 600e3).toUTCString() + '</pubDate><source url="https://news.example.com">테스트일보</source></item>';
+    const downNews = (m, u) => text('<?xml version="1.0"?><rss><channel>' + item(queryName(u) + ', 반도체 업황 우려에 급락') + '</channel></rss>');
+    const base = { gemini: () => text('upstream error', 500), krAt: NOW_KR, krPct: { '005930': -4.2, '000660': 0.3 }, news: downNews };
+    const rows = (...r) => ({ ...DART_ROWS, '00126380': r });
+    const r1 = workspace();
+    await pipeline(r1, { ...base, dartRows: rows(['20261013000400', '주요사항보고서(회사합병결정)']) });
+    assert.deepEqual(read(r1, 'moves.json')['005930'][0], { d: '20261015', p: -4.2, r: '삼성전자, 반도체 업황 우려에 급락', s: 'news' }, '이틀 전(화) 공시 대신 뉴스');
+    const r2 = workspace();
+    await pipeline(r2, { ...base, dartRows: rows(['20261014000400', '주요사항보고서(회사합병결정)']) });
+    const tag = read(r2, 'disclosures.json')['005930'].items[0].tag;
+    assert.deepEqual(read(r2, 'moves.json')['005930'][0], { d: '20261015', p: -4.2, r: `[${tag}] 주요사항보고서(회사합병결정)`, s: 'disc' }, '앞 평일(수) 공시는 그대로');
+    const r3 = workspace();
+    writeData(r3, 'moves.json', { '005930': [{ d: '20261015', p: -3, r: `[${tag}] 주요사항보고서(회사합병결정)`, s: 'disc' }] });
+    await pipeline(r3, { ...base, dartRows: rows(['20261013000400', '주요사항보고서(회사합병결정)']) });
+    assert.deepEqual(read(r3, 'moves.json')['005930'][0], { d: '20261015', p: -4.2, r: '삼성전자, 반도체 업황 우려에 급락', s: 'news' }, '예전에 남긴 이틀 전 공시 이유 → 뉴스로');
+    const r4 = workspace();
+    await pipeline(r4, { ...base, dartRows: rows(['20261015000500', '[첨부추가]주요사항보고서(회사합병결정)'], ['20261015000400', '주요사항보고서(회사합병결정)']) });
+    assert.deepEqual(read(r4, 'moves.json')['005930'][0], { d: '20261015', p: -4.2, r: `[${tag}] 주요사항보고서(회사합병결정)`, s: 'disc' }, '[첨부추가]보다 원래 공시');
+  });
+  // 화면 '왜 움직였나'도 같은 날 [첨부추가]보다 원래 공시
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const why = appJs.slice(appJs.indexOf('function keyDiscToday('), appJs.indexOf('function tileHtml('));
+  const kstYmd = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const today = kstYmd(Date.now());
+  const ctx = { state: { analysis: {}, news: {}, disc: {} }, kstYmd };
+  const f = vm.runInNewContext(`${block}\n${why}; ({ whyOf })`, ctx);
+  ctx.state.disc.A = { items: [{ key: true, date: today, tag: 'M&A', title: '[첨부추가]주요사항보고서(회사합병결정)' }, { key: true, date: today, tag: 'M&A', title: '주요사항보고서(회사합병결정)' }] };
+  ctx.state.news.A = { items: [] };
+  assert.equal(f.whyOf({ code: 'A', name: '가나', market: 'KR', ok: true, changePct: -3.1, asOf: new Date().toISOString() }).text, '[M&A] 주요사항보고서(회사합병결정)', '화면 — 원래 공시 먼저');
+});
 await test('이유 고르기(21차): 주가 전망·기술적 분석 글(지지선·저항선·과매도·RSI·기술적 분석·횡보·…할 수 있을까?·…지속될까?)은 맨 뒤 — 그것뿐이면 그것 · 봇과 화면 같음', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');

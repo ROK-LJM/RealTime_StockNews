@@ -349,6 +349,14 @@ const MUTANTS = [
   ["[지수 핵심 폭] 개장 전 분석도 맞춤", A, " || kst(aiAt).slice(11, 16) < '09:00') return s;", ") return s;"],
   ["[지수 핵심 폭] 화면에 안 씀", A, "${esc(coreMag(ai.summary, mags, b.reason.aiAt))}", "${esc(ai.summary)}"],
   ["[지수 핵심 폭] 다른 지수 안 맞춤", A, "  const mags = briefs.map((x) => [x.name, x.changePct]);", "  const mags = briefs.slice(0, 1).map((x) => [x.name, x.changePct]);"],
+  // ---------- 111차 — 지난 공시는 앞 평일까지·[첨부추가] ----------
+  ["[기록] 지난 공시 3일 안 다 씀", F, "x.date >= discFrom", "x.date >= dayStart(3)"],
+  ["[기록] 지난 공시 창 — 오늘 것만", F, "const discFrom = prevWeekday(day);", "const discFrom = day;"],
+  ["[기록] 예전 공시 이유 창 안 봄", F, " || (oldItemD && oldItemD.date < discFrom)", ""],
+  ["[앞 평일] 주말 안 건너뜀", U, "if (w !== 0 && w !== 6) return", "return"],
+  ["[앞 평일] 일요일만 건너뜀", U, "if (w !== 0 && w !== 6) return", "if (w !== 0) return"],
+  ["[정정 공시] 첨부추가 정정 아님(봇)", D, "|첨부정정|첨부추가)", "|첨부정정)"],
+  ["[정정 공시] 첨부추가 정정 아님(화면)", A, "|첨부정정|첨부추가)", "|첨부정정)"],
   // ---------- 110차 — 영어 방향 낱말 ----------
   ["[영어 방향] retreats 놓침", S, "'retreat', 'retreats', 'retreated', ", ""],
   ["[영어 방향] dips 놓침", S, "'dips', 'dipped', ", ""],

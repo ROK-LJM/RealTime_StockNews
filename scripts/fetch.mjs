@@ -19,7 +19,7 @@ import {
   aiStatus, aiGate, aiRoom, noteAiSkipped, aiModels, setAiBudget, resetState, STOCK_ANALYSIS_THRESHOLD, pickReasonNews, strongNews, weakTitle, tagSentiment, krBaseName,
 } from './sources.mjs';
 import { startBudget, toStored, totalUsed, capacity, inSession, isKrSession, nextAllowanceAt, closedCheckDay, usExtWindow, usAfterPostSameDay, krHours } from './aibudget.mjs';
-import { validateWatchlist, writeJsonAtomic, analysisSig, sigMove, nearSig, newsOnlySig, manifestOf } from './util.mjs';
+import { validateWatchlist, writeJsonAtomic, analysisSig, sigMove, nearSig, newsOnlySig, manifestOf, prevWeekday } from './util.mjs';
 import { dartEnabled, resetDart, dartHalted, ensureCorpTable, getDisclosures, MINOR_DISC_RE, discDir } from './dart.mjs';
 import { calendarDue, buildCalendar } from './calendar.mjs';
 
@@ -544,7 +544,10 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
           const a = an[it.code];
           const names = [q.name, krBaseName(q.name, q.code), ...(q.market === 'US' ? [q.code] : [])]; // 우선주는 기사 속 보통주 이름으로도 방향을 본다 · 미국은 티커도(47차)
           // 그날 움직임과 방향이 반대인 공시(내린 날의 공급계약 체결·자기주식 취득, 오른 날의 유상증자 등)는 이유가 아니다(30차)
-          const discs = (disclosures[it.code]?.items || []).filter((x) => x && x.key && x.title && x.date <= day && x.date >= dayStart(3) && discDir(x.title) !== -Math.sign(q.changePct));
+          // 지난 공시는 앞 평일 것까지만(111차 — 장 마감 뒤에 낸 공시가 다음 거래일을 움직인다 · 월요일엔 금요일까지). 예전엔 3일 안이면 다 써서
+          // 11/23 한화솔루션 합병 결정 공시가 11/23 -3.09%·11/24 +6.22%·11/25 -3.35%(코스피 -6.34%보다 덜 내림) 세 날의 이유였다
+          const discFrom = prevWeekday(day);
+          const discs = (disclosures[it.code]?.items || []).filter((x) => x && x.key && x.title && x.date <= day && x.date >= discFrom && discDir(x.title) !== -Math.sign(q.changePct));
           const d = discs.find((x) => !MINOR_DISC_RE.test(x.title)), dMinor = d ? null : discs[0] || null;
           const n = pickReasonNews((news[it.code]?.items || []).filter((x) => x && Number.isFinite(x.pubMs) && ymdIn(x.pubMs, tz) >= dayStart(1)),
             q.changePct, day, (ms) => ymdIn(ms, tz), names);
@@ -568,8 +571,9 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
           const oldNewsOk = old && old.s === 'news' && !!pickReasonNews([oldItem], q.changePct, day, (ms) => ymdIn(ms, tz), names)
             && !(mk && !strongNews(oldItem, q.changePct, names)) // 시장 흐름 안이면 방향을 말하는 기사만 지킨다(32차)
             && !(mkB && weakTitle(oldItem.title)); // 같은 방향으로 더 움직였으면 나열·전망 글·물음 제목은 안 지킨다(99차)
-          // 예전에 남긴 공시 이유도 지금 규칙으로 — 방향이 반대인 공시면 지킬 이유가 아니다(30차)
-          const oldDiscOk = !(old && old.s === 'disc' && discDir(String(old.r ?? '').replace(/^\[[^\]]*\]\s*/, '')) === -Math.sign(q.changePct));
+          // 예전에 남긴 공시 이유도 지금 규칙으로 — 방향이 반대인 공시면 지킬 이유가 아니다(30차) · 앞 평일보다 오래된 공시도(111차 — 받은 공시 목록에서 찾을 때만)
+          const oldItemD = old && old.s === 'disc' ? (disclosures[it.code]?.items || []).find((x) => x && x.title && cut(`[${x.tag || '공시'}] ${x.title}`) === old.r) : null;
+          const oldDiscOk = !(old && old.s === 'disc' && (discDir(String(old.r ?? '').replace(/^\[[^\]]*\]\s*/, '')) === -Math.sign(q.changePct) || (oldItemD && oldItemD.date < discFrom)));
           const oldMktOk = !(old && old.s === 'mkt' && !mk); // 시장 흐름 이유는 지금도 시장 흐름 안일 때만(32차 — 시장보다 더 움직이면 그 폭의 새 이유로, 99차)
           const oldRank = old && oldDiscOk && oldMktOk && !(old.s === 'news' && !oldNewsOk) ? rankOf(old) : 0;
           const keep = old && oldRank > rankOf(why);
