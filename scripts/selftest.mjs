@@ -1124,18 +1124,25 @@ await test('화면 지연 경고(app.js): 장중 45분 · 개장 30분 뒤 · �
   const mixed = [...q('OPEN', 50, KR_NOON), ...q('CLOSE', 5, KR_NOON)];
   assert.equal(s('KR', mixed, null, KR_NOON), '', '가장 최근 시세 기준');
 });
-await test('개장 직후 집중 갱신 계획(burst.mjs): 평일 08:54~09:10만 · 첫 눈금 09:00:10까지 기다림 · 매분 10초 · 끝 눈금 09:10:10 · 주말·휴장(국내 시세가 개장 전·장중 아님·오늘 휴장 기록)·국내 시세 없음이면 끝 · 워크플로가 되풀이 실행', async () => {
+await test('아침 집중 갱신 계획(burst.mjs, 121차): 평일 08:00~10:00 · 매분 10초 눈금 · 다음 정규 회차(5분 눈금) 직전까지 · 09:00:10~09:10:10 개장 순간은 이어서 · 주말·휴장(국내 시세가 개장 전·장중 아님·오늘 휴장 기록)·국내 시세 없음이면 끝 · 워크플로가 되풀이 실행', async () => {
   const at = (hms, d = '2026-11-05') => T(`${d}T${hms}+09:00`);
   const q = (status = 'PREOPEN', extra = {}) => ({ quotes: [{ code: '005930', market: 'KR', ok: true, marketStatus: status }, { code: 'AAPL', market: 'US', ok: true, marketStatus: 'CLOSE' }], ...extra });
   const plan = burst.burstPlan;
-  assert.deepEqual(plan(at('08:55:30'), q()), { at: at('09:00:10') }, '08:55 회차는 첫 눈금까지 기다림');
-  assert.deepEqual(plan(at('08:53:59'), q()), { stop: '창 밖' }, '08:54 전');
-  assert.deepEqual(plan(at('08:54:00'), q()), { at: at('09:00:10') });
+  assert.deepEqual(plan(at('07:59:59'), q()), { stop: '창 밖' }, '08:00 전');
+  assert.deepEqual(plan(at('08:01:30'), q()), { at: at('08:02:10') }, '08:00 회차 — 본 작업 뒤 다음 눈금(넥스트레이드 프리마켓)');
+  assert.deepEqual(plan(at('08:04:05'), q()), { at: at('08:04:10') }, '회차 끝 전 눈금');
+  assert.deepEqual(plan(at('08:04:20'), q()), { stop: '다음 회차' }, '08:05:10은 다음 정규 회차와 겹침');
+  assert.deepEqual(plan(at('08:55:30'), q()), { at: at('08:56:10') }, '08:55 회차');
+  assert.deepEqual(plan(at('08:59:30'), q()), { at: at('09:00:10') }, '09:00:10 첫 눈금은 5분 눈금이어도 받음(개장 순간)');
   assert.deepEqual(plan(at('09:00:10'), q('OPEN')), { at: at('09:00:10') }, '눈금 그 시각이면 바로');
   assert.deepEqual(plan(at('09:00:25'), q('OPEN')), { at: at('09:01:10') }, '다음 눈금');
-  assert.deepEqual(plan(at('09:10:05'), q('OPEN')), { at: at('09:10:10') }, '끝 눈금');
-  assert.deepEqual(plan(at('09:10:20'), q('OPEN')), { stop: '창 끝' });
-  assert.deepEqual(plan(at('09:11:00'), q('OPEN')), { stop: '창 밖' });
+  assert.deepEqual(plan(at('09:04:20'), q('OPEN')), { at: at('09:05:10') }, '개장 순간은 5분 눈금에도 이어서');
+  assert.deepEqual(plan(at('09:10:05'), q('OPEN')), { at: at('09:10:10') }, '개장 순간 끝 눈금');
+  assert.deepEqual(plan(at('09:10:20'), q('OPEN')), { at: at('09:11:10') }, '그 뒤는 회차마다');
+  assert.deepEqual(plan(at('09:14:20'), q('OPEN')), { stop: '다음 회차' });
+  assert.deepEqual(plan(at('09:58:30'), q('OPEN')), { at: at('09:59:10') });
+  assert.deepEqual(plan(at('09:59:20'), q('OPEN')), { stop: '창 끝' }, '10:00 넘는 눈금');
+  assert.deepEqual(plan(at('10:00:30'), q('OPEN')), { stop: '창 밖' });
   assert.deepEqual(plan(at('08:56:00', '2026-11-07'), q()), { stop: '주말' }, '토요일');
   assert.deepEqual(plan(at('08:56:00'), q('CLOSE')), { stop: '휴장' }, '휴장일 — 국내 시세가 마감');
   assert.deepEqual(plan(at('09:03:00'), q('OPEN', { closed: { KR: '2026-11-05' } })), { stop: '휴장' }, '오늘 휴장 기록');
@@ -1145,7 +1152,8 @@ await test('개장 직후 집중 갱신 계획(burst.mjs): 평일 08:54~09:10만
   // 워크플로 — 마지막 단계가 0으로 끝나는 동안 되풀이(커밋·푸시), 회차 시간 제한은 08:55 회차의 집중 갱신(~09:10)보다 길게
   const yml = fs.readFileSync(new URL('../.github/workflows/update.yml', import.meta.url), 'utf8');
   assert.match(yml, /node scripts\/burst\.mjs \|\| break/, '되풀이 실행');
-  assert.ok(+(yml.match(/^ {4}timeout-minutes: (\d+)/m) || [])[1] >= 20, '회차 시간 제한');
+  assert.ok(+(yml.match(/^ {4}timeout-minutes: (\d+)/m) || [])[1] >= 28, '회차 시간 제한 — 08:55 회차(개장 순간을 이어 09:14:10까지)보다 길게');
+  assert.ok(+(yml.match(/for n in \$\(seq 1 (\d+)\)/) || [])[1] >= 20, '되풀이 횟수 — 08:56:10~09:14:10 19번');
 });
 await test('개장 직후 집중 갱신(burst.mjs): 국내 시세·코스피·코스닥만 새 값 · 해외·휴장 기록·상장 시장·AI 끔·내 별칭은 그대로 · 받기 실패한 종목·지수는 직전 값(야후 지연 값으로 대신 안 함) · 지수 브리핑·분위기도 같은 값 · 파일 지문 다시 계산', async () => {
   const root = workspace();
@@ -1198,6 +1206,23 @@ await test('개장 직후 집중 갱신(burst.mjs): 국내 시세·코스피·�
   now = T('2026-11-05T09:01:10+09:00');
   assert.equal(await burst.burstOnce({ root, clock: () => now, sleep: async () => {} }), '개장 전');
   assert.equal(raw(root, 'quotes.json'), before0, '쓰지 않음');
+  // 121차 — 9시 전 넥스트레이드 프리마켓 값이 바뀐 종목이 있으면 시세만 씀(지수·브리핑은 정규 회차가) · 그대로면 안 씀 · 밤사이 남은 애프터마켓 값은 바뀌어도 아님
+  const pm = (price, ratio, tAt, type = 'PRE_MARKET') => ({ overMarketPriceInfo: { tradingSessionType: type, overMarketStatus: 'OPEN', overPrice: price, fluctuationsRatio: ratio, accumulatedTradingVolumeRaw: '1200', localTradedAt: tAt } });
+  const mBefore = raw(root, 'market.json');
+  NET.routes = routes({ krStatus: 'PREOPEN', krPct: { '005930': 0, '000660': 0 }, krExtra: { '005930': pm('71,500', '2.14', '2026-11-05T08:20:00+09:00') } });
+  now = T('2026-11-05T08:21:05+09:00');
+  assert.equal(await burst.burstOnce({ root, clock: () => now, sleep: async () => {} }), 'written', '프리마켓 값이 바뀜');
+  assert.equal(read(root, 'quotes.json').quotes.find((x) => x.code === '005930').over.fluctuationsRatio, '2.14');
+  assert.equal(raw(root, 'market.json'), mBefore, '지수는 그대로(정규 회차가 — 35차 예상 지수)');
+  assert.equal(read(root, 'manifest.json').files['quotes.json'], sha10(fs.readFileSync(file(root, 'quotes.json'))), '지문도 고침');
+  const qPre = raw(root, 'quotes.json');
+  now = T('2026-11-05T08:22:05+09:00');
+  assert.equal(await burst.burstOnce({ root, clock: () => now, sleep: async () => {} }), '개장 전', '그대로면 안 씀');
+  assert.equal(raw(root, 'quotes.json'), qPre);
+  NET.routes = routes({ krStatus: 'PREOPEN', krPct: { '005930': 0, '000660': 0 }, krExtra: { '005930': pm('69,000', '-1.40', '2026-11-04T19:59:00+09:00', 'AFTER_MARKET') } });
+  now = T('2026-11-05T08:23:05+09:00');
+  assert.equal(await burst.burstOnce({ root, clock: () => now, sleep: async () => {} }), '개장 전', '밤사이 남은 애프터마켓 값은 바뀌어도 아님');
+  assert.equal(raw(root, 'quotes.json'), qPre);
   assert.deepEqual(['written', '개장 전', '창 끝', '휴장', '시세 받기 실패'].map(burst.exitCodeOf), [0, 0, 3, 3, 3], '새 값·첫 체결 전은 계속, 그 밖은 끝');
   // 국내 시세가 모두 실패하면 아무것도 쓰지 않고 끝
   const before = raw(root, 'quotes.json');
@@ -1397,20 +1422,20 @@ await test('화면 첫 체결 전·매매 정지·예상 지수(app.js): 장중�
   assert.match(f.boardNote('KR', [pend, kr({})], at('09:01')), /첫 체결 전/);
   assert.equal(f.boardNote('KR', [kr({})], at('09:01')), '');
 });
-await test('화면 개장 직후·개장 전(app.js): 평일 08:59~09:12엔 20초마다 확인(설정이 더 짧거나 수동이면 그대로) · 국내 시세가 모두 개장 전이면 안내 한 줄 · 이름표 "개장 전"', async () => {
+await test('화면 아침·개장 전(app.js): 평일 08:00~10:02엔 20초마다 확인(121차)(설정이 더 짧거나 수동이면 그대로) · 국내 시세가 모두 개장 전이면 안내 한 줄 · 이름표 "개장 전"', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
   const block = appJs.slice(appJs.indexOf('// ---------- 데이터 지연 경고'), appJs.indexOf('// ---------- 내 종목 한눈에'));
   const f = vm.runInNewContext(`${block}; ({ pollSec, preOpenNote, groupInfo })`, { lastTimeOf: () => '' });
   const at = (hm, d = '2026-11-05') => T(`${d}T${hm}:00+09:00`);
-  assert.equal(f.pollSec(60, at('08:58')), 60, '창 전');
-  assert.equal(f.pollSec(60, at('08:59')), 20, '창 시작');
+  assert.equal(f.pollSec(60, at('07:59')), 60, '창 전');
+  assert.equal(f.pollSec(60, at('08:00')), 20, '창 시작(121차 — 아침 08:00~10:00 1분 갱신)');
   assert.equal(f.pollSec(300, at('09:05')), 20, '5분 설정도 이때만 20초');
   assert.equal(f.pollSec(30, at('09:05')), 20);
   assert.equal(f.pollSec(0, at('09:05')), 0, '수동은 그대로');
   assert.equal(f.pollSec(0, at('08:00')), 0);
-  assert.equal(f.pollSec(60, at('09:11')), 20);
-  assert.equal(f.pollSec(60, at('09:12')), 60, '창 끝');
+  assert.equal(f.pollSec(60, at('10:01')), 20);
+  assert.equal(f.pollSec(60, at('10:02')), 60, '창 끝');
   assert.equal(f.pollSec(60, at('09:05', '2026-11-07')), 60, '토요일');
   const now = new Date().toISOString();
   const pre = [{ ok: true, marketStatus: 'PREOPEN', changePct: 0, asOf: now }, { ok: true, marketStatus: 'PREOPEN', changePct: 0, asOf: now }];
@@ -2769,12 +2794,14 @@ await test('늦게 여는 날(46차): 수능일 10:00~16:30·새해 첫 거래�
   assert.equal(src.calmExpected([pre], at('2026-11-19T09:50:00'))[0].changePct, 0, '수능일 09:55 전은 되돌림');
   assert.equal(src.calmExpected([pre], at('2026-11-19T09:55:00'))[0].changePct, -1.96, '09:55부터 예상');
   assert.equal(src.calmExpected([pre], at('2026-11-18T09:50:00'))[0].changePct, -1.96, '평일은 08:55부터');
-  // 집중 갱신 — 10시 개장이면 09:54~10:10
+  // 집중 갱신 — 10시 개장이면 09:00~11:00(개장 순간 10:00:10~10:10:10, 121차)
   const q = (s) => ({ quotes: [{ code: '005930', market: 'KR', ok: true, marketStatus: s }] });
   assert.deepEqual(burst.burstPlan(at('2026-11-19T08:55:30'), q('PREOPEN')), { stop: '창 밖' }, '수능일 08:55 회차는 끝');
-  assert.deepEqual(burst.burstPlan(at('2026-11-19T09:55:30'), q('PREOPEN')), { at: at('2026-11-19T10:00:10') }, '09:55 회차가 10:00:10까지 기다림');
-  assert.deepEqual(burst.burstPlan(at('2026-11-19T10:10:05'), q('OPEN')), { at: at('2026-11-19T10:10:10') }, '끝 눈금');
-  assert.deepEqual(burst.burstPlan(at('2026-11-19T10:10:20'), q('OPEN')), { stop: '창 끝' });
+  assert.deepEqual(burst.burstPlan(at('2026-11-19T09:55:30'), q('PREOPEN')), { at: at('2026-11-19T09:56:10') }, '09:55 회차');
+  assert.deepEqual(burst.burstPlan(at('2026-11-19T09:59:30'), q('PREOPEN')), { at: at('2026-11-19T10:00:10') }, '10:00:10 첫 눈금은 이어서');
+  assert.deepEqual(burst.burstPlan(at('2026-11-19T10:10:05'), q('OPEN')), { at: at('2026-11-19T10:10:10') }, '개장 순간 끝 눈금');
+  assert.deepEqual(burst.burstPlan(at('2026-11-19T10:14:20'), q('OPEN')), { stop: '다음 회차' });
+  assert.deepEqual(burst.burstPlan(at('2026-11-19T10:59:20'), q('OPEN')), { stop: '창 끝' }, '11:00 넘는 눈금');
   // 정규장 종가 — 수능일 16:30 시세(시간외 단일가 17시 전)는 closeFix · 놓쳤으면 야후 일봉 종가(시각은 그날 마감 16:30)
   const kr = (root) => read(root, 'quotes.json').quotes.find((x) => x.code === '005930');
   const r1 = workspace();
@@ -2798,13 +2825,13 @@ await test('늦게 여는 날(46차): 수능일 10:00~16:30·새해 첫 거래�
   assert.equal(f.staleOf('KR', old('PREOPEN', 600, at('2026-11-19T10:30:00')), null, at('2026-11-19T10:30:00')), '개장 후 갱신 없음');
   assert.equal(f.staleOf('KR', old('CLOSE', 600, at('2026-11-19T16:15:00')), null, at('2026-11-19T16:15:00')), '개장 후 갱신 없음', '수능일 16:30까지 정규장');
   assert.equal(f.staleOf('KR', old('PREOPEN', 600, at('2026-11-18T09:45:00')), null, at('2026-11-18T09:45:00')), '개장 후 갱신 없음', '평일은 9:30부터');
-  assert.equal(f.pollSec(60, at('2026-11-19T08:59:00')), 60, '수능일 9시 전후는 평소대로');
-  assert.equal(f.pollSec(60, at('2026-11-19T09:59:00')), 20, '수능일 09:59부터 20초');
-  assert.equal(f.pollSec(60, at('2026-11-19T10:11:00')), 20);
-  assert.equal(f.pollSec(60, at('2026-11-19T10:12:00')), 60);
+  assert.equal(f.pollSec(60, at('2026-11-19T08:59:00')), 60, '수능일 9시 전은 평소대로');
+  assert.equal(f.pollSec(60, at('2026-11-19T09:00:00')), 20, '수능일 09:00부터 20초');
+  assert.equal(f.pollSec(60, at('2026-11-19T11:01:00')), 20);
+  assert.equal(f.pollSec(60, at('2026-11-19T11:02:00')), 60);
   const preQ = [{ ok: true, market: 'KR', marketStatus: 'PREOPEN', changePct: 0 }];
-  assert.match(f.preOpenNote('KR', preQ, at('2026-11-19T09:40:00')), /^10시 개장 전.*10시 10분까지/);
-  assert.match(f.preOpenNote('KR', preQ, at('2026-11-18T08:40:00')), /^9시 개장 전.*9시 10분까지/);
+  assert.match(f.preOpenNote('KR', preQ, at('2026-11-19T09:40:00')), /^10시 개장 전.*11시까지는 1분마다/);
+  assert.match(f.preOpenNote('KR', preQ, at('2026-11-18T08:40:00')), /^9시 개장 전.*10시까지는 1분마다/);
   assert.match(f.boardNote('KR', preQ, at('2026-11-19T09:40:00')), /^10시 개장 전/, '한눈에 안내도 그날 시각');
   const pend = { ok: true, market: 'KR', marketStatus: 'OPEN', volume: null, changePct: 0 };
   assert.match(f.pendingNote('KR', [pend], at('2026-11-19T10:10:00')), /^1종목/, '수능일 10시~10시 30분');

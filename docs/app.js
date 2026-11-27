@@ -859,10 +859,10 @@ function marketClock(timeZone, ms) {
 // 국내 정규장 시간이 평소(09:00~15:30)와 다른 날 — scripts/aibudget.mjs의 KRX_LATE와 같게(자체 테스트가 비교). 수능일 10:00~16:30 · 새해 첫 거래일 10시 개장(46차)
 const KRX_LATE = { '2026-11-19': [10 * 60, 16 * 60 + 30], '2027-01-04': [10 * 60, 15 * 60 + 30] };
 const krHours = (ms) => KRX_LATE[marketClock('Asia/Seoul', ms).day] || [9 * 60, 15 * 60 + 30];
-// 개장 직후(평일 08:59~09:12 — 10시에 여는 날은 09:59~10:12)엔 봇이 1분마다 국내 시세를 올린다(scripts/burst.mjs) — 그동안은 20초마다 확인해 올라온 값을 1분 안에 보이게.
+// 아침(평일 08:00~10:02 — 10시에 여는 날은 09:00~11:02)엔 봇이 1분마다 국내 시세를 올린다(121차 — scripts/burst.mjs, 처음엔 개장 직후 08:59~09:12만) — 그동안은 20초마다 확인해 올라온 값을 1분 안에 보이게.
 // 설정이 더 짧으면 그대로, '수동'(0)은 0 그대로(자동으로 받지 않음)
 const BURST_SEC = 20;
-const burstWindow = (ms) => { const c = marketClock('Asia/Seoul', ms), late = krHours(ms)[0] - 9 * 60; return !c.weekend && c.min >= 8 * 60 + 59 + late && c.min < 9 * 60 + 12 + late; };
+const burstWindow = (ms) => { const c = marketClock('Asia/Seoul', ms), late = krHours(ms)[0] - 9 * 60; return !c.weekend && c.min >= 8 * 60 + late && c.min < 10 * 60 + 2 + late; };
 const pollSec = (sec, ms = Date.now()) => (burstWindow(ms) ? Math.min(sec, BURST_SEC) : sec);
 function fmtAge(ms) {
   const m = Math.floor(ms / 60e3);
@@ -881,7 +881,7 @@ function staleOf(market, valid, closed, ms = Date.now()) {
   return regular && closed?.[market] !== c.day ? '개장 후 갱신 없음' : '';
 }
 // 개장 전(국내 08:00~09:00 첫 체결 전) — 네이버 시세가 모두 '개장 전'·어제 종가(0%)라 칸이 모두 무채색이다. 비어 보이지 않게 까닭을 한 줄로
-const preOpenText = (h) => `${h}시 개장 전이라 모두 어제 종가(0%)예요 — 첫 체결 뒤 1분쯤 지나 바뀌고, ${h}시 10분까지는 1분마다 새로 받아요.`; // 수능일처럼 늦게 여는 날은 10시(46차)
+const preOpenText = (h) => `${h}시 개장 전이라 모두 어제 종가(0%)예요 — 첫 체결 뒤 1분쯤 지나 바뀌고, ${h + 1}시까지는 1분마다 새로 받아요.`; // 수능일처럼 늦게 여는 날은 10시(46차) · 아침 1분 갱신(121차)
 const preOpenNote = (key, valid, ms = Date.now()) => (key === 'KR' && valid.length && valid.every((q) => q.marketStatus === 'PREOPEN') ? preOpenText(Math.floor(krHours(ms)[0] / 60)) : '');
 // 한국시간 'HH:MM' — 시각을 모르면 ''
 function hmKst(iso) {
