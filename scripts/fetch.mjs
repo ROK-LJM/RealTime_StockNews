@@ -483,7 +483,8 @@ export async function run({ root = ROOT, dataDir = path.join(root, 'docs', 'data
   // 6-2) 큰 소식(themes.json, 78차 — 화면 '큰 소식'): 약 3시간마다 내 종목들의 최근 이틀 기사 제목을 AI가 사건별로 묶는다(sources.mjs aiThemes).
   //      종목 분석이 먼저 — 무료 한도 배분 몫이 2번 넘게 남을 때만(리셋 전 1시간은 늘). 관련 종목은 AI가 아니라 고른 기사가 걸린 종목(themeOut).
   //      실패하면 직전 것 그대로(화면은 36시간 넘은 것을 숨김) · 자체 테스트는 기본으로 끔(themes: false — 종목 분석 호출 수 검사가 흔들리지 않게)
-  //      평일 아침 07:00~08:59엔 12시간 넘었으면 시간 배분보다 1번 앞당겨(88차 — 밤사이 미국 소식을 국내 장 열기 전에)
+  //      평일 아침 07:00~08:59엔 그날 06:00(미국 마감) 전에 묶은 것이면 시간 배분보다 1번 앞당겨(88차 — 밤사이 미국 소식을 국내 장 열기 전에 · 109차) —
+  //      애프터마켓 진단이 먼저 앞당겨 썼어도 1번 더(116차, THEME_EARLY_AHEAD 3)
   if (themes) try {
     const early = themeMorning(now) ? aiRoom(THEME_EARLY_AHEAD) : 0;
     if (themeDue(readJson('themes.json'), now, aiRoom(), early)) {

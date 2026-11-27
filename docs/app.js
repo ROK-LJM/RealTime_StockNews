@@ -628,6 +628,7 @@ const PRICE_ONLY = [
   /주가,?\s*\d{1,2}월\s*\d{1,2}일\s*(?:장중|장\s?마감|오전|오후)?\s*[\d.]+%\s*(?:상승|하락)\s*동일업종/, // 'LS ELECTRIC 주가, 11월 5일 장중 11.94% 하락 동일업종 동반 약세'
   /\bstock\s+(?:(?:rises|falls)\s+\w+day,\s+(?:still\s+)?(?:out|under)performs\s+market|(?:out|under)performs\s+(?:competitors|market|\w+day\s+when\s+compared\s+to\s+competitors)(?:\s+on\s+(?:a\s+)?(?:strong|weak)\s+trading\s+day|\s+despite\s+(?:losses\s+on\s+the\s+day|daily\s+gains))?)$/i, // MarketWatch 자동 기사 'Plug Power Inc. stock outperforms competitors on strong trading day'·'… stock falls Tuesday, underperforms market'(45차)
   /\b(?:moved|opened|closed)\s+(?:up|down)\s+by\s+[\d.]+%\s+on\s+[a-z]{3,9}\.?\s+\d{1,2}\b/i, // 'Microsoft Corp Stock (MSFT) Moved Up by 3.24% on Nov 9: Facts Behind the Movement'(45차)
+  /^(?!Why\b)(?:[A-Za-z][\w.&'’-]*\s){1,4}(?:(?:Stock|Shares)\s(?:\((?:[A-Z]+:\s?)?[A-Z]{1,5}(?:\.[A-Z]{1,2})?\)\s)?|Stock\sNews\s\([A-Z][a-z]{2,4}\.?\s\d{1,2},\s\d{4}\):\s[A-Z]{1,5}(?:\.[A-Z]{1,2})?\s)(?:(?:Rise|Fall|Gain|Drop|Climb|Slip|Jump|Sink|Slide|Dip|Rebound|Surge|Soar|Tumble|Plunge|Decline|Advance|Retreat)s?|Edges?\s(?:Up|Down|Higher|Lower))\s[\d.]+%\sto\s\$[\d,.]+(?:\s\([A-Z][a-z]{2,4}\.?\s\d{1,2}\)|\son\s[A-Z][a-z]{2,4}\.?\s\d{1,2})?$/, // 'Tesla Stock (TSLA) Falls 0.2% to $384.68 (Nov 24)'(115차 — 가격까지에 날짜만 붙은 자동 기사, 봇과 같음)
   /^\[마감분석\](?![^…]*[가-힣]에\s*(?:약세|강세|상승|하락|급등|급락|반등|반락))[^…]*?(?:마감|마쳐|종료|[\d.]+%대?\s*(?:상승|하락|급등|급락|강세|약세|내린|오른))/, // '[마감분석] 심텍 6%대 급등 9만9900원 마감'·'… 11%대 급락하며 41만5000원에 거래 마감'(49차 — 자동 기사)·'[마감분석] 현대차 500원 내린 26만6500원 마감'·'… 약보합 마감 속 공시 일정 주목'(99차 — '…' 앞에 마감 말이 있으면, 10/20~11/20 재경일보 자동 마감 기사 57건 모두 · '…관세 우려에 약세 마감'처럼 '…에 + 움직임' 원인이 붙으면 아님)
   /^\[특징주\]\s*[^\s,…·]+,?\s장중\s*(?:(?:강세|약세)…\s*)?[\d.]+%대?\s*(?:상승|하락|강세|약세|급등|급락)세?(?:하며|\s*(?:보이며|나타내며))?(?:…\s*|\s+)[\d만,.]+원(?:선|대)(?:로|으로)?(?:\s*(?:기록|거래|돌파|회복|하회|머물러|진입|밀려|붕괴|위협|근접|안착))?$/, // '[특징주] 삼성전기, 장중 4%대 상승…87만원선 돌파'(49차)
   /^\d{1,2}일\s*[^\s,…·]+(?:\s[^\s,…·]+)?\s*(?:장중\s*)?[\d,]+원\s*[\d.]+%\s*(?:상승|하락)(?=[,…\s]|$)/, // '4일 심텍 121,600원 8.28% 상승 동일업종 등락과 반대 방향'(49차)
@@ -651,9 +652,10 @@ const coreTitle = (t) => String(t ?? '').trim().replace(/\s:\s\S{1,10}$/, '');
 // 시세 말 밖의 낱말(원인·업종·사업 — '수주'·'관세'·'보통주보다')이 하나라도 있거나 앞 낱말이 '…에'(기대감에)·한글 두 낱말이면 아님 — 10/20~11/20 제목 9,572건 중 13건(모두 자동 시세 기사) ·
 // 이 규칙에 완전히 들어가는 49차 틀('…거래대금 1946억원…16만1400원으로 4.55% 하락'·'…12.69% 급락…31만3000원'·99차 '…12.99% 급락…장중 저가 76만8000원')과 '거래량 1342만주…2만7050원서 3.39% 약세' 틀은 뺐다
 const PW_NUM = /^[+-]?\d[\d,.]*(?:만|억|조)?[\d,.]*(?:원|%p?|만?주)?(?:선|대|권)?(?:에서|서|으로|로|에|까지|도)?[↑↓]?$/;
-const PW_WORD = /^(?:주가[가는은]?|장중|종가|시가|고가|저가|고가권|저가권|고저|차|대비|거래량|거래대금|변동폭|공방|찍고|딛고|숨|고르기|흐름|상승|하락|급등|급락|강세|약세|보합|강보합|약보합|반등|올라|내려|마감|상승세|하락세|급등세|급락세|오름세|내림세|보합세|보합권|약보합세|강보합세|기록|기록하며|유지|거래|등락|지속|보이며|돌파|붕괴|이탈|전일|소폭|원|원선|원대|원에|원에서|원서|VI|발동|무너져)$/;
+const PW_WORD = /^(?:주가[가는은]?|장중|종가|시가|고가|저가|고가권|저가권|고저|차|대비|거래량|거래대금|변동폭|공방|찍고|딛고|숨|고르기|흐름|상승|하락|급등|급락|강세|약세|보합|강보합|약보합|반등|올라|내려|오른|내린|상승한|하락한|급등한|급락한|마감|상승세|하락세|급등세|급락세|오름세|내림세|보합세|보합권|약보합세|강보합세|기록|기록하며|유지|거래|등락|지속|보이며|돌파|붕괴|이탈|전일|소폭|원|원선|원대|원에|원에서|원서|VI|발동|무너져)$/;
 // 105차 — 앞 '[특징주]' 꼬리표와 '뚜렷한 공시 없이'(103차)는 떼고 보고, 기록·유지·거래·등락·돌파·붕괴·오름세·보합권·'원선' 같은 시세 말도 받는다(봇과 같음)
 // 107차 — '[속보]' 꼬리표도 떼고 VI·발동·무너져·'…원선도'도 시세 말(봇과 같음)
+// 115차 — '하락한·내린'처럼 꾸미는 꼴도 시세 말('삼성전기, 12% 하락한 75만 5,000원에 마감' — 봇과 같음)
 const priceWordsOnly = (t) => {
   const w = coreTitle(t).replace(/^\[(?:특징주|속보)\]\s*/, '').replace(/(?:뚜렷한|특별한|별다른)\s*(?:공시|재료|이유|호재|악재|소식)\s*없이/g, ' ').replace(/[…·]|,(?!\d)/g, ' ').split(/\s+/).filter(Boolean);
   return [1, 2].some((n) => w.length >= n + 2 && !/[가-힣]에도?$/.test(w[0]) && (n === 1 || w.slice(0, 2).every((x) => /^[A-Za-z][A-Za-z0-9&.-]*$/.test(x)))
@@ -1095,14 +1097,26 @@ function extWhyOf(q) {
   const it = w.items[q.code];
   return it && it.h && Math.sign(Number(it.pct) || 0) === Math.sign(x.changePct || 0) ? { text: String(it.h), at: Number(it.at) } : null;
 }
-// 시간외 움직임의 이유 — AI 애프터마켓 진단 → 정규장 마감 뒤 기사 중 시간외 방향과 같은 방향 기사(시세 안내·원인 아닌 기사 빼고, pickReasonNews) → 없음. 미국 종목만
+// 정규장 움직임을 전한 마감 뒤 기사(115차) — 'Nvidia Stock (NVDA) Falls 5.9% as Chip Stocks Slide (Nov 24)'처럼 제목의 등락 숫자가 정규장 등락과 같고(0.15%p·5% 안,
+// 'N%대'는 정수 부분) 시간외 등락과는 다르면 시간외 움직임의 이유가 아니다 — 11/25 엔비디아 애프터 -2.07%·스페이스X 프리 -2.15%('Falls 5.7% on Reports of a Tesla Merger (Nov 24)')의
+// 이유로 떴다(10/27~11/25 시간외 줄에 이런 기사 11가지). 숫자가 시간외 등락과도 같거나 'after hours'·'premarket'·'시간외'처럼 시간외를 말하는 기사는 그대로
+const EXT_WORD_RE = /after[\s-]?hours|pre[\s-]?market|overnight|extended[\s-]trading|late\s+trading|시간외|애프터마켓|프리마켓/i;
+const MOVE_PCT_RE = /\b(?:ris(?:e|es|ing)|rose|fall(?:s|ing)?|fell|jump(?:s|ed)?|drop(?:s|ped)?|gain(?:s|ed)?|slid(?:e|es|ing)?|sink(?:s|ing)?|sank|surg(?:e|es|ed)|climb(?:s|ed)?|tumbl(?:e|es|ed)|plung(?:e|es|ed)|soar(?:s|ed)?|slip(?:s|ped)?|dip(?:s|ped)?|rebound(?:s|ed)?|declin(?:e|es|ed)|slump(?:s|ed)?|retreat(?:s|ed)?|up|down)\s+(?:by\s+|over\s+|nearly\s+|almost\s+|more\s+than\s+)?(\d+(?:\.\d+)?)%|(\d+(?:\.\d+)?)%\s?(대)?\s?(?:상승|하락|급등|급락|강세|약세|올라|오른|올랐|내려|내린|내렸|떨어|뛰었|빠졌)/i;
+function regularMove(title, reg, ext) {
+  const t = String(title ?? ''), m = t.match(MOVE_PCT_RE);
+  if (!m || EXT_WORD_RE.test(t) || !Number.isFinite(reg) || !Number.isFinite(ext)) return false;
+  const v = +(m[1] ?? m[2]), dae = !!m[3];
+  const near = (p) => (dae ? Math.floor(Math.abs(p)) === v : Math.abs(v - Math.abs(p)) <= Math.max(0.15, Math.abs(p) * 0.05));
+  return near(reg) && !near(ext);
+}
+// 시간외 움직임의 이유 — AI 애프터마켓 진단 → 정규장 마감 뒤 기사 중 시간외 방향과 같은 방향 기사(시세 안내·원인 아닌 기사·정규장 움직임 기사(115차) 빼고, pickReasonNews) → 없음. 미국 종목만
 function extReason(q) {
   const a = extWhyOf(q);
   if (a) return { src: 'AI', label: 'AI 애프터마켓 진단(정규장 마감 뒤 기사로)', text: toneTail(a.text, extOf(q).changePct), at: a.at }; // 끝말은 지금 시간외 등락에(89차)
   const x = marketOf(q) === 'US' ? extOf(q) : null, qt = Date.parse(q && q.asOf), s = Math.sign((x && x.changePct) || 0);
   if (!x || !s || !Number.isFinite(qt)) return null;
   const names = reasonNames(q);
-  const after = (state.news[q.code]?.items || []).filter((it) => it && it.title && Number.isFinite(it.pubMs) && it.pubMs >= qt && newsDir(it, names) === s);
+  const after = (state.news[q.code]?.items || []).filter((it) => it && it.title && Number.isFinite(it.pubMs) && it.pubMs >= qt && newsDir(it, names) === s && !regularMove(it.title, q.changePct, x.changePct));
   const n = pickReasonNews(after, x.changePct, '', (ms) => marketYmd(ms, 'US'), names);
   return n ? { src: '뉴스', label: '정규장 마감 뒤 기사', text: n.title, item: n } : null;
 }

@@ -1535,22 +1535,32 @@ const PRICE_ONLY_YES = ['효성중공업 주가, 장중 114,000원 내린 1,682,
   // 105차 — 이름 뺀 시세 말이 못 읽는 꼴(장 초반·뒤에 시세 아닌 말)은 [특징주] 틀이 읽음
   '[특징주] 삼성전기, 장 초반 8%대 하락', '[특징주] YG PLUS, 장 초반 14%대 급등', '[특징주] 삼성전기, 뚜렷한 공시 없이 장 초반 8%대 하락세', '[특징주] 삼성SDI, 장중 5%대 약세 보이며 51만3000원선 기록…거래량 평소 수준', '[특징주] 심텍, 장중 9%대 급락…10만4000원선 거래…거래량 평소 수준',
   // 107차 — '[속보]' 꼬리표·VI 발동·'…원선도 무너져'(11/25 삼성전기 -11%의 이유로 뜸)
-  '[속보] 삼성전기 VI 발동, 주가 10% 급락…80만원선도 무너져'];
+  '[속보] 삼성전기 VI 발동, 주가 10% 급락…80만원선도 무너져',
+  // 115차 — '하락한·내린'처럼 꾸미는 꼴(11/25 삼성전기 -12%의 이유로 뜸) · 가격까지에 날짜만 붙은 영어 자동 기사(실제)
+  '삼성전기, 12% 하락한 75만 5,000원에 마감', 'LG에너지솔루션, 2.67% 내린 29만 1500원에 마감',
+  'Tesla Stock (TSLA) Falls 0.2% to $384.68 (Nov 24)', 'Microsoft Stock (MSFT) Rises 0.7% to $496.13 (Nov 24)', 'SpaceX Stock (SPCX) Falls 0.6% to $139.11 (Nov 13)',
+  'Microsoft Stock News (Oct 27, 2026): MSFT Rises 1.5% to $532.60', 'Super Micro Computer Shares Fall 6.85% to $25.025 on Nov. 16'];
 const PRICE_ONLY_NO = ['영업이익 추정치 웃돈 파두…주가는 장중 6.75% 하락', '삼성전기 주가 3.08% 상승…엔비디아 기판 생산능력 확대에 공급 수혜 기대',
   '호실적에 자사주 소각까지…삼성E&A 15% 상승세 [특징주]', '[장중수급포착] 대덕전자, 기관 8일 연속 순매수행진... 주가 +4.24%',
   '[개장시황] 삼성전기 5.05% 급등…코스피 차익매물에 하락 출발', 'Why Super Micro Computer Stock Popped Today', '수주 기대감에 장중 3%대 상승',
   '대덕전자, 장중 2.51% 하락…iM증권은 이익 전망 상향', '9개국 이상 거점 둔 한화에어로스페이스…주가 89만9000원으로 상승', '[특징주] SK텔레콤, 뚜렷한 공시 없이 장중 소폭 하락세 : 기업주식정보', '두산에너빌리티 장중 1.57% 하락해 6만2500원…원전 수주 지연 영향',
   "[특징주] 현대차·기아, 트럼프 자동차 정책 후퇴 기대.. '강세'", 'LG전자 5.99% 하락…AI 데이터센터 냉각 수주 전환 주목', '4일 한화오션 수주 2조…주가 2.60% 올라',
   '[특징주] 씨에스윈드, 미국 베스타스와 797억원 공급계약', '효성중공업 177만원까지 밀려…전력기기 호황에도 13.62%↓', "[특징주] 美관세 완화 기대?…현대차·기아, 3%·5%대 각각 상승(종합)", '[마감분석] 반도체 수요 둔화 우려…대덕전자 급락',
-  '[마감분석] 반도체 수요 둔화 우려…대덕전자 급락 마감', '[마감분석] 현대차, 관세 우려에 약세 마감', '심텍, 호실적 뒤 차익 매물에 12.41% 급락', '대덕전자, 3분기 실적 호조에도 13.44% 급락', '실적 우려에 SK텔레콤, 장중 저가 7만원', 'LG전자 장중 저가 16만800원…실적 우려 반영', '한화오션 2조원 수주…주가 3% 상승', '기대감에 7만원선에서 공방', '수주 소식 5% 급등', 'LS ELECTRIC 장중 공방…약세 마감', '삼성전자우 9.59% 급락…보통주보다 큰 낙폭', '[특징주] 삼성전기, 엔비디아발 AI 반도체 훈풍에 10%대 급등', '[특징주] 현대차, GV90 계약 개시…주가 장중 2.03% 상승', '[속보] 삼성전자, 美 수출 규제에 5% 급락', "[특징주] 삼성전기 9% 급락…'S7' 줄줄이 하락세", "[특징주] 삼성전자·SK하이닉스, 엔비디아 등 하락.. 동반 '약세'", '[특징주] 삼성전기, 뚜렷한 공시 없이 장중 8%대 하락…AI 기판 수요 둔화 우려', '삼성전자 주가, 11월 9일 장중 5% 상승…엔비디아 호재', '[속보] 두산에너빌리티 주가 장초반 9%대 껑충…VI 발동에 4만7000원선 돌파'];
+  '[마감분석] 반도체 수요 둔화 우려…대덕전자 급락 마감', '[마감분석] 현대차, 관세 우려에 약세 마감', '심텍, 호실적 뒤 차익 매물에 12.41% 급락', '대덕전자, 3분기 실적 호조에도 13.44% 급락', '실적 우려에 SK텔레콤, 장중 저가 7만원', 'LG전자 장중 저가 16만800원…실적 우려 반영', '한화오션 2조원 수주…주가 3% 상승', '기대감에 7만원선에서 공방', '수주 소식 5% 급등', 'LS ELECTRIC 장중 공방…약세 마감', '삼성전자우 9.59% 급락…보통주보다 큰 낙폭', '[특징주] 삼성전기, 엔비디아발 AI 반도체 훈풍에 10%대 급등', '[특징주] 현대차, GV90 계약 개시…주가 장중 2.03% 상승', '[속보] 삼성전자, 美 수출 규제에 5% 급락', "[특징주] 삼성전기 9% 급락…'S7' 줄줄이 하락세", "[특징주] 삼성전자·SK하이닉스, 엔비디아 등 하락.. 동반 '약세'", '[특징주] 삼성전기, 뚜렷한 공시 없이 장중 8%대 하락…AI 기판 수요 둔화 우려', '삼성전자 주가, 11월 9일 장중 5% 상승…엔비디아 호재', '[속보] 두산에너빌리티 주가 장초반 9%대 껑충…VI 발동에 4만7000원선 돌파',
+  // 115차 — 원인이 섞인 꾸미는 꼴 · 가격 뒤에 원인이 이어지는 영어 기사(실제)
+  '[특징주]현대건설, 외국인 순매수에 7.29% 오른 8만9,700원 마감', '현대건설 3.58% 내린 9만1500원 마감 실적 예고 속 하락 : 기업주식정보',
+  'Nvidia NVDA Stock Falls 4.4% to $212.21 as AI Financing Fears Hit Chips', 'SpaceX Stock (SPCX) Falls 5.7% on Reports of a Tesla Merger (Nov 24)',
+  'SPCX Stock Rebounds 8.62% to $134.27 After Musk Eases Government Contract Fears', 'Why Is Tesla Stock Up Today? Shares Jump 13.5% to $392.50 on SpaceX Merger Talk, Market Rebound',
+  'Nvidia Stock Premarket: NVDA Edges Up To $217 After $3 Billion Meta Investment'];
 await test('시세 안내 기사: 날짜·가격만 있는 자동 기사·"주가 상승 중"·"장중 3%대 상승"은 이유에서 제외 · 이유가 붙은 제목은 유지 · 봇과 화면 판정이 같음', async () => {
   for (const t of PRICE_ONLY_YES) assert.equal(src.priceOnly(t), true, t);
   for (const t of PRICE_ONLY_NO) assert.equal(src.priceOnly(t), false, t);
+  assert.equal(src.priceOnly('Why Nvidia Stock Falls 5.2% to $180.10'), false, "'Why …' 글은 시세 아님(115차)");
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
   const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
   const f = vm.runInNewContext(`${block}; ({ priceOnly, pickReasonNews })`, {});
-  for (const t of [...PRICE_ONLY_YES, ...PRICE_ONLY_NO, '', '삼성전자 주가 하락 출발']) assert.equal(f.priceOnly(t), src.priceOnly(t), `화면·봇 같은 판정: ${t}`);
+  for (const t of [...PRICE_ONLY_YES, ...PRICE_ONLY_NO, '', '삼성전자 주가 하락 출발', 'Why Nvidia Stock Falls 5.2% to $180.10']) assert.equal(f.priceOnly(t), src.priceOnly(t), `화면·봇 같은 판정: ${t}`);
   const items = [{ title: PRICE_ONLY_YES[0] }, { title: '' }, { title: PRICE_ONLY_YES[4] }, { title: PRICE_ONLY_NO[0] }, { title: PRICE_ONLY_NO[1] }];
   const none = () => '';
   assert.equal(f.pickReasonNews(items, -2.5, '', none).title, PRICE_ONLY_NO[0], '시세 안내 기사를 건너뛴 가장 최근 기사(방향이 반대인 기사는 제외)');
@@ -2443,8 +2453,9 @@ await test('방향 낱말(36차): 휘청·무너·붕괴·밀려·껑충·뛰었
   assert.equal(pick('19만 원 무너진 삼성전자…증권가 저가 매수론', 5.32, ['삼성전자']), false, '무너진');
   assert.equal(pick('한화證 “현대차, 원화 강세·원자재 부담…목표가 49만원으로 하향”', 3.13, ['현대차']), false, '원화 강세는 종목 강세 아님 — 목표가 하향');
   // 내림·오름 낱말
-  for (const t of ['삼성전기, 80만원선까지 밀려', '코스피 5000선 붕괴에 가나 곤두박질', '가나 3% 내린 5만원', '가나 주가 주저앉아', '가나 5% 빠졌다']) { assert.equal(pick(t, 4, ['가나', '삼성전기']), false, '오른 날 제외: ' + t); assert.equal(pick(t, -4, ['가나', '삼성전기']), true, '내린 날 이유: ' + t); }
-  for (const t of ['[속보] 두산에너빌리티 주가 장초반 9%대 껑충…VI 발동', '가나 하루 만에 30% 뛰었다', '가나 3% 오른 5만원', '가나 불기둥']) { assert.equal(pick(t, -4, ['가나', '두산에너빌리티']), false, '내린 날 제외: ' + t); assert.equal(pick(t, 4, ['가나', '두산에너빌리티']), true, '오른 날 이유: ' + t); }
+  // '가나 3% 내린 5만원'만이면 시세 안내(115차 — 꾸미는 꼴도 시세 말)라 호재·악재 낱말 없는 말('…공시 앞두고')을 붙여 방향 낱말만으로 본다
+  for (const t of ['삼성전기, 80만원선까지 밀려', '코스피 5000선 붕괴에 가나 곤두박질', '가나 3% 내린 5만원…공시 앞두고', '가나 주가 주저앉아', '가나 5% 빠졌다']) { assert.equal(pick(t, 4, ['가나', '삼성전기']), false, '오른 날 제외: ' + t); assert.equal(pick(t, -4, ['가나', '삼성전기']), true, '내린 날 이유: ' + t); }
+  for (const t of ['[속보] 두산에너빌리티 주가 장초반 9%대 껑충…VI 발동', '가나 하루 만에 30% 뛰었다', '가나 3% 오른 5만원…공시 앞두고', '가나 불기둥']) { assert.equal(pick(t, -4, ['가나', '두산에너빌리티']), false, '내린 날 제외: ' + t); assert.equal(pick(t, 4, ['가나', '두산에너빌리티']), true, '오른 날 이유: ' + t); }
   // 낱말 경계 — 뜻이 다른 말
   assert.equal(pick('가나 주문 밀려들어 공장 풀가동', 4, ['가나']), true, '밀려들어는 내림 아님');
   assert.equal(pick('가나 오른쪽 날개 신규 생산', -4, ['가나']), true, '오른쪽은 오름 아님');
@@ -3778,7 +3789,7 @@ await test('큰 소식(78차, 봇): 내 종목들의 최근 48시간 기사(원�
   assert.equal(src.themeDue(null, m, 0, 1), true, '직전 것 없음');
   assert.equal(src.themeDue({ at: m + 60 * MIN }, m, 0, 1), true, '시계가 거꾸로');
   assert.equal(src.themeDue({ at: kst('2026-11-13T10:00:00') - 15 * 3600e3 }, kst('2026-11-13T10:00:00'), 0, 1), false, '아침이 아님');
-  assert.equal(src.THEME_EARLY_AHEAD, 1);
+  assert.equal(src.THEME_EARLY_AHEAD, src.EXT_AHEAD + 1, '애프터 진단 몫(2번)과 따로 1번(116차)');
   // 봇 — 뉴스 갱신이 아닌 회차(7분)라 넣어 둔 뉴스로, 3시간마다
   const themeCalls = () => NET.bodies.filter((b, i) => isGemini(NET.calls[i]) && b.includes("'큰 소식'")).length;
   const route = () => json(NET.bodies.at(-1).includes("'큰 소식'") ? { candidates: [{ content: { parts: [{ text: JSON.stringify(ok) }] } }] } : geminiOk);
@@ -3809,7 +3820,7 @@ await test('큰 소식(78차, 봇): 내 종목들의 최근 48시간 기사(원�
   await pipeline(r3, { gemini: route }, t0, { refreshAll: false });
   assert.equal(themeCalls(), 0, '꺼 두면 안 부름');
   assert.equal(fs.existsSync(path.join(r3, 'docs', 'data', 'themes.json')), false);
-  // 아침 큰 소식(88차) — 평일 07:05, 몫이 없어도 1번 앞당겨(마지막 큰 소식 15시간 전) · 이미 1번 앞당겼으면 안 부름
+  // 아침 큰 소식(88차) — 평일 07:05, 몫이 없어도 1번 앞당겨(마지막 큰 소식 15시간 전)
   const tm = T('2026-11-13T07:05:00+09:00');
   const nm = (title, h) => ({ title, pubMs: tm - h * 3600e3, link: 'https://news.example.com/' + encodeURIComponent(title), source: '테스트일보' });
   const seedMorning = (root, used) => {
@@ -3824,10 +3835,16 @@ await test('큰 소식(78차, 봇): 내 종목들의 최근 48시간 기사(원�
   await pipeline(r5, { gemini: route }, tm, { refreshAll: false, themes: true });
   assert.equal(themeCalls(), 1, '아침 — 몫이 없어도 1번 앞당겨 묶음');
   assert.equal(read(r5, 'themes.json').at, tm);
+  // 116차 — 애프터마켓 진단이 먼저 2번 앞당겨 썼어도(11/26 아침 06:35·07:45) 1번 더 · 이미 3번 앞당겼으면 안 부름
   const r6 = workspace();
-  seedMorning(r6, 1);
+  seedMorning(r6, 2);
   await pipeline(r6, { gemini: route }, tm, { refreshAll: false, themes: true });
-  assert.equal(themeCalls(), 0, '이미 1번 앞당겼으면 안 부름');
+  assert.equal(themeCalls(), 1, '애프터 진단이 2번 앞당겼어도 1번 더 묶음');
+  assert.equal(read(r6, 'themes.json').at, tm);
+  const r7 = workspace();
+  seedMorning(r7, 3);
+  await pipeline(r7, { gemini: route }, tm, { refreshAll: false, themes: true });
+  assert.equal(themeCalls(), 0, '이미 3번 앞당겼으면 안 부름');
 });
 await test('큰 소식(87차): 지시문 — 같은 사건이면 다른 내 종목 기사도 모두 refs에(관련 종목은 고른 기사로 정해짐)·여러 종목 소식부터 · 저장은 관련 종목이 많은 소식부터(같으면 AI 순서)', async () => {
   src.resetState(); src.setAiBudget(null);
@@ -4032,6 +4049,38 @@ await test('애프터마켓 이유(85차, 봇 회차): 애프터마켓 ±2% 넘�
   seed(r5, [BEAT]); seedStatus(r5, capNow + 2);
   await go(r5, t0);
   assert.equal(extCalls(), 0, '이미 2번 앞당겼으면 안 부름');
+});
+await test('시간외 줄 이유(115차, 화면): 정규장 등락 숫자를 전한 마감 뒤 기사(엔비디아 정규장 -5.86% · 애프터 -2.07%에 \'Falls 5.9% as Chip Stocks Slide (Nov 24)\')는 시간외 움직임의 이유가 아님 · 숫자가 시간외 등락과도 같거나 시간외를 말하는 기사는 그대로', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const top = appJs.slice(appJs.indexOf('function fmtPrice('), appJs.indexOf('\n', appJs.indexOf('function esc(')) + 1);
+  const links = appJs.slice(appJs.indexOf('function safeUrl('), appJs.indexOf('\n', appJs.indexOf('function extLink(')) + 1);
+  const a = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const b = appJs.slice(appJs.indexOf('// ---------- 데이터 지연 경고'), appJs.indexOf('// ---------- 내 종목 한눈에'));
+  const c = appJs.slice(appJs.indexOf('// ---------- 내 종목 한눈에'), appJs.indexOf('const THEME_STALE_MS'));
+  const ctx = { state: { news: {}, analysis: {}, disc: {}, market: {}, hist: {}, moves: {}, cal: null, extwhy: null }, location: { href: 'https://example.com/' }, URL, lastTimeOf: () => '', kstYmd: () => '' };
+  const f = vm.runInNewContext(`${top}${links}${a}${b}${c}; ({ extReason, regularMove })`, ctx);
+  const NV = { ok: true, code: 'NVDA', name: '엔비디아', market: 'US', currency: 'USD', marketStatus: 'CLOSE', price: 100, change: -5.86, changePct: -5.86, asOf: '2026-11-24T21:00:00Z',
+    ext: { session: 'post', price: 98, change: -2, changePct: -2.07, at: T('2026-11-24T23:30:00Z') } };
+  const n = (title, min) => ({ title, pubMs: T('2026-11-24T21:00:00Z') + min * MIN, link: 'https://news.example.com/' + encodeURIComponent(title), sentiment: { tone: 'neg' } });
+  ctx.state.news.NVDA = { items: [n('Nvidia Stock (NVDA) Falls 5.9% as Chip Stocks Slide (Nov 24)', 90)] };
+  assert.equal(f.extReason(NV), null, '정규장 -5.86%를 전한 기사 — 애프터 -2.07%의 이유 아님');
+  ctx.state.news.NVDA.items.push(n('Nvidia, Chip Stocks Fall As Data Center Spending Fears Return', 60));
+  assert.equal(f.extReason(NV).text, 'Nvidia, Chip Stocks Fall As Data Center Spending Fears Return', '숫자 없는 마감 뒤 기사는 그대로');
+  // 판별 — 정규장 숫자와 같고 시간외 숫자와 다를 때만 · 'N%대'는 정수 부분 · 시간외를 말하는 기사는 그대로
+  const R = (t, reg = -5.86, ext = -2.07) => f.regularMove(t, reg, ext);
+  assert.equal(R('Nvidia Stock (NVDA) Falls 5.9% as Chip Stocks Slide (Nov 24)'), true);
+  assert.equal(R('엔비디아 5%대 하락 마감…반도체주 동반 약세'), true, "'5%대' — 정규장 -5.86%");
+  assert.equal(R('엔비디아 2%대 하락'), false, "'2%대' — 시간외 -2.07%");
+  assert.equal(R('Nvidia Shares Fall 2.1% as Data Center Fears Return'), false, '숫자가 시간외 등락과 같음');
+  assert.equal(R('Tesla Stock Falls 2.3% as Growth Stocks Slide', -2.43, -2.20), false, '정규장·시간외 숫자에 둘 다 가까우면 그대로');
+  assert.equal(R('Nvidia Falls 5.9% in After-Hours Trading'), false, '시간외를 말함');
+  assert.equal(R('Nvidia Stock Down 5.8% Amid Chip Rout'), true, "'Down 5.8%'");
+  assert.equal(R('Nvidia Stock Falls 40% From Its High'), false, '정규장·시간외 숫자 둘 다 아님');
+  assert.equal(R("Taiwan Semiconductor Manufacturing (NYSE:TSM) Stock Falls 1.9% - Here's What Happened", -1.75, -4.02), true, '0.15%p 안(실제 10/30 TSMC 프리 -4.02%)');
+  assert.equal(R('TSMC Stock Falls 1.9% on Export Worries', -1.6, -4.02), false, '0.3%p 차이 — 정규장 숫자 아님');
+  assert.equal(R('Nvidia Stock (NVDA) Falls 5.9% (Nov 24)', -5.86, NaN), false, '시간외 등락이 없으면 그대로');
+  assert.equal(R('Nvidia rises on AI demand'), false, '숫자 없음');
 });
 await test('애프터마켓 이유(85차, 화면): "왜 움직였나"에 미국 시간외 ±2% 줄(정규장 줄 바로 뒤 · 정규장 ±2% 안쪽이면 시간외 줄만 · 더 크게 움직인 쪽 순) · 이유는 AI 진단(그 애프터마켓·같은 방향만) → 마감 뒤 같은 방향 기사 · 카드 시간외 줄 아래 이유', async () => {
   const vm = await import('node:vm');
