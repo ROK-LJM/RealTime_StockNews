@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 
 const PAGES = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const S = 'scripts/sources.mjs', F = 'scripts/fetch.mjs', B = 'scripts/aibudget.mjs', W = 'scripts/watchlist-apply.mjs', U = 'scripts/util.mjs';
-const D = 'scripts/dart.mjs', C = 'scripts/calendar.mjs', A = 'docs/app.js', CJ = 'docs/calendar.js', BU = 'scripts/burst.mjs', Y = '.github/workflows/update.yml', AL = 'scripts/alerts.mjs';
+const D = 'scripts/dart.mjs', C = 'scripts/calendar.mjs', A = 'docs/app.js', CJ = 'docs/calendar.js', BU = 'scripts/burst.mjs', Y = '.github/workflows/update.yml', AL = 'scripts/alerts.mjs', AT = '.github/workflows/alert-test.yml';
 const R = String.raw;
 
 // [이름, 파일, 찾을 글(그 파일에 정확히 한 번), 바꿀 글]
@@ -349,6 +349,11 @@ const MUTANTS = [
   ["[지수 핵심 폭] 개장 전 분석도 맞춤", A, " || kst(aiAt).slice(11, 16) < '09:00') return s;", ") return s;"],
   ["[지수 핵심 폭] 화면에 안 씀", A, "${esc(plainEnd(coreMag(ai.summary, mags, b.reason.aiAt)))}", "${esc(plainEnd(ai.summary))}"],
   ["[지수 핵심 폭] 다른 지수 안 맞춤", A, "  const mags = briefs.map((x) => [x.name, x.changePct]);", "  const mags = briefs.slice(0, 1).map((x) => [x.name, x.changePct]);"],
+  // ---------- 124차 — 텔레그램 연결 확인(Actions에서 누르는 확인 메시지) ----------
+  ["[알림 확인] 실패해도 성공으로", AL, "process.exitCode = r === '보냄' ? 0 : 1;", "process.exitCode = 0;"],
+  ["[알림 확인] 기준 파일 안 봄", AL, "const r = alertRules(cfg);", "const r = alertRules(null);"],
+  ["[알림 확인] 워크플로 대화 번호 없음", AT, "          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}", ""],
+  ["[알림 확인] 워크플로 저절로 돎", AT, "  workflow_dispatch: {}", "  schedule:\r\n    - cron: \"0 0 * * *\""],
   // ---------- 123차 — 아침 조건 알림(텔레그램, 사용자 요청) ----------
   ["[알림] 창 밖에도 보냄", AL, "if (!alertWindow(now)) return '창 밖';", ""],
   ["[알림] 주말에도", AL, "k.getUTCDay() !== 0 && k.getUTCDay() !== 6 && ", ""],
@@ -361,8 +366,8 @@ const MUTANTS = [
   ["[알림] 개장 뒤 프리마켓도", AL, " && q.marketStatus === 'PREOPEN'", ""],
   ["[알림] 체결 없는 프리마켓도", AL, "num(o.accumulatedTradingVolumeRaw) > 0 && ", ""],
   ["[알림] 보낸 기록 안 씀", AL, "writeJsonAtomic(statePath, { day, sent: [...sent] });", ""],
-  ["[알림] 실패해도 기록", AL, "await sendTelegram(token, chat, alertText(found, rules, now));", "await sendTelegram(token, chat, alertText(found, rules, now)).catch(() => {});"],
-  ["[알림] 대화 번호 없어도 보냄", AL, "if (!token || !chat) return '설정 없음';", "if (!token) return '설정 없음';"],
+  ["[알림] 실패해도 기록", AL, "await sendTelegram(tg.token, tg.chat, alertText(found, rules, now));", "await sendTelegram(tg.token, tg.chat, alertText(found, rules, now)).catch(() => {});"],
+  ["[알림] 대화 번호 없어도 보냄", AL, "return token && chat ? { token, chat } : null;", "return token ? { token, chat } : null;"],
   ["[알림] 기준 파일 무시", AL, "const rules = alertRules(readJson(path.join(root, 'config', 'alerts.json')));", "const rules = alertRules(null);"],
   ["[알림] 이상한 기준도 받음", AL, "if (Number.isFinite(v) && v > 0 && v < 30) out[k] = v;", "if (Number.isFinite(v)) out[k] = v;"],
   ["[알림] 텔레그램 실패 안 봄", AL, "if (!res.ok || !j || j.ok !== true) throw", "if (false) throw"],

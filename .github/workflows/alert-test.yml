@@ -1,0 +1,28 @@
+name: 텔레그램 연결 확인
+
+# 124차 — 저장소 Secret TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID를 넣은 뒤, 저장소 Actions 탭에서 이 워크플로를 고르고 'Run workflow'를 누르면
+# 텔레그램으로 확인 메시지를 한 번 보낸다(아침 창·조건과 상관없음). 값이 없거나 보내기에 실패하면 빨간 X로 끝난다 — 아침 알림 자체는 update.yml이 보낸다.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: 체크아웃
+        uses: actions/checkout@v5
+
+      - name: Node 설치
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
+      - name: 확인 메시지 보내기
+        run: node scripts/alerts.mjs --test
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}

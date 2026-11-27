@@ -4222,6 +4222,35 @@ await test('조건 알림(123차, 텔레그램): 평일 08:00~10:00(늦게 여�
   assert.equal((yml.match(/TELEGRAM_BOT_TOKEN: \$\{\{ secrets\.TELEGRAM_BOT_TOKEN \}\}/g) || []).length, 2, 'Secret은 알림을 부르는 두 단계에만');
   assert.ok(fs.existsSync(new URL('../state/.gitkeep', import.meta.url)), '기록 폴더');
 });
+await test('텔레그램 연결 확인(124차): 값이 없으면 \'설정 없음\'(대화 번호만·토큰만도) · 있으면 아침 창과 상관없이 확인 메시지 한 번(기준 숫자 포함) · 실패면 오류 · 알림 기록엔 안 남김 · Actions에서 누르는 워크플로 · 값이 없거나 실패하면 빨간 X', async () => {
+  const al = await import(new URL('./alerts.mjs', import.meta.url));
+  const root = workspace();
+  NET.calls = []; NET.bodies = []; NET.routes = [{ re: /api\.telegram\.org\/bot[^/]+\/sendMessage/, fn: () => json({ ok: true, result: {} }) }];
+  const now = T('2026-11-28T15:00:00+09:00'); // 토요일 오후 — 아침 창 밖이어도 보냄
+  const ENV = { TELEGRAM_BOT_TOKEN: '123:TEST', TELEGRAM_CHAT_ID: '42' };
+  assert.equal(await al.runTest({ root, now, env: {} }), '설정 없음');
+  assert.equal(await al.runTest({ root, now, env: { TELEGRAM_CHAT_ID: '42' } }), '설정 없음', '토큰 없음');
+  assert.equal(await al.runTest({ root, now, env: { TELEGRAM_BOT_TOKEN: '123:TEST', TELEGRAM_CHAT_ID: ' ' } }), '설정 없음', '대화 번호가 빈칸');
+  assert.equal(NET.calls.length, 0, '안 보냄');
+  assert.equal(await al.runTest({ root, now, env: ENV }), '보냄');
+  assert.equal(NET.calls.length, 1);
+  const body = JSON.parse(NET.bodies[0]);
+  assert.equal(body.chat_id, '42');
+  assert.equal(body.text, '[연결 확인 15:00]\n아침 조건 알림이 이 대화로 옵니다 — 평일 8~10시, 등락 +3% · 시가 대비 +2% · 프리마켓 +2%를 처음 넘으면(같은 종목·조건은 하루 한 번)\nhttps://rok-ljm.github.io/RealTime_StockNews/');
+  fs.mkdirSync(path.join(root, 'config'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'config', 'alerts.json'), JSON.stringify({ pct: 4, fromOpen: 2.5, pre: 3 }));
+  await al.runTest({ root, now, env: ENV });
+  assert.match(JSON.parse(NET.bodies[1]).text, /등락 \+4% · 시가 대비 \+2\.5% · 프리마켓 \+3%를 처음 넘으면/, '기준 파일 숫자');
+  NET.routes = [{ re: /api\.telegram\.org/, fn: () => json({ ok: false, description: 'Bad Request: chat not found' }, 400) }];
+  await assert.rejects(al.runTest({ root, now, env: ENV }), /텔레그램 보내기 실패\(400\)/);
+  assert.equal(fs.existsSync(path.join(root, 'state', 'alerts.json')), false, '알림 기록엔 안 남김');
+  const wf = fs.readFileSync(new URL('../.github/workflows/alert-test.yml', import.meta.url), 'utf8');
+  assert.match(wf, /^on:\s*\r?\n\s+workflow_dispatch:/m, 'Actions 탭에서 누를 때만');
+  assert.match(wf, /run: node scripts\/alerts\.mjs --test/);
+  assert.equal((wf.match(/TELEGRAM_(?:BOT_TOKEN|CHAT_ID): \$\{\{ secrets\.TELEGRAM_(?:BOT_TOKEN|CHAT_ID) \}\}/g) || []).length, 2, 'Secret 둘');
+  const src = fs.readFileSync(new URL('./alerts.mjs', import.meta.url), 'utf8');
+  assert.ok(src.includes("process.exitCode = r === '보냄' ? 0 : 1;") && src.includes("if (isMain && process.argv.includes('--test')) {"), '연결 확인은 값이 없거나 실패하면 빨간 X');
+});
 await test('아침 흐름(122차, 화면): 평일 08:00~10:00에만 · 첫 체결 뒤엔 지금 등락 순으로 시가 대비·고가 대비(지금이 고가면 \'고가\') · 9시 전엔 오늘 넥스트레이드 프리마켓 체결 종목만 프리 등락 순(가격·거래량) · PC 8줄·휴대폰 5줄·더 보기 · 휴장·주말·창 밖엔 없음 · 늦게 여는 날 09:00~11:00', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');

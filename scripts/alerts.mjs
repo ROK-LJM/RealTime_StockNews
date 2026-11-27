@@ -68,6 +68,9 @@ export function alertText(found, rules, now) {
   return `[아침 알림 ${kstHm(now)}]\n${lines.join('\n')}\n${SITE}`;
 }
 
+// 텔레그램 값 — 봇 토큰·대화 번호가 둘 다 있을 때만(저장소 Secret)
+const telegramOf = (env) => { const token = String(env.TELEGRAM_BOT_TOKEN || '').trim(), chat = String(env.TELEGRAM_CHAT_ID || '').trim(); return token && chat ? { token, chat } : null; };
+
 export async function sendTelegram(token, chatId, text) {
   const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true }),
@@ -77,8 +80,8 @@ export async function sendTelegram(token, chatId, text) {
 }
 
 export async function runAlerts({ root = ROOT, now = Date.now(), env = process.env } = {}) {
-  const token = String(env.TELEGRAM_BOT_TOKEN || '').trim(), chat = String(env.TELEGRAM_CHAT_ID || '').trim();
-  if (!token || !chat) return '설정 없음';
+  const tg = telegramOf(env);
+  if (!tg) return '설정 없음';
   if (!alertWindow(now)) return '창 밖';
   const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
   const quotes = readJson(path.join(root, 'docs', 'data', 'quotes.json'));
@@ -88,15 +91,30 @@ export async function runAlerts({ root = ROOT, now = Date.now(), env = process.e
   const rules = alertRules(readJson(path.join(root, 'config', 'alerts.json')));
   const found = findAlerts(quotes.quotes, rules, sent, now);
   if (!found.length) return '새 알림 없음';
-  await sendTelegram(token, chat, alertText(found, rules, now));
+  await sendTelegram(tg.token, tg.chat, alertText(found, rules, now));
   for (const a of found) sent.add(`${a.code}|${a.kind}`);
   fs.mkdirSync(path.dirname(statePath), { recursive: true });
   writeJsonAtomic(statePath, { day, sent: [...sent] });
   return `보냄 ${found.length}`;
 }
 
-// 직접 실행(`node scripts/alerts.mjs`)일 때만 — 어떤 결과든 종료 코드 0(회차를 실패로 만들지 않음)
+// 연결 확인(124차 — Actions 탭 '텔레그램 연결 확인' → Run workflow): 넣은 값이 맞는지 확인 메시지 한 번 · 아침 창·조건·보낸 기록과 상관없음
+export async function runTest({ root = ROOT, now = Date.now(), env = process.env } = {}) {
+  const tg = telegramOf(env);
+  if (!tg) return '설정 없음';
+  let cfg = null;
+  try { cfg = JSON.parse(fs.readFileSync(path.join(root, 'config', 'alerts.json'), 'utf8')); } catch {}
+  const r = alertRules(cfg);
+  await sendTelegram(tg.token, tg.chat, `[연결 확인 ${kstHm(now)}]\n아침 조건 알림이 이 대화로 옵니다 — 평일 8~10시, 등락 +${r.pct}% · 시가 대비 +${r.fromOpen}% · 프리마켓 +${r.pre}%를 처음 넘으면(같은 종목·조건은 하루 한 번)\n${SITE}`);
+  return '보냄';
+}
+
+// 직접 실행일 때만 — 알림(`node scripts/alerts.mjs`)은 어떤 결과든 종료 코드 0(회차를 실패로 만들지 않음),
+// 연결 확인(`--test`)은 값이 없거나 보내기에 실패하면 1(Actions에 빨간 X — 무엇이 문제인지 바로 보이게)
 const isMain = !!process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isMain) {
+if (isMain && process.argv.includes('--test')) {
+  runTest().then((r) => { console.log(`[alerts] 연결 확인 — ${r === '보냄' ? '확인 메시지를 보냈어요' : 'TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID Secret이 없어요'}`); process.exitCode = r === '보냄' ? 0 : 1; },
+    (e) => { console.error('[alerts] 연결 확인 실패 —', e.message, '(토큰·대화 번호가 맞는지, 봇에게 먼저 말을 걸었는지 확인)'); process.exitCode = 1; });
+} else if (isMain) {
   runAlerts().then((r) => console.log(`[alerts] ${new Date().toISOString()} ${r}`), (e) => console.error('[alerts] 오류 —', e.message)).finally(() => { process.exitCode = 0; });
 }
