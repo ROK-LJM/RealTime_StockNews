@@ -4152,6 +4152,76 @@ await test('시간외 줄 이유(115차, 화면): 정규장 등락 숫자를 전
   assert.equal(R('Nvidia Stock (NVDA) Falls 5.9% (Nov 24)', -5.86, NaN), false, '시간외 등락이 없으면 그대로');
   assert.equal(R('Nvidia rises on AI demand'), false, '숫자 없음');
 });
+await test('조건 알림(123차, 텔레그램): 평일 08:00~10:00(늦게 여는 날 09:00~11:00)만 · 등락 +N%·시가 대비 +N%·프리마켓 +N%(첫 체결 전·오늘 체결만) 처음 넘을 때 · 같은 종목·조건 하루 한 번 · 한 메시지로 · 기준은 config/alerts.json(이상하면 기본) · 토큰·대화 번호 없으면 안 보냄 · 보내기 실패면 기록 안 함 · 워크플로', async () => {
+  const al = await import(new URL('./alerts.mjs', import.meta.url));
+  const at = (s) => T(s + '+09:00');
+  assert.deepEqual(['2026-11-27T07:59', '2026-11-27T08:00', '2026-11-27T09:59', '2026-11-27T10:00', '2026-11-28T09:00', '2026-11-19T08:59', '2026-11-19T09:00', '2026-11-19T10:59', '2026-11-19T11:00'].map((s) => al.alertWindow(at(s + ':00'))),
+    [false, true, true, false, false, false, true, true, false], '평일 08:00~10:00 · 토요일 아님 · 수능일 09:00~11:00');
+  assert.deepEqual(al.alertRules(null), { pct: 3, fromOpen: 2, pre: 2 }, '기본');
+  assert.deepEqual(al.alertRules({ pct: 5, fromOpen: '1.5', pre: -1, note: 'x' }), { pct: 5, fromOpen: 1.5, pre: 2 }, '이상한 값은 기본');
+  assert.deepEqual(al.alertRules({ pct: 30, fromOpen: 0 }), { pct: 3, fromOpen: 2, pre: 2 });
+  const R = { pct: 3, fromOpen: 2, pre: 2 };
+  const kr = (code, name, extra) => ({ ok: true, code, name, market: 'KR', currency: 'KRW', ...extra });
+  const pm = (pct, price, vol, tAt, type = 'PRE_MARKET') => ({ tradingSessionType: type, overMarketStatus: 'OPEN', overPrice: price, fluctuationsRatio: pct, accumulatedTradingVolumeRaw: vol, localTradedAt: tAt });
+  const now = at('2026-11-27T09:07:00');
+  const Q = [
+    kr('053800', '안랩', { marketStatus: 'OPEN', changePct: 3.12, price: 155000, open: 151400, high: 155500 }),
+    kr('056080', '유진로봇', { marketStatus: 'OPEN', changePct: 2.1, price: 7400, open: 7250, high: 7400 }),
+    kr('005930', '삼성전자', { marketStatus: 'OPEN', changePct: 2.9, price: 176000, open: 174000, high: 177000 }),
+    kr('000660', 'SK하이닉스', { marketStatus: 'OPEN', changePct: 4, price: 1000, open: null, high: null }),
+    kr('278470', '에이피알', { marketStatus: 'OPEN', changePct: 1, price: 300000, open: 299000, high: 301000, over: pm('10.05', '328,500', '86000', '2026-11-27T08:31:00+09:00') }),
+    { ok: true, code: 'PLUG', name: '플러그파워', market: 'US', marketStatus: 'OPEN', changePct: 14, price: 2, open: 1.7, high: 2 },
+  ];
+  const keys = (list) => list.map((a) => `${a.code}|${a.kind}`);
+  assert.deepEqual(keys(al.findAlerts(Q, R, new Set(), now)), ['053800|pct', '053800|fromOpen', '056080|fromOpen', '000660|pct'], '등락 3%·시가 대비 2%를 넘은 것(개장 뒤 남은 프리마켓 값·해외는 아님)');
+  assert.deepEqual(keys(al.findAlerts(Q, R, new Set(['053800|pct', '056080|fromOpen']), now)), ['053800|fromOpen', '000660|pct'], '오늘 보낸 것은 다시 안 보냄');
+  const P = [
+    kr('278470', '에이피알', { marketStatus: 'PREOPEN', changePct: 0, price: 298500, over: pm('10.05', '328,500', '86000', '2026-11-27T08:31:00+09:00') }),
+    kr('006400', '삼성SDI', { marketStatus: 'PREOPEN', changePct: 0, price: 418000, over: pm('1.67', '425,000', '31000', '2026-11-27T08:30:40+09:00') }),
+    kr('035420', 'NAVER', { marketStatus: 'PREOPEN', changePct: 0, price: 200000, over: pm('3.00', '206,000', '1000', '2026-11-27T08:31:20+09:00', 'REGULAR_MARKET') }),
+    kr('000660', 'SK하이닉스', { marketStatus: 'PREOPEN', changePct: 0, price: 1030000, over: pm('5.0', '1,081,500', '500', '2026-11-26T19:50:00+09:00', 'AFTER_MARKET') }),
+    kr('009150', '삼성전기', { marketStatus: 'PREOPEN', changePct: 0, price: 755000, over: pm('4.0', '785,000', '900', '2026-11-26T08:40:00+09:00') }),
+    kr('005930', '삼성전자', { marketStatus: 'PREOPEN', changePct: 0, price: 171300, over: pm('3.0', '176,400', '0', '2026-11-27T08:30:00+09:00') }),
+  ];
+  const f2 = al.findAlerts(P, R, new Set(), at('2026-11-27T08:32:00'));
+  assert.deepEqual(keys(f2), ['278470|pre'], '프리마켓 — 장 구분이 프리마켓·오늘 체결·2% 넘은 것만');
+  assert.equal(al.alertText([...al.findAlerts(Q, R, new Set(), now), ...f2], R, now), ['[아침 알림 09:07]', '안랩 +3.12% — 등락 3% 넘음 (시가 대비 +2.4% · 고가 대비 -0.3%)', '안랩 시가 대비 +2.4% — 2% 넘음 (지금 +3.12% · 고가 대비 -0.3%)',
+    '유진로봇 시가 대비 +2.1% — 2% 넘음 (지금 +2.10% · 지금이 고가)', 'SK하이닉스 +4.00% — 등락 3% 넘음', '에이피알 프리마켓 +10.05% — 2% 넘음 (328,500원)', 'https://rok-ljm.github.io/RealTime_StockNews/'].join('\n'));
+  // 실행 — 토큰·대화 번호 없으면 안 보냄 · 보냄·기록 · 다시 안 보냄 · 다음 거래일 다시 · 실패면 기록 안 함 · 기준 파일
+  const root = workspace();
+  writeData(root, 'quotes.json', { quotes: Q });
+  const tg = () => NET.calls.filter((u) => u.includes('api.telegram.org')).length;
+  NET.calls = []; NET.bodies = []; NET.routes = [{ re: /api\.telegram\.org\/bot[^/]+\/sendMessage/, fn: () => json({ ok: true, result: {} }) }];
+  const ENV = { TELEGRAM_BOT_TOKEN: '123:TEST', TELEGRAM_CHAT_ID: '42' };
+  assert.equal(await al.runAlerts({ root, now, env: {} }), '설정 없음');
+  assert.equal(await al.runAlerts({ root, now, env: { TELEGRAM_BOT_TOKEN: '123:TEST' } }), '설정 없음', '대화 번호 없음');
+  assert.equal(await al.runAlerts({ root, now: at('2026-11-27T10:00:00'), env: ENV }), '창 밖');
+  assert.equal(tg(), 0, '안 보냄');
+  assert.equal(await al.runAlerts({ root, now, env: ENV }), '보냄 4');
+  assert.equal(tg(), 1, '한 메시지로');
+  const body = JSON.parse(NET.bodies[NET.calls.findIndex((u) => u.includes('api.telegram.org'))]);
+  assert.equal(body.chat_id, '42'); assert.ok(body.text.startsWith('[아침 알림 09:07]\n안랩 +3.12% — 등락 3% 넘음'), body.text);
+  const stPath = path.join(root, 'state', 'alerts.json');
+  assert.deepEqual(JSON.parse(fs.readFileSync(stPath, 'utf8')), { day: '2026-11-27', sent: ['053800|pct', '053800|fromOpen', '056080|fromOpen', '000660|pct'] }, '보낸 기록');
+  assert.equal(await al.runAlerts({ root, now: now + 60e3, env: ENV }), '새 알림 없음', '같은 날 다시 안 보냄');
+  assert.equal(tg(), 1);
+  assert.equal(await al.runAlerts({ root, now: at('2026-11-30T09:07:00'), env: ENV }), '보냄 4', '다음 거래일엔 다시');
+  fs.rmSync(stPath);
+  NET.routes = [{ re: /api\.telegram\.org/, fn: () => json({ ok: false, description: 'Unauthorized' }, 401) }];
+  await assert.rejects(al.runAlerts({ root, now, env: ENV }), /텔레그램 보내기 실패\(401\)/);
+  assert.equal(fs.existsSync(stPath), false, '실패면 기록 없음 — 다음에 다시');
+  fs.mkdirSync(path.join(root, 'config'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'config', 'alerts.json'), JSON.stringify({ pct: 5, fromOpen: 2, pre: 2 }));
+  NET.routes = [{ re: /api\.telegram\.org/, fn: () => json({ ok: true, result: {} }) }];
+  assert.equal(await al.runAlerts({ root, now, env: ENV }), '보냄 2', '등락 5%면 시가 대비 2개만');
+  // 저장소의 기준 파일은 기본값과 같다 · 워크플로 — 정규 회차 뒤·아침 눈금마다 부르고, 보낸 기록도 커밋 · Secret은 이 두 단계에만 · 기록 폴더
+  assert.deepEqual(al.alertRules(JSON.parse(fs.readFileSync(new URL('../config/alerts.json', import.meta.url), 'utf8'))), al.ALERT_DEFAULTS);
+  const yml = fs.readFileSync(new URL('../.github/workflows/update.yml', import.meta.url), 'utf8');
+  assert.equal((yml.match(/node scripts\/alerts\.mjs/g) || []).length, 2, '정규 회차 뒤·아침 눈금마다');
+  assert.equal((yml.match(/git add docs\/data state/g) || []).length, 2, '보낸 기록도 커밋');
+  assert.equal((yml.match(/TELEGRAM_BOT_TOKEN: \$\{\{ secrets\.TELEGRAM_BOT_TOKEN \}\}/g) || []).length, 2, 'Secret은 알림을 부르는 두 단계에만');
+  assert.ok(fs.existsSync(new URL('../state/.gitkeep', import.meta.url)), '기록 폴더');
+});
 await test('아침 흐름(122차, 화면): 평일 08:00~10:00에만 · 첫 체결 뒤엔 지금 등락 순으로 시가 대비·고가 대비(지금이 고가면 \'고가\') · 9시 전엔 오늘 넥스트레이드 프리마켓 체결 종목만 프리 등락 순(가격·거래량) · PC 8줄·휴대폰 5줄·더 보기 · 휴장·주말·창 밖엔 없음 · 늦게 여는 날 09:00~11:00', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');

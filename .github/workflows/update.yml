@@ -46,11 +46,20 @@ jobs:
           # 저장소 Secret에 DART_API_KEY(OpenDART 무료 인증키)를 넣으면 국내 종목 최근 공시가 켜짐 (없으면 생략)
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
 
+      - name: 아침 조건 알림(텔레그램)
+        # 123차(11/27 사용자 요청) — 평일 08:00~10:00에 국내 종목이 정한 조건(등락·시가 대비·프리마켓 — config/alerts.json)을 처음 넘으면 텔레그램으로
+        # (같은 종목·같은 조건은 하루 한 번 — 보낸 기록 state/alerts.json). Secret TELEGRAM_BOT_TOKEN·TELEGRAM_CHAT_ID가 없으면 아무것도 안 함 · 실패해도 회차는 성공
+        continue-on-error: true
+        run: node scripts/alerts.mjs
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
       - name: 변경분 커밋 & 푸시
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add docs/data
+          git add docs/data state
           if git diff --staged --quiet; then
             echo "변경 없음 — 커밋 생략"
             exit 0
@@ -72,13 +81,17 @@ jobs:
       - name: 아침 집중 갱신(국내 08:00~10:00 · 1분마다)
         # 평일 08:00~10:00에 여기 온 회차만 — 다음 정규 회차(5분 눈금) 직전까지 1분마다, 09:00~09:10 개장 순간은 이어서(121차, 11/27 사용자 요청).
         # 그 밖엔 burst.mjs가 바로 끝낸다(1초 안팎). 국내 시세·코스피·코스닥만 받아 커밋·푸시한다(뉴스·AI·공시는 정규 회차). 그동안 다음 회차는 대기했다가 이어서 돈다.
-        # 실패해도 회차는 성공으로 둔다 — 앞 단계 데이터는 이미 푸시됐다.
+        # 실패해도 회차는 성공으로 둔다 — 앞 단계 데이터는 이미 푸시됐다. 눈금마다 조건 알림도 확인한다(123차 — scripts/alerts.mjs).
         continue-on-error: true
         timeout-minutes: 22
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           for n in $(seq 1 22); do
             node scripts/burst.mjs || break
-            git add docs/data
+            node scripts/alerts.mjs
+            git add docs/data state
             if git diff --staged --quiet; then continue; fi
             git commit -q -m "data(개장): $(date -u +%FT%TZ)"
             for i in 1 2 3; do
