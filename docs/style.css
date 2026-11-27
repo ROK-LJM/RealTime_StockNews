@@ -286,6 +286,28 @@ input::placeholder { color: var(--muted); }
 .why-more:hover { color: var(--text); }
 .why-more .ic { width: 16px; height: 16px; }
 .why-none { padding: 6px 0; font-size: 13px; }
+/* 아침 흐름(122차) — 평일 08:00~10:00 '한눈에' 제목 아래 표: 지금·시가 대비·고가 대비(9시 전엔 넥스트레이드 프리마켓 등락·가격·거래량) · 줄을 누르면 그 카드로 */
+.am { margin: 0 0 16px; padding: 0 0 12px; border-bottom: 1px solid var(--line); }
+.am-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; font-size: 14px; font-weight: 700; }
+.am-head .muted { font-size: 12px; font-weight: 500; }
+.am-t { width: 100%; max-width: 760px; border-collapse: collapse; table-layout: fixed; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.am-t col.c-nm { width: 40%; }
+.am-t th { padding: 4px 8px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; font-weight: 500; text-align: right; white-space: nowrap; }
+.am-t td { padding: 7px 8px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.am-t th:first-child, .am-t td:first-child { padding-left: 0; text-align: left; }
+.am-t td.nm { font-weight: 600; }
+.am-t td.pc { font-weight: 700; }
+.am-t td.dim { color: var(--text-2); }
+.am-t tbody tr { cursor: pointer; }
+.am-t tbody tr:hover td { background: var(--surface-2); }
+.am-t tbody tr:last-child td { border-bottom: 0; }
+.am-t tr.more { display: none; }
+@media (max-width: 720px) {
+  .am-t { font-size: 13px; }
+  .am-t th, .am-t td { padding-left: 4px; padding-right: 4px; }
+  .am-t col.c-nm { width: 30%; }
+  .am-t .c-px { display: none; }
+}
 /* 큰 소식(78차) — '왜 움직였나' 아래, 여러 종목에 걸친 이슈. 관련 종목은 글자 버튼(누르면 그 카드로) */
 .themes { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
 .theme { padding: 8px 0; border-bottom: 1px solid var(--line); }

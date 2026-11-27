@@ -1140,6 +1140,48 @@ function themesHtml(th) {
     </div>`).join('');
   return `<div class="themes"><div class="why-head">큰 소식 <span class="muted">여러 종목에 걸친 이슈 · AI가 기사 제목으로 묶음 · ${esc(fmtAiTime(th.at))}</span></div>${rows}</div>`;
 }
+// ---------- 아침 흐름(122차) ----------
+// 11/27 사용자 요청 — 아침 단타에 '오르고 있는 게 어떤 건지'를 한 표로(시안 A '표'를 고름). 평일 08:00~10:00(늦게 여는 날은 09:00~11:00)에만 '한눈에' 제목 아래:
+// 국내 첫 체결 뒤엔 지금 등락 순으로 시가 대비·고가 대비(지금이 고가면 '고가' — 치솟았다 밀린 종목이 보인다), 첫 체결 전(9시 전)엔 넥스트레이드 프리마켓 등락 순으로
+// 프리 가격·거래량(오늘 체결된 프리마켓 값만 — 밤사이 남은 애프터마켓·지난날 값은 아님). 처음엔 PC 8줄·휴대폰 5줄. 이 시간엔 봇이 1분마다 국내 시세를 올린다(121차).
+// 화면에 없던 값(시가·고가 대비, 프리마켓 순위)을 보여 준다 — 등락 칸과 같은 정보를 다시 늘어놓지 않게
+const AM_SHOW = 8, AM_SHOW_NARROW = 5;
+const amWindow = (ms) => { const c = marketClock('Asia/Seoul', ms), late = krHours(ms)[0] - 9 * 60; return !c.weekend && c.min >= 8 * 60 + late && c.min < 10 * 60 + late; };
+const amNum = (v) => Number(String(v ?? '').replace(/,/g, ''));
+const amP1 = (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`;
+const amVol = (v) => (v >= 1e4 ? `${(v / 1e4).toFixed(v >= 1e5 ? 0 : 1)}만주` : `${v.toLocaleString('ko-KR')}주`);
+function amRows(list, ms) {
+  const kr = (list || []).filter((q) => q && q.ok && marketOf(q) === 'KR');
+  const open = kr.filter((q) => q.marketStatus === 'OPEN' && q.open > 0 && q.high > 0 && Number.isFinite(q.price) && Number.isFinite(q.changePct))
+    .map((q) => ({ q, pct: q.changePct, fromOpen: (q.price / q.open - 1) * 100, fromHigh: (q.price / q.high - 1) * 100, at: Date.parse(q.asOf) }))
+    .sort((a, b) => b.pct - a.pct);
+  if (open.length) return { phase: 'open', rows: open, total: kr.length };
+  const today = marketClock('Asia/Seoul', ms).day;
+  const pre = kr.map((q) => ({ q, o: q.over, at: Date.parse(q.over && q.over.localTradedAt) }))
+    .filter(({ o, at }) => o && o.tradingSessionType === 'PRE_MARKET' && amNum(o.accumulatedTradingVolumeRaw) > 0 && Number.isFinite(at) && marketClock('Asia/Seoul', at).day === today)
+    .map(({ q, o, at }) => ({ q, pct: amNum(o.fluctuationsRatio), price: amNum(o.overPrice), vol: amNum(o.accumulatedTradingVolumeRaw), at }))
+    .filter((r) => Number.isFinite(r.pct)).sort((x, y) => y.pct - x.pct);
+  return pre.length ? { phase: 'pre', rows: pre, total: kr.length } : null;
+}
+function amHtml(groups, ms = Date.now(), narrow = isNarrow()) {
+  if (!amWindow(ms)) return '';
+  const g = (groups || []).find((x) => x && x.g && x.g.key === 'KR');
+  const r = g ? amRows(g.list, ms) : null;
+  if (!r) return '';
+  const show = narrow ? AM_SHOW_NARROW : AM_SHOW, all = !!state.amAll;
+  const last = Math.max(...r.rows.map((x) => x.at).filter(Number.isFinite));
+  const t = Number.isFinite(last) ? hmKst(new Date(last).toISOString()) : '';
+  const pre = r.phase === 'pre';
+  const row = (x, i, cells) => `<tr data-code="${esc(x.q.code)}"${i >= show && !all ? ' class="more"' : ''}><td class="nm">${esc(x.q.name)}</td>${cells}</tr>`;
+  const head = pre ? '<th>프리 등락</th><th class="c-px">프리 가격</th><th>거래량</th>' : '<th>지금</th><th>시가 대비</th><th>고가 대비</th>';
+  const body = r.rows.map((x, i) => row(x, i, pre
+    ? `<td class="pc ${dirClass(x.pct)}-c">${fmtPct(x.pct)}</td><td class="dim c-px">${Math.round(x.price).toLocaleString('ko-KR')}원</td><td class="dim">${amVol(x.vol)}</td>`
+    : `<td class="pc ${dirClass(x.pct)}-c">${fmtPct(x.pct)}</td><td class="${dirClass(x.fromOpen)}-c">${amP1(x.fromOpen)}</td><td class="dim">${x.fromHigh > -0.05 ? '고가' : amP1(x.fromHigh)}</td>`)).join('');
+  const more = r.rows.length > show && !all ? `<button type="button" class="why-more" data-am="all">${r.rows.length - show}종목 더 보기<svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></button>` : '';
+  const note = pre ? `넥스트레이드 프리마켓 · 1분마다 · 체결 ${r.rows.length}/${r.total}종목` : `1분마다 · ${Math.floor(krHours(ms)[0] / 60) + 1}시까지만`;
+  return `<div class="am"><div class="am-head">아침 흐름 <span class="muted">${t ? `${esc(t)} · ` : ''}${note}</span></div>
+    <table class="am-t"><colgroup><col class="c-nm"><col><col><col></colgroup><thead><tr><th>종목</th>${head}</tr></thead><tbody>${body}</tbody></table>${more}</div>`;
+}
 function renderBoard(groups, closed, measures) {
   const el = $('#board');
   if (!el) return;
@@ -1172,7 +1214,7 @@ function renderBoard(groups, closed, measures) {
   }).join('');
   const more = movers.length > show && !state.whyAll ? `<button type="button" class="why-more" data-why="all">${movers.length - show}줄 더 보기<svg class="ic" aria-hidden="true"><use href="#i-chev"/></svg></button>` : '';
   el.innerHTML = `<div class="board-head"><h2 id="boardTitle">오늘 내 종목 한눈에</h2>
-      <span class="board-hint">진한 색일수록 크게 움직임 · 누르면 그 종목 카드로</span></div>
+      <span class="board-hint">진한 색일수록 크게 움직임 · 누르면 그 종목 카드로</span></div>${amHtml(groups)}
     <div class="board-mkts">${mkts}</div>
     <div class="why">
       <div class="why-head">왜 움직였나 <span class="muted">±${WHY_MIN}% 이상 · 많이 움직인 순</span></div>
@@ -1195,6 +1237,7 @@ function goToCard(code) {
 }
 $('#board')?.addEventListener('click', (e) => {
   if (e.target.closest('[data-why="all"]')) { state.whyAll = true; renderQuotes(); return; }
+  if (e.target.closest('[data-am="all"]')) { state.amAll = true; renderQuotes(); return; }
   const b = e.target.closest('[data-code]');
   if (b) goToCard(b.dataset.code);
 });

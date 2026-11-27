@@ -4152,6 +4152,76 @@ await test('시간외 줄 이유(115차, 화면): 정규장 등락 숫자를 전
   assert.equal(R('Nvidia Stock (NVDA) Falls 5.9% (Nov 24)', -5.86, NaN), false, '시간외 등락이 없으면 그대로');
   assert.equal(R('Nvidia rises on AI demand'), false, '숫자 없음');
 });
+await test('아침 흐름(122차, 화면): 평일 08:00~10:00에만 · 첫 체결 뒤엔 지금 등락 순으로 시가 대비·고가 대비(지금이 고가면 \'고가\') · 9시 전엔 오늘 넥스트레이드 프리마켓 체결 종목만 프리 등락 순(가격·거래량) · PC 8줄·휴대폰 5줄·더 보기 · 휴장·주말·창 밖엔 없음 · 늦게 여는 날 09:00~11:00', async () => {
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const top = appJs.slice(appJs.indexOf('function fmtPrice('), appJs.indexOf('\n', appJs.indexOf('function esc(')) + 1);
+  const a = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const b = appJs.slice(appJs.indexOf('// ---------- 데이터 지연 경고'), appJs.indexOf('// ---------- 내 종목 한눈에'));
+  const am = appJs.slice(appJs.indexOf('// ---------- 아침 흐름(122차)'), appJs.indexOf('function renderBoard('));
+  const ctx = { state: { amAll: false }, lastTimeOf: () => '' };
+  const f = vm.runInNewContext(`${top}${a}${b}${am}; ({ amHtml })`, ctx);
+  const at = (s) => T(s + '+09:00');
+  const kr = (code, name, extra) => ({ ok: true, code, name, market: 'KR', currency: 'KRW', ...extra });
+  const pm = (pct, price, vol, tAt, type = 'PRE_MARKET') => ({ tradingSessionType: type, overMarketStatus: 'OPEN', overPrice: price, fluctuationsRatio: pct, accumulatedTradingVolumeRaw: vol, localTradedAt: tAt });
+  const G = (list) => [{ g: { key: 'KR' }, list }, { g: { key: 'US' }, list: [{ ok: true, code: 'AAPL', market: 'US', changePct: 5 }] }];
+  const codes = (h) => [...h.matchAll(/data-code="(\w+)"/g)].map((m) => m[1]);
+  // 9시 전 — 넥스트레이드 프리마켓(실제 11/27 08:31 꼴)
+  const PRE = [
+    kr('006400', '삼성SDI', { marketStatus: 'PREOPEN', changePct: 0, price: 418000, over: pm('1.67', '425,000', '31000', '2026-11-27T08:30:40+09:00') }),
+    kr('278470', '에이피알', { marketStatus: 'PREOPEN', changePct: 0, price: 298500, over: pm('10.05', '328,500', '86000', '2026-11-27T08:31:02+09:00') }),
+    kr('035420', 'NAVER', { marketStatus: 'PREOPEN', changePct: 0, price: 200000, over: pm('3.00', '206,000', '1000', '2026-11-27T08:31:20+09:00', 'REGULAR_MARKET') }),
+    kr('005930', '삼성전자', { marketStatus: 'PREOPEN', changePct: 0, price: 171300, over: pm('-0.40', '170,600', '0', '2026-11-27T08:30:00+09:00') }),
+    kr('000660', 'SK하이닉스', { marketStatus: 'PREOPEN', changePct: 0, price: 1030000, over: pm('-0.78', '1,022,000', '5000', '2026-11-26T19:59:00+09:00', 'AFTER_MARKET') }),
+    kr('009150', '삼성전기', { marketStatus: 'PREOPEN', changePct: 0, price: 755000, over: pm('2.50', '774,000', '900', '2026-11-26T08:40:00+09:00') }),
+    kr('042700', '한미반도체', { marketStatus: 'PREOPEN', changePct: 0, price: 150000 }),
+  ];
+  const h1 = f.amHtml(G(PRE), at('2026-11-27T08:32:00'), false);
+  assert.match(h1, /아침 흐름 <span class="muted">08:31 · 넥스트레이드 프리마켓 · 1분마다 · 체결 2\/7종목<\/span>/, h1.slice(0, 300));
+  assert.deepEqual(codes(h1), ['278470', '006400'], '오늘 체결된 프리마켓만 · 프리 등락 순(체결 없음·장 구분이 프리마켓 아님·밤사이 애프터마켓·지난날 프리마켓·넥스트레이드 없음은 뺌)');
+  assert.ok(h1.includes('<td class="pc up-c">+10.05%</td><td class="dim c-px">328,500원</td><td class="dim">8.6만주</td>'), '프리 등락·가격·거래량');
+  assert.ok(h1.includes('<th>프리 등락</th><th class="c-px">프리 가격</th><th>거래량</th>'));
+  // 첫 체결 뒤 — 지금 등락 순 · 시가 대비 · 고가 대비(실제 11/27 09:20 꼴)
+  const OPEN = [
+    kr('053800', '안랩', { marketStatus: 'OPEN', changePct: 9.24, price: 167900, open: 156200, high: 169600, volume: 900000, asOf: '2026-11-27T09:20:11+09:00' }),
+    kr('056080', '유진로봇', { marketStatus: 'OPEN', changePct: 9.2, price: 7600, open: 7266, high: 8261, volume: 2000000, asOf: '2026-11-27T09:20:11+09:00' }),
+    kr('411080', '샌즈랩', { marketStatus: 'OPEN', changePct: 8.05, price: 12350, open: 11425, high: 12350, volume: 300000, asOf: '2026-11-27T09:20:12+09:00' }),
+    kr('005930', '삼성전자', { marketStatus: 'OPEN', changePct: -0.5, price: 170400, open: 171200, high: 171500, volume: 5000000, asOf: '2026-11-27T09:20:10+09:00' }),
+    kr('009150', '삼성전기', { marketStatus: 'OPEN', changePct: 0, price: 755000, open: null, high: null, volume: null, asOf: '2026-11-27T09:20:10+09:00' }),
+    ...['A1', 'A2', 'A3', 'A4'].map((c, i) => kr(c, '가' + i, { marketStatus: 'OPEN', changePct: 1 - i, price: 1000, open: 1000, high: 1010, volume: 10, asOf: '2026-11-27T09:19:00+09:00' })),
+  ];
+  const h2 = f.amHtml(G(OPEN), at('2026-11-27T09:21:00'), false);
+  assert.match(h2, /아침 흐름 <span class="muted">09:20 · 1분마다 · 10시까지만<\/span>/, h2.slice(0, 300));
+  assert.deepEqual(codes(h2), ['053800', '056080', '411080', 'A1', 'A2', '005930', 'A3', 'A4'], '지금 등락 순 · 체결 전은 뺌');
+  assert.ok(h2.includes('<td class="nm">안랩</td><td class="pc up-c">+9.24%</td><td class="up-c">+7.5%</td><td class="dim">-1.0%</td>'), '시가 대비·고가 대비: ' + h2);
+  assert.ok(h2.includes('<td class="nm">유진로봇</td><td class="pc up-c">+9.20%</td><td class="up-c">+4.6%</td><td class="dim">-8.0%</td>'), '치솟았다 밀림');
+  assert.ok(h2.includes('<td class="nm">샌즈랩</td><td class="pc up-c">+8.05%</td><td class="up-c">+8.1%</td><td class="dim">고가</td>'), '지금이 고가');
+  assert.ok(h2.includes('<td class="nm">삼성전자</td><td class="pc down-c">-0.50%</td><td class="down-c">-0.5%</td>'), '내린 종목');
+  assert.ok(h2.includes('<th>지금</th><th>시가 대비</th><th>고가 대비</th>'));
+  assert.equal((h2.match(/class="more"/g) || []).length, 0, 'PC 8줄 — 8종목이면 다 보임');
+  // 휴대폰 5줄 · 더 보기 · 누르면 다 보임
+  const h3 = f.amHtml(G(OPEN), at('2026-11-27T09:21:00'), true);
+  assert.equal((h3.match(/class="more"/g) || []).length, 3, '휴대폰 5줄');
+  assert.match(h3, /<button type="button" class="why-more" data-am="all">3종목 더 보기/);
+  ctx.state.amAll = true;
+  const h4 = f.amHtml(G(OPEN), at('2026-11-27T09:21:00'), true);
+  assert.ok(!h4.includes('class="more"') && !h4.includes('data-am="all"'), '더 보기를 누르면 다 보임');
+  ctx.state.amAll = false;
+  // 창 밖·주말·휴장
+  assert.equal(f.amHtml(G(OPEN), at('2026-11-27T07:59:00'), false), '', '08:00 전');
+  assert.equal(f.amHtml(G(OPEN), at('2026-11-27T10:00:00'), false), '', '10:00부터 없음');
+  assert.ok(f.amHtml(G(OPEN), at('2026-11-27T09:59:00'), false).includes('class="am"'), '09:59');
+  assert.ok(f.amHtml(G(PRE), at('2026-11-27T08:00:00'), false).includes('class="am"'), '08:00');
+  assert.equal(f.amHtml(G(OPEN), at('2026-11-28T09:21:00'), false), '', '토요일');
+  assert.equal(f.amHtml(G(OPEN.map((q) => ({ ...q, marketStatus: 'CLOSE' }))), at('2026-11-27T09:21:00'), false), '', '휴장(국내 시세가 마감)·프리마켓 없음');
+  assert.equal(f.amHtml([{ g: { key: 'US' }, list: [] }], at('2026-11-27T09:21:00'), false), '', '국내 묶음 없음');
+  // 늦게 여는 날(수능일 10시 개장) — 09:00~11:00, '11시까지만'
+  assert.equal(f.amHtml(G(OPEN), at('2026-11-19T08:30:00'), false), '', '수능일 9시 전');
+  assert.match(f.amHtml(G(OPEN.map((q) => ({ ...q, asOf: '2026-11-19T10:20:00+09:00' }))), at('2026-11-19T10:21:00'), false), /1분마다 · 11시까지만/);
+  // '한눈에' 제목 아래에 넣음 · 더 보기 누르기
+  assert.ok(appJs.includes('<span class="board-hint">진한 색일수록 크게 움직임 · 누르면 그 종목 카드로</span></div>${amHtml(groups)}'), '한눈에 제목 아래');
+  assert.ok(appJs.includes(`if (e.target.closest('[data-am="all"]')) { state.amAll = true; renderQuotes(); return; }`), '더 보기 누르기');
+});
 await test('애프터마켓 이유(85차, 화면): "왜 움직였나"에 미국 시간외 ±2% 줄(정규장 줄 바로 뒤 · 정규장 ±2% 안쪽이면 시간외 줄만 · 더 크게 움직인 쪽 순) · 이유는 AI 진단(그 애프터마켓·같은 방향만) → 마감 뒤 같은 방향 기사 · 카드 시간외 줄 아래 이유', async () => {
   const vm = await import('node:vm');
   const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
