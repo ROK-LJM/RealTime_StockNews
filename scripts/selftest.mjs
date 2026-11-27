@@ -1539,7 +1539,13 @@ const PRICE_ONLY_YES = ['효성중공업 주가, 장중 114,000원 내린 1,682,
   // 115차 — '하락한·내린'처럼 꾸미는 꼴(11/25 삼성전기 -12%의 이유로 뜸) · 가격까지에 날짜만 붙은 영어 자동 기사(실제)
   '삼성전기, 12% 하락한 75만 5,000원에 마감', 'LG에너지솔루션, 2.67% 내린 29만 1500원에 마감',
   'Tesla Stock (TSLA) Falls 0.2% to $384.68 (Nov 24)', 'Microsoft Stock (MSFT) Rises 0.7% to $496.13 (Nov 24)', 'SpaceX Stock (SPCX) Falls 0.6% to $139.11 (Nov 13)',
-  'Microsoft Stock News (Oct 27, 2026): MSFT Rises 1.5% to $532.60', 'Super Micro Computer Shares Fall 6.85% to $25.025 on Nov. 16'];
+  'Microsoft Stock News (Oct 27, 2026): MSFT Rises 1.5% to $532.60', 'Super Micro Computer Shares Fall 6.85% to $25.025 on Nov. 16',
+  // 119차 — 회복·후퇴·상한가·아래로·오전·오후·고가와·저가와·웃돌아·밑돌아·터치(실제 — 11/27 화면 다섯 · 10/20~11/25 여섯)
+  '[특징주] OCI홀딩스, 17만9700원 찍고 16만원대로 후퇴', '뷰티스킨 2520원 상한가…거래량 618만주', 'SK텔레콤 장중 저가 대비 4000원 회복…6만7500원 거래', '삼성E&A 6만원 아래로…오후 5만7400원',
+  '현대건설 6만8200원…장중 고가와 400원 차', '[특징주] 한국화장품 장중 14%대 급등 7800원선 터치', '한미반도체 15만원 밑돌아…장중 저가와 100원 차', '안랩 장중 상한가 15만7900원…거래대금 2652억원',
+  '안랩, 장중 10만4300원 찍고 11만7000원 회복', '[특징주] 삼성E&A 장중 4%대 상승 6만2000원선 웃돌아 : 기업주식정보', 'HD현대중공업, 오전 장중 3.11% 하락',
+  // 99차 '장중 N원선 회복' 틀만 읽는 꼴(이름 뺀 시세 말엔 '탈환'·'…원선을'이 없음 — 119차에 '회복'이 시세 말이 되어 원래 제목 'HD현대일렉트릭 장중 40만원선 회복'은 두 규칙 모두 읽음)
+  'HD현대일렉트릭 장중 40만원선을 탈환'];
 const PRICE_ONLY_NO = ['영업이익 추정치 웃돈 파두…주가는 장중 6.75% 하락', '삼성전기 주가 3.08% 상승…엔비디아 기판 생산능력 확대에 공급 수혜 기대',
   '호실적에 자사주 소각까지…삼성E&A 15% 상승세 [특징주]', '[장중수급포착] 대덕전자, 기관 8일 연속 순매수행진... 주가 +4.24%',
   '[개장시황] 삼성전기 5.05% 급등…코스피 차익매물에 하락 출발', 'Why Super Micro Computer Stock Popped Today', '수주 기대감에 장중 3%대 상승',
@@ -1551,7 +1557,9 @@ const PRICE_ONLY_NO = ['영업이익 추정치 웃돈 파두…주가는 장중 
   '[특징주]현대건설, 외국인 순매수에 7.29% 오른 8만9,700원 마감', '현대건설 3.58% 내린 9만1500원 마감 실적 예고 속 하락 : 기업주식정보',
   'Nvidia NVDA Stock Falls 4.4% to $212.21 as AI Financing Fears Hit Chips', 'SpaceX Stock (SPCX) Falls 5.7% on Reports of a Tesla Merger (Nov 24)',
   'SPCX Stock Rebounds 8.62% to $134.27 After Musk Eases Government Contract Fears', 'Why Is Tesla Stock Up Today? Shares Jump 13.5% to $392.50 on SpaceX Merger Talk, Market Rebound',
-  'Nvidia Stock Premarket: NVDA Edges Up To $217 After $3 Billion Meta Investment'];
+  'Nvidia Stock Premarket: NVDA Edges Up To $217 After $3 Billion Meta Investment',
+  // 119차 — 가격 뒤에 실적·사업 말이 이어지는 기사(실제 11/27)
+  '한미반도체 15만원선 웃돌아…3분기 영업익 34% 증가', '한화솔루션 1만9390원…신재생과 케미칼 실적 엇갈려', 'LG에너지솔루션 30만3750원…ESS 출하 확대에도 장중 약세', '한화에어로스페이스 63만원…3분기 인도 일정 조정 영향'];
 await test('시세 안내 기사: 날짜·가격만 있는 자동 기사·"주가 상승 중"·"장중 3%대 상승"은 이유에서 제외 · 이유가 붙은 제목은 유지 · 봇과 화면 판정이 같음', async () => {
   for (const t of PRICE_ONLY_YES) assert.equal(src.priceOnly(t), true, t);
   for (const t of PRICE_ONLY_NO) assert.equal(src.priceOnly(t), false, t);
@@ -2509,6 +2517,8 @@ await test('무산 말(117차): 수주·계약·승인·협상 뒤 불발·무�
   assert.deepEqual(['삼성중공업 LNG선 수주 실패', '가나, 1천억 공급계약 해지', 'FDA 승인 불발에 하한가', '두산에너빌리티·대우건설, 체코 원전 시공협상 결렬', '체코 원전 시공 계약 무산…대우건설·두산에너빌리티 주가 급락',
     '한화임팩트 지분 매각 불발된 한화솔루션, PRS 활용 검토', 'SK하이닉스, 실적 잔치에 주가 흔들…중복 상장 논란', '가나 수주전 불발'].map(tone), ['neg', 'neg', 'neg', 'neg', 'neg', 'neg', 'neg', 'neg']);
   assert.deepEqual([src.tagSentiment('삼성중공업 LNG선 수주 실패').keywords.join(','), src.tagSentiment('가나, 1천억 공급계약 해지').keywords.join(',')], ['불발', '취소'], "'실패'는 '불발', '해지'는 '취소'로 셈");
+  // 119차 — '신주인수권부사채'·'무인수상함' 속 '인수'는 인수합병이 아님(실제 11/27·11월)
+  assert.deepEqual(['심텍, 1500억원 규모 영구 신주인수권부사채 사모 발행 결정', 'HD현대중공업·안두릴, 600t급 무인수상함 진수…내년 초 미국서 시험', '가나, 경쟁사 인수 추진'].map(tone), ['neutral', 'neutral', 'pos']);
   // 그대로 — 흔들리지 않는·흔들림 없는·흔들려도 · 경쟁입찰 무산(단독 응찰) · 상장 중단(쪽마다 뜻이 갈림) · 수주 기대
   assert.deepEqual(['[TECH한주] 엔비디아 위기에도 흔들리지 않는 HBM 적층 기술의 절대 강자 ‘한미반도체’', "[리포트 브리핑]HD건설기계, '일시적 물류 차질, 흔들림 없는 성장과 엔진' 목표가 140,000원 - 신한투자증권",
     '"주가 흔들려도 걱정 없다?"…삼전닉스 \'역대급 전망\'에 깜짝 [종목+]', '1.6조 목동4단지 현대건설만 입찰…경쟁입찰 또 무산', 'SK하이닉스, 솔리다임 美 상장 검토 중단…"기존 주주 이익 고려"', '수주 기대감에 상승'].map(tone),
