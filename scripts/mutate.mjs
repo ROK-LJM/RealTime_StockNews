@@ -347,8 +347,10 @@ const MUTANTS = [
   ["[지수 핵심 폭] 전날 숫자도 맞춤", A, "(?<!(?:전날|전일|어제|간밤)\\\\s?)", "(?:)"],
   ["[지수 핵심 폭] 지난 날 분석도 맞춤", A, " || kst(aiAt).slice(0, 10) !== kst(now).slice(0, 10)", " || false"],
   ["[지수 핵심 폭] 개장 전 분석도 맞춤", A, " || kst(aiAt).slice(11, 16) < '09:00') return s;", ") return s;"],
-  ["[지수 핵심 폭] 화면에 안 씀", A, "${esc(coreMag(ai.summary, mags, b.reason.aiAt))}", "${esc(ai.summary)}"],
+  ["[지수 핵심 폭] 화면에 안 씀", A, "${esc(plainEnd(coreMag(ai.summary, mags, b.reason.aiAt)))}", "${esc(plainEnd(ai.summary))}"],
   ["[지수 핵심 폭] 다른 지수 안 맞춤", A, "  const mags = briefs.map((x) => [x.name, x.changePct]);", "  const mags = briefs.slice(0, 1).map((x) => [x.name, x.changePct]);"],
+  // ---------- 120차 — 지수 AI 핵심 문장 끝 ----------
+  ["[지수 핵심 끝] 문장 끝 안 뗌", A, "${esc(plainEnd(coreMag(ai.summary, mags, b.reason.aiAt)))}", "${esc(coreMag(ai.summary, mags, b.reason.aiAt))}"],
   // ---------- 119차 — 시세 말 더하기·신주인수권·무인수상 ----------
   ["[시세 꼴] 회복·후퇴 등 안 받음(봇)", S, "|VI|발동|무너져|회복|후퇴|상한가|하한가|아래로|위로|오전|오후|고가와|저가와|웃돌아|밑돌아|터치|가격제한폭까지)$/;", "|VI|발동|무너져)$/;"],
   ["[시세 꼴] 회복·후퇴 등 안 받음(화면)", A, "|VI|발동|무너져|회복|후퇴|상한가|하한가|아래로|위로|오전|오후|고가와|저가와|웃돌아|밑돌아|터치|가격제한폭까지)$/;", "|VI|발동|무너져)$/;"],

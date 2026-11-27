@@ -2357,12 +2357,17 @@ await test('지수 핵심 폭(100차): AI 핵심 속 두 지수 이름 바로 �
   const el = { innerHTML: '', querySelectorAll: () => [] };
   const ctx = { $: () => el, state: { market: { indices: [] }, briefOpen: new Map() }, briefLook: () => ({ est: false, dirCls: 'down', cardCls: 'brief-down', arrow: '▼', label: '급락 핵심 이유' }),
     fmtAiTime: () => '14:20', extLink: (l, t) => t, isNarrow: () => false, flowWhen: () => '', fmtFlow: String, dirClass: () => 'down', fmtPct: String, esc: (x) => String(x), EST_TIP: '' };
-  const g = vm.runInNewContext(rb + '; ({ renderBriefs })', ctx);
+  const pe = appJs.slice(appJs.indexOf('function plainEnd('), appJs.indexOf('\n}', appJs.indexOf('function plainEnd(')) + 2);
+  const g = vm.runInNewContext(pe + '\n' + rb + '; ({ renderBriefs })', ctx);
   const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10), at = Date.parse(today + 'T09:30:00+09:00');
   const br = (name, pct, summary) => ({ key: name, name, changePct: pct, reason: { ai: { summary, items: [{ title: '기사', link: 'https://news.example.com/1' }] }, aiAt: at } });
   g.renderBriefs([br('코스피', -5.9, '미국 빅테크 급락 여파, 코스피 4%대 급락'), br('코스닥', -5.1, '코스피 4%대 급락에 코스닥도 3%대 하락')]);
   assert.ok(el.innerHTML.includes('미국 빅테크 급락 여파, 코스피 5%대 급락'), '배너에 씀');
   assert.ok(el.innerHTML.includes('코스피 5%대 급락에 코스닥도 5%대 하락'), '다른 지수 숫자도 그 지수 등락으로');
+  // 120차 — 문장 끝은 종목 진단처럼 뗌(실제 11/27 코스닥 +6.17%: '…코스닥이 5%대 급등세를 보이고 있습니다.')
+  g.renderBriefs([br('코스닥', 6.17, '증안펀드 기대감과 매수 사이드카 발동으로 코스닥이 5%대 급등세를 보이고 있습니다.'), br('코스피', 3.26, '외국인과 기관의 매수세 유입 속 코스피가 장중 2.5% 넘게 급등세')]);
+  assert.ok(el.innerHTML.includes('증안펀드 기대감과 매수 사이드카 발동으로 코스닥이 6%대 급등세 <span class="ai-at">'), '문장 끝 뗌·숫자는 지금 등락: ' + el.innerHTML);
+  assert.ok(el.innerHTML.includes('외국인과 기관의 매수세 유입 속 코스피가 장중 2.5% 넘게 급등세 <span class="ai-at">'), '이미 짧으면 그대로');
 });
 await test('시장 분위기 문구(98차): 가장 크게 움직인 지수 말 — ±2% 넘으면 급등·급락, ±0.3% 안쪽은 보합, 그 사이는 강세·약세(11/20 코스피 -4.36%가 "약세")', async () => {
   const word = (p) => src.computeMood([{ name: '코스피', symbol: '^KS11', changePct: p, marketStatus: 'OPEN' }], 20).summary.split(' · ')[0];

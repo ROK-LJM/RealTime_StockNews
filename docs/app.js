@@ -380,10 +380,11 @@ function renderBriefs(briefs) {
         ${extLink(it.link, it.title)}
         ${it.why ? `<span class="ai-why">— ${esc(it.why)}</span>` : ''}</div>`).join('');
       const at = fmtAiTime(b.reason.aiAt); // 한도 배분으로 이전 판단을 이어 쓸 수 있어 분석 시각을 함께 보여준다
+      // AI 핵심의 문장 끝('…급등세를 보이고 있습니다.')·부풀린 말은 종목 진단처럼 뗀다(120차 — plainEnd · 10/20~11/27 지수 AI 핵심 348건 중 208건이 문장 끝)
       // 근거 뉴스는 접을 수 있게 — 휴대폰에선 처음에 접어 둔다(펼친 상태는 새로고침해도 유지)
       const key = String(b.key || b.name);
       const open = state.briefOpen.has(key) ? state.briefOpen.get(key) : !isNarrow();
-      reasonBlock = `<div class="brief-reason"><span class="ai-badge">AI 핵심</span>${esc(coreMag(ai.summary, mags, b.reason.aiAt))}${at ? ` <span class="ai-at">${esc(at)} 분석</span>` : ''}</div>
+      reasonBlock = `<div class="brief-reason"><span class="ai-badge">AI 핵심</span>${esc(plainEnd(coreMag(ai.summary, mags, b.reason.aiAt)))}${at ? ` <span class="ai-at">${esc(at)} 분석</span>` : ''}</div>
         <details class="ai-items-d" data-key="${esc(key)}"${open ? ' open' : ''}><summary>근거 뉴스 ${ai.items.length}건</summary>
         <div class="ai-items">${items}</div></details>`;
     } else {
