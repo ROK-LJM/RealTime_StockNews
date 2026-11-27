@@ -2128,6 +2128,9 @@ await test('급등락 기록(32차): 시장보다 덜 움직인 날은 방향 �
   assert.ok(el.innerHTML.includes('<span class="src">AI</span>앤트로픽의 오피스 도구 출시로 경쟁 심화 우려가 부각되며 하락</span>') && el.innerHTML.includes('<span class="src">뉴스</span>가나, 장중 신고가 기록했다</span>'), el.innerHTML);
   g.renderMoves({ code: 'A', market: 'KR', ok: true, asOf: new Date().toISOString() }, [{ d: '20261123', p: -2.52, r: '코스피 서킷브레이커 수준의 급락과 프로그램 매도세에 하락', s: 'ai' }]);
   assert.ok(el.innerHTML.includes('<span class="src">AI</span>코스피 급락과 프로그램 매도세에 하락</span>'), '지난 급등락의 부풀린 말도 뗌(114차): ' + el.innerHTML);
+  g.renderMoves({ code: 'A', market: 'KR', ok: true, asOf: new Date().toISOString() }, [{ d: '20261124', p: 8.94, r: '코스닥 지수 강세 속 뚜렷한 개별 재료 없이 완만한 상승', s: 'ai' }, { d: '20261123', p: -2.27, r: '코스닥 상승세에도 불구하고 뚜렷한 재료 없이 소폭 하락', s: 'ai' }]);
+  assert.ok(el.innerHTML.includes('<span class="src">AI</span>코스닥 지수 강세 속 뚜렷한 개별 재료 없이 상승</span>') && el.innerHTML.includes('<span class="src">AI</span>코스닥 상승세에도 불구하고 뚜렷한 재료 없이 소폭 하락</span>'),
+    '지난 급등락 — 그날 +8.94%의 완만한은 뗌, -2.27%의 소폭은 그대로(118차): ' + el.innerHTML);
   // 시세 안내 — 끝에 '기록'·'마감'이 붙어도(실제 11/05 OCI홀딩스 급등락 기록 이유)
   for (const t of ['OCI홀딩스 주가, 11월 5일 204,000원 2.00% 상승 기록', 'LG전자 주가, 11월 5일 142,800원 2.39% 하락 마감']) { assert.equal(src.priceOnly(t), true, '봇: ' + t); assert.equal(g.priceOnly(t), true, '화면: ' + t); }
   for (const t of ['삼성SDI 50만8000원으로 6.79%↓…ESS 성장과 조정 압력 교차', 'OCI홀딩스 주가, 11월 5일 204,000원 2.00% 상승 기록 경신에 신고가']) { assert.equal(src.priceOnly(t), false, '봇: ' + t); assert.equal(g.priceOnly(t), false, '화면: ' + t); }
@@ -2497,6 +2500,31 @@ await test('뉴스 검색어(37차): 미국은 영문 이름·영문 별칭과 �
   assert.deepEqual(n2['010120'].items.map((x) => x.title).sort(), ['LS ELECTRIC 주가 급등 배경', 'LS일렉트릭, 북미 변압기 수주'].sort(), '합치고 같은 기사는 하나');
   assert.deepEqual(n2.PLUG.items.map((x) => x.title), ['Why PLUG stock jumped today'], '영문 검색이 0건이어도 예전 검색어로');
   assert.deepEqual([n2.SPCX.ok, n2.SPCX.items.map((x) => x.title)], [true, ['SpaceX wins contract']], '두 번째가 실패해도 첫 결과 유지');
+});
+await test('무산 말(117차): 수주·계약·승인·협상 뒤 불발·무산·실패·결렬·해지는 악재(좋은 낱말은 빼고 셈)·흔들은 악재 · 흔들리지 않는·흔들림 없는·흔들려도·경쟁입찰 무산·상장 중단은 그대로 · 오른 날 이유 아님 · 봇·화면 같음', async () => {
+  const tone = (t) => src.tagSentiment(t).tone;
+  // 실제 11/26 기사 — 11/27 한화오션 +7.00%의 '왜 움직였나'에 떴다('수주'만 보고 호재)
+  const hw = '한화오션, 6800억 수주 불발…4조원대 사업도 흔들';
+  assert.deepEqual([tone(hw), src.tagSentiment(hw).keywords.join(',')], ['neg', '불발,흔들'], '무산 말만 셈 — 표시 낱말도 제목에 있는 말');
+  assert.deepEqual(['삼성중공업 LNG선 수주 실패', '가나, 1천억 공급계약 해지', 'FDA 승인 불발에 하한가', '두산에너빌리티·대우건설, 체코 원전 시공협상 결렬', '체코 원전 시공 계약 무산…대우건설·두산에너빌리티 주가 급락',
+    '한화임팩트 지분 매각 불발된 한화솔루션, PRS 활용 검토', 'SK하이닉스, 실적 잔치에 주가 흔들…중복 상장 논란', '가나 수주전 불발'].map(tone), ['neg', 'neg', 'neg', 'neg', 'neg', 'neg', 'neg', 'neg']);
+  assert.deepEqual([src.tagSentiment('삼성중공업 LNG선 수주 실패').keywords.join(','), src.tagSentiment('가나, 1천억 공급계약 해지').keywords.join(',')], ['불발', '취소'], "'실패'는 '불발', '해지'는 '취소'로 셈");
+  // 그대로 — 흔들리지 않는·흔들림 없는·흔들려도 · 경쟁입찰 무산(단독 응찰) · 상장 중단(쪽마다 뜻이 갈림) · 수주 기대
+  assert.deepEqual(['[TECH한주] 엔비디아 위기에도 흔들리지 않는 HBM 적층 기술의 절대 강자 ‘한미반도체’', "[리포트 브리핑]HD건설기계, '일시적 물류 차질, 흔들림 없는 성장과 엔진' 목표가 140,000원 - 신한투자증권",
+    '"주가 흔들려도 걱정 없다?"…삼전닉스 \'역대급 전망\'에 깜짝 [종목+]', '1.6조 목동4단지 현대건설만 입찰…경쟁입찰 또 무산', 'SK하이닉스, 솔리다임 美 상장 검토 중단…"기존 주주 이익 고려"', '수주 기대감에 상승'].map(tone),
+    ['neutral', 'pos', 'neutral', 'neutral', 'neutral', 'pos']);
+  // 이유 고르기 — 오른 날엔 이유 아님 · 내린 날엔 이유(봇·화면 같음)
+  const vm = await import('node:vm');
+  const appJs = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  const block = appJs.slice(appJs.indexOf('function marketOf('), appJs.indexOf('// ---------- 데이터 지연 경고'));
+  const f = vm.runInNewContext(block + '; ({ pickReasonNews })', {});
+  const kst = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 10).replace(/-/g, '');
+  const list = [{ title: hw, pubMs: T('2026-11-27T09:30:00+09:00'), sentiment: src.tagSentiment(hw) }];
+  for (const [pct, want] of [[7, null], [-3, hw]]) {
+    const a = src.pickReasonNews(list, pct, '20261127', kst, ['한화오션']), b = f.pickReasonNews(list, pct, '20261127', kst, ['한화오션']);
+    assert.equal(a ? a.title : null, want, `${pct > 0 ? '오른' : '내린'} 날`);
+    assert.equal(b ? b.title : null, want, `화면 ${pct > 0 ? '오른' : '내린'} 날`);
+  }
 });
 await test('방향 낱말(38차): 증발·반토막·들썩 · 낮춰·물린·눈물 / 쾌재·높여·수혜 · "무슨 일이"·"…할까…"는 원인을 말하지 않아 맨 뒤 · 봇·화면 같음', async () => {
   const vm = await import('node:vm');
@@ -4199,6 +4227,13 @@ await test('진단 끝말(86차): 5% 안쪽 움직임의 끝 "급등·급락(세
     ['코스피 서킷브레이커 동반 급락 속 입찰제한 소송 불확실성과 거래중단 공시 여파로 하락', -6.2, '코스피 동반 급락 속 입찰제한 소송 불확실성과 거래중단 공시 여파로 하락'],
     ['코스피가 서킷브레이커 수준으로 밀리며 동반 급락', -7.1, '코스피가 밀리며 동반 급락'],
     ['코스피 서킷브레이커 발동에 따른 투매로 급락', -9, '코스피 서킷브레이커 발동에 따른 투매로 급락'],
+    // 118차 — ±3% 넘게 움직인 날 끝 방향 말 앞 '소폭·완만한·다소'는 뗌(실제 11/27 샌즈랩 +9.48%·11/06 플러그파워 +7.41%) · ±3% 안쪽·끝이 아닌 자리·시장 대비 '제한적'은 그대로
+    ['코스닥 지수 강세 속 뚜렷한 개별 재료 없이 완만한 상승', 9.48, '코스닥 지수 강세 속 뚜렷한 개별 재료 없이 상승'],
+    ['나스닥 강세 속 실적 발표 경계감과 저가 매수세가 유입되며 소폭 반등했습니다.', 7.41, '나스닥 강세 속 실적 발표 경계감과 저가 매수세가 유입되며 반등'],
+    ['단기 급등 부담에 다소 하락세', -4.2, '단기 급등 부담에 하락세'],
+    ['코스피 약세 속 전일 급등에 따른 피로감으로 소폭 하락', -2.25, '코스피 약세 속 전일 급등에 따른 피로감으로 소폭 하락'],
+    ['소폭 상승 출발 뒤 차익 매물 출회로 급락', -6.1, '소폭 상승 출발 뒤 차익 매물 출회로 급락'],
+    ['코스피 급락에 따른 동반 하락이나, 최근 수주 모멘텀 부각으로 시장 대비 낙폭은 제한적', -3.6, '코스피 급락에 따른 동반 하락이나, 최근 수주 모멘텀 부각으로 시장 대비 낙폭은 제한적'],
   ]) assert.equal(src.toneTail(h, p), want, h);
   // 종합분석 — 삼성전자 +4.2%는 맞춤, +7.5%는 그대로
   const withHead = (headline) => () => json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ ...JSON.parse(geminiOk.candidates[0].content.parts[0].text), headline }) }] } }] });
@@ -4237,7 +4272,8 @@ await test('진단 끝말 — 지금 등락(89차): 화면("왜 움직였나"·�
   // 화면 규칙 = 봇 규칙
   for (const [h, p] of [['…선보여 급등', 3.31], ['…공시에 급락', -4.59], ['…급락세', -2], ['…급등', 6.08], ['…급등', -5], ['단기 급등에 따른 하락', -3], ['…급등', NaN], ['…겹치며 12%대 급락', -13.09], ['…5%대 급락', -4.2], ['…6%대 하락세', -7.8], ['코스피 5%대 급락', -7.3], ['장중 15%대 급락', -13], ['2%대 상승', 0.6], ['12.5%대 급등', 9.1], ['7%대 급등', NaN], ['', 1], ['월가 목표주가 하향 조정에 하락 마감했다', -2.07], ['…시장 대비 초과 상승했습니다.', 11.97], ['실적 호조에 급등했습니다', 3], ['…하락세를 보였습니다.', -3], ['…약세를 보이고 있습니다', -3],
     ['…크게 위축되었습니다.', -4], ['…원선이 붕괴됐다', -6], ['…지속되고 있습니다.', -2.5], ['…맞물린 결과입니다.', -6.6], ['회복하지 못했다', -3], ['…위축시켰습니다.', -2.4],
-    ['코스피 서킷브레이커급 폭락과 반락 여파로 11%대 급락', -11.05], ['코스피 서킷브레이커 수준의 급락에 하락', -2.5], ['코스피 서킷브레이커 동반 급락 속 하락', -6.2], ['서킷브레이커 발동에 따른 투매로 급락', -9]])
+    ['코스피 서킷브레이커급 폭락과 반락 여파로 11%대 급락', -11.05], ['코스피 서킷브레이커 수준의 급락에 하락', -2.5], ['코스피 서킷브레이커 동반 급락 속 하락', -6.2], ['서킷브레이커 발동에 따른 투매로 급락', -9],
+    ['코스닥 지수 강세 속 뚜렷한 개별 재료 없이 완만한 상승', 9.48], ['…유입되며 소폭 반등했습니다.', 7.41], ['…부담에 다소 하락세', -4.2], ['…피로감으로 소폭 하락', -2.25], ['소폭 상승 출발 뒤 급락', -6.1], ['…완만한 상승', NaN]])
     assert.equal(f.toneTail(h, p), src.toneTail(h, p), `화면 = 봇: ${h} ${p}`);
   // 왜 움직였나 · 카드 — 그날 진단(10:45 +6.08%에 만든 '…급등')은 지금 +3.31%면 '…상승'
   const q = { code: 'A', name: '샌즈랩', market: 'KR', ok: true, changePct: 3.31, asOf: '2026-11-19T11:20:00+09:00' };

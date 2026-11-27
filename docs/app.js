@@ -805,6 +805,9 @@ function plainEnd(h) {
     .replace(/\s*[을를]\s?보(?:였|이고\s?있)(?:습니다|다)\.?$/, '')
     .replace(/(?<=[가-힣])(?<!못)(?:(?:했|하였|되었|됐)(?:습니다|다)|(?:하|되)고\s?있(?:습니다|다)|입니다)\.?$/, '');
 }
+// 크게 움직인 날(±3% 이상) 끝 방향 말 바로 앞의 '소폭·완만한·다소·약간'은 뗀다(118차, 봇 calmEnd와 같음 — 샌즈랩 +9.48%에 '…재료 없이 완만한 상승') · 지난 급등락은 그날 등락으로
+const SMALL_TAIL_RE = /(?:소폭|완만한|완만하게|다소|약간)\s*(?=(?:상승|하락|반등|반락|조정|강세|약세)세?$)/;
+function calmEnd(h, pct) { return Math.abs(pct) >= 3 ? plainEnd(h).replace(SMALL_TAIL_RE, '') : plainEnd(h); }
 // 공시 제목이 말하는 방향 — 호재 쪽 +1, 악재 쪽 −1, 모르면 0. 오늘 움직임과 반대 방향인 공시(내린 날의 공급계약 체결 등)는 이유로 쓰지 않는다(scripts/dart.mjs의 discDir와 같게)
 const DISC_UP_RE = /공급계약체결|수주|자기주식취득|주식소각|(?<!유)무상증자|배당결정/; // 유무상증자는 방향을 모름
 const DISC_DOWN_RE = /계약해지|유상증자|사채권발행결정|자기주식처분|불성실공시법인지정|횡령|배임|전환청구권\s?행사|신주인수권\s?행사|교환청구권\s?행사/; // 전환·신주인수·교환 청구 행사는 희석(50차)
@@ -999,7 +1002,7 @@ function whyOf(q) {
 // 그 뒤 등락이 줄면 '+3.31% … 급등'처럼 어긋났다(11/19 10:45 한 줄 진단 — 샌즈랩 +6.08%·유진로봇 -5.44%였다가 +3.31%·-4.59%).
 // 5% 안쪽이면 끝의 '급등·급락(세)'만 '상승·하락(세)'으로, 끝 'N%대 급락'의 숫자는 지금 등락의 정수 자리로(101차) — 그날 진단에만 쓴다(지난 거래일 진단은 그날 등락의 말)
 function toneTail(h, pct) {
-  const s = plainEnd(h);
+  const s = calmEnd(h, pct);
   // 끝 'N%대 급락'의 숫자도 지금 등락의 정수 자리로(101차 — 11/20 SK텔레콤 -13.09%에 '…재료 소진 심리가 겹치며 12%대 급락') · 지수·'장중'·'한때' 뒤 숫자·소수·1% 안쪽은 그대로
   const t = Math.abs(pct) >= 1 ? s.replace(/(?<!(?:코스피|코스닥|나스닥|지수|장중|한때)\s?)(?<![\d.])\d{1,2}%대(\s*(?:급등|급락|상승|하락|강세|약세)세?)$/, (m, tail) => `${Math.floor(Math.abs(pct))}%대${tail}`) : s;
   return Math.abs(pct) < 5 ? t.replace(/급(등|락)(세)?$/, (m, a, b) => (a === '등' ? '상승' : '하락') + (b || '')) : t;
@@ -1270,7 +1273,7 @@ function renderMoves(q, list) {
   el.innerHTML = `<div class="news-head"><span>지난 급등락</span><span class="disc-src">±2% 넘게 움직인 날 · 그날의 이유</span></div>`
     + rows.map((x) => `<div class="news-item mv-item"><span class="mv-d">${+x.d.slice(4, 6)}/${+x.d.slice(6, 8)}</span>`
       + `<span class="mv-p ${dirClass(x.p)}-c">${x.p > 0 ? '▲' : '▼'} ${Math.abs(x.p).toFixed(2)}%</span>`
-      + `<span class="mv-r">${x.r ? (x.s === 'mkt' ? `<span class="muted">${esc(x.r)}</span>` : `${MOVE_SRC[x.s] ? `<span class="src">${MOVE_SRC[x.s]}</span>` : ''}${esc(x.s === 'ai' ? plainEnd(x.r) : x.r)}`) : '<span class="muted">이유 기록 없음</span>'}</span></div>`).join('');
+      + `<span class="mv-r">${x.r ? (x.s === 'mkt' ? `<span class="muted">${esc(x.r)}</span>` : `${MOVE_SRC[x.s] ? `<span class="src">${MOVE_SRC[x.s]}</span>` : ''}${esc(x.s === 'ai' ? calmEnd(x.r, x.p) : x.r)}`) : '<span class="muted">이유 기록 없음</span>'}</span></div>`).join('');
   el.hidden = false;
 }
 
